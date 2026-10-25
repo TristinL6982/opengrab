@@ -1,0 +1,94 @@
+"""Settings: pydantic-backed, persisted as JSON in the user app-data dir."""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import threading
+from pathlib import Path
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+from . import APP_ID, APP_NAME
+
+
+def app_data_dir() -> Path:
+    """Per-user data dir:  %APPDATA%/OpenGrab   (settings.json, accounts, state)"""
+    if sys.platform.startswith("win"):
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    p = base / APP_NAME
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def user_plugins_dir() -> Path:
+    p = app_data_dir() / "plugins"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+class Settings(BaseModel):
+    # downloads
+    download_dir: str = str(Path.home() / "Downloads")
+    max_parallel: int = 3              # concurrent links
+    per_link_chunks: int = 2           # parallel range-chunks per link (1 = single)
+    speed_limit_kbps: int = 0          # 0 = unlimited
+    retry_max: int = 3
+    chunk_size_kb: int = 256
+    keep_partials: bool = True
+    verify_hash: bool = False
+
+    # anti-bot / network
+    impersonate: str = "chrome"        # chrome|firefox|safari|edge|chrome124|... (curl_cffi)
+    user_agent: str = ""               # override UA (empty = use impersonation default)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    proxy: str = ""                    # http://user:pass@host:port  (empty = none)
+    timeout_s: float = 30.0
+    ua_rotation: bool = False
+    ua_pool: list[str] = Field(default_factory=list)
+
+    # captcha solving (unpaywalled: BYO keys, local OCR, or manual)
+    captcha_provider: str = "auto"     # auto|manual|2captcha|capmonster|capsolver|ddddocr
+    captcha_2captcha_key: str = ""
+    captcha_capmonster_key: str = ""
+    captcha_capsolver_key: str = ""
+    captcha_manual_timeout_s: int = 120
+    captcha_auto_failover: bool = True # try cheaper/faster solvers first, escalate
+
+    # grabbing
+    auto_start_after_grab: bool = True
+    stop_at_paywall: bool = True       # mark paywalled instead of erroring
+    grab_timeout_s: float = 45.0
+
+    # ui
+    theme: str = "dark"
+    poll_ms: int = 1000
+
+    # maintenance
+    confirm_delete: bool = True
+
+    def save(self) -> None:
+        with self._lock:
+            p = app_data_dir() / "settings.json"
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(self.model_dump_json(indent=2), encoding="utf-8")
+            tmp.replace(p)
+
+    _lock = threading.Lock()
+
+
+def load_settings() -> Settings:
+    p = app_data_dir() / "settings.json"
+    if p.exists():
+        try:
+            return Settings.model_validate(json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    s = Settings()
+    s.save()
+    return s

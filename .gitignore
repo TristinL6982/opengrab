@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/OpenGrab/dist/
+*.spec.bak
+.venv.bak

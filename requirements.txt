@@ -1,0 +1,18 @@
+# OpenGrab core runtime
+httpx[http2]>=0.27
+curl_cffi>=0.7.1
+aiofiles>=24.1
+beautifulsoup4>=4.12
+lxml>=5.2
+pydantic>=2.7
+rich>=13.7
+yt-dlp>=2024.10.0
+
+# GUI / windowing
+pywebview>=5.1
+
+# Local CAPTCHA OCR (lazy-imported; heavy onnxruntime dep)
+ddddocr>=1.4.11
+
+# Build-only
+pyinstaller>=6.10
