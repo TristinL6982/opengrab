@@ -18,6 +18,15 @@ HTTPS-proxy/auth checks, clipboard review/dedupe, the opt-in token-gated
 terminal, diagnostics redaction, and Packagizer CRUD/preview. Clipboard HTTP
 behavior uses a mock; native OS clipboard interaction remains unverified.
 
+**Download range handling is corrected and verified** with a local HTTP fixture:
+the first and subsequent parallel chunks send exact byte ranges, validate each
+`Content-Range`, write to independent offsets, and produce the original SHA-256.
+When a server ignores a range despite advertising support, OpenGrab discards the
+partial chunk file and safely restarts as one sequential request. The local
+fixture verifies both paths; the 16-check interrupted-download/resume suite and
+real-network smoke test also pass. Per-host concurrency and richer bandwidth
+profiles remain open.
+
 **M4 GUI lifecycle and M5 UI panels are implemented.** A mocked lifecycle test
 verifies close-to-tray, show, clipboard-monitor toggle, and Exit cleanup; the
 native WebView2/tray window has not been manually exercised. The UI now has

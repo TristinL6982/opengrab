@@ -48,6 +48,10 @@ class DownloadError(Exception):
         self.cancelled = False
 
 
+class RangeUnsupported(DownloadError):
+    """The server advertised or implied ranges but did not honor them."""
+
+
 class _RateLimiter:
     """Token bucket shared by all chunk threads of one download."""
 
@@ -287,7 +291,21 @@ class LinkDownload:
             if chunks == 1:
                 self._stream(self._done, None)
             else:
-                self._parallel(self._done, self._total, chunks)
+                try:
+                    self._parallel(self._done, self._total, chunks)
+                except RangeUnsupported:
+                    # A probe header is only a hint. If a chunk request is
+                    # ignored or malformed, discard all partial chunk writes
+                    # and restart sequentially to avoid silently corrupting a
+                    # file. The server may still accept a normal GET.
+                    with self._file_lock:
+                        with self.part.open("wb"):
+                            pass
+                    with self._state_lock:
+                        self._done = 0
+                        self._samples.clear()
+                        self._speed = 0.0
+                    self._stream(0, None)
         except DownloadError:
             raise
         except Exception as e:
@@ -311,26 +329,32 @@ class LinkDownload:
                 if self._cookies:
                     headers["Cookie"] = "; ".join(
                         f"{k}={v}" for k, v in self._cookies.items())
-                if start > 0:
+                ranged = start > 0 or end is not None
+                if ranged:
                     headers["Range"] = f"bytes={start}-"
                     if end is not None:
                         headers["Range"] = f"bytes={start}-{end - 1}"
                 r = sess.get(self.url, headers=headers, stream=True,
                              timeout=60.0, allow_redirects=True)
-                if start > 0:
+                if ranged:
                     if r.status_code == 200:
-                        # server ignored Range -> must start over
-                        if self._total is None:
-                            start = 0
-                        else:
-                            raise DownloadError(
-                                "server rejected resume range",
-                                transient=False)
-                    elif r.status_code != 206:
+                        raise RangeUnsupported("server ignored Range request")
+                    if r.status_code != 206:
                         raise DownloadError(
-                            f"resume failed: HTTP {r.status_code}",
+                            f"range request failed: HTTP {r.status_code}",
                             transient=_is_transient(
                                 Exception(f"HTTP {r.status_code}")))
+                    cr = r.headers.get("content-range", "")
+                    match = re.fullmatch(r"bytes\s+(\d+)-(\d+)/(\d+)", cr.strip(), re.I)
+                    expected_end = (end - 1 if end is not None
+                                    else (self._total - 1 if self._total else None))
+                    if (not match or int(match.group(1)) != start
+                            or (expected_end is not None
+                                and int(match.group(2)) != expected_end)
+                            or (self._total is not None
+                                and int(match.group(3)) != self._total)):
+                        raise RangeUnsupported(
+                            "server returned an invalid Content-Range")
                 elif r.status_code >= 400:
                     raise DownloadError(f"HTTP {r.status_code}",
                                         transient=_is_transient(
@@ -343,22 +367,27 @@ class LinkDownload:
                         self._total = int(m.group(1))
                     elif _int_hdr(r.headers.get("content-length")) is not None:
                         self._total = start + int(r.headers["content-length"])
-                with self._file_lock:
-                    mode = "r+b" if start > 0 or self.part.exists() else "wb"
-                    f = open(self.part, mode)
-                    try:
-                        if start > 0:
-                            f.seek(start)
-                        for piece in r.iter_content(READ_CHUNK):
-                            if not piece:
-                                continue
-                            self._stop_check()
-                            self._sleep_paused()
-                            self._limiter.consume(len(piece))
-                            f.write(piece)
-                            self._update_speed(len(piece))
-                    finally:
-                        f.close()
+                expected_bytes = (end - start if ranged and end is not None
+                                  else (self._total - start if ranged
+                                        and self._total is not None else None))
+                received = 0
+                mode = "r+b" if self.part.exists() else "wb"
+                with open(self.part, mode) as f:
+                    if start > 0:
+                        f.seek(start)
+                    for piece in r.iter_content(READ_CHUNK):
+                        if not piece:
+                            continue
+                        self._stop_check()
+                        self._sleep_paused()
+                        self._limiter.consume(len(piece))
+                        f.write(piece)
+                        received += len(piece)
+                        self._update_speed(len(piece))
+                if expected_bytes is not None and received != expected_bytes:
+                    raise DownloadError(
+                        f"range ended early: received {received} of {expected_bytes} bytes",
+                        transient=True)
                 return
             except DownloadError:
                 raise
@@ -377,6 +406,13 @@ class LinkDownload:
 
     # -- parallel chunks ------------------------------------------------------
     def _parallel(self, start: int, total: int, n: int) -> None:
+        # Prepare the file before workers open independent handles at offsets.
+        # Holding one lock around an entire stream would serialize the chunks.
+        self.part.parent.mkdir(parents=True, exist_ok=True)
+        with self._file_lock:
+            mode = "r+b" if self.part.exists() else "w+b"
+            with open(self.part, mode) as f:
+                f.truncate(total)
         span = total - start
         size = span // n
         ranges = []
@@ -406,6 +442,9 @@ class LinkDownload:
             t.start()
         for t in threads:
             t.join()
+        if any(isinstance(error, RangeUnsupported) for error in errors):
+            raise RangeUnsupported(str(next(e for e in errors
+                                           if isinstance(e, RangeUnsupported))))
         if errors and self.stop_event.is_set():
             raise DownloadError("cancelled", transient=False)
         if errors:
