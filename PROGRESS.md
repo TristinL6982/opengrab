@@ -1,7 +1,22 @@
 # OpenGrab — build state (pause point)
 
+> **Status note:** This file is an older handoff and its DONE/NOT YET WRITTEN
+> lists are stale. The engine, API server, and UI files now exist in the
+> repository, but their existence does not mean they have been fully verified.
+> Inspect the current tree and Git status before relying on this snapshot.
+> `PROJECT_SPEC.md` is the authoritative product requirements document;
+> `AGENTS.md` contains instructions for coding agents.
+
 **Date paused:** 2026-10-25. **Location:** `C:\Users\trist\opengrab`
 Git repo initialized at this pause point — check `git log` for the commit.
+
+## Open decisions — RESOLVED 2026-10-25 (see PROJECT_STATUS.md §2 for full text)
+1. Platforms: Windows/Linux/macOS via portable Python core; no Java rewrite.
+2. Auth: v1 single owner token; remote access requires auth.
+3. Tray + LinkGrabber clipboard capture: yes; monitoring must be visible + user-controllable.
+4. Docker: supported target; unbuildable/unverifiable on this machine (no docker CLI) — document as unverified.
+5. HTTPS: local-only default, HTTPS off on localhost; remote requires HTTPS (trusted proxy or explicit TLS); never unauthenticated HTTP.
+6. Default port: 5678 (JD2 parity), configurable. (Code currently 8765 — change pending.)
 
 ## What OpenGrab is
 A modern, unpaywalled JDownloader-2-style grabber/downloader for Windows.

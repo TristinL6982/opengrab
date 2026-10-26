@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenGrab</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="opengrab.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <img src="opengrab.svg" alt="" class="logo">
+      <h1>OpenGrab <span class="ver">0.1</span></h1>
+    </div>
+    <div class="statusline">
+      <span id="speed-pill" class="pill">0 B/s</span>
+      <span id="active-pill" class="pill">0 active</span>
+      <span id="conn-pill" class="pill warn">connecting…</span>
+      <span id="token-pill" class="pill hidden"></span>
+    </div>
+    <nav id="tabs">
+      <button data-tab="queue" class="tab active">Queue</button>
+      <button data-tab="all" class="tab">All Links</button>
+      <button data-tab="accounts" class="tab">Accounts</button>
+      <button data-tab="filters" class="tab">Filters</button>
+      <button data-tab="settings" class="tab">Settings</button>
+    </nav>
+  </header>
+
+  <div id="auth-banner" class="hidden">
+    <span>Remote session — enter the access token from the OpenGrab console:</span>
+    <input id="auth-token" type="password" placeholder="access token">
+    <button id="auth-save">Save</button>
+  </div>
+
+  <main>
+    <!-- ============================ QUEUE TAB ============================ -->
+    <section id="tab-queue" class="tabpane active">
+      <div class="addbox" id="dropzone">
+        <textarea id="url-input" rows="3"
+          placeholder="Drop links here or paste one per line…&#10;https://example.com/video&#10;https://example.com/file.zip"></textarea>
+        <div class="addrow">
+          <label>priority
+            <input id="url-priority" type="number" value="0" style="width:4.5em">
+          </label>
+          <label><input id="url-auto" type="checkbox" checked> auto-start</label>
+          <button id="btn-add" class="primary">Add &amp; download</button>
+        </div>
+        <div id="drop-hint" class="drophint hidden">release to add</div>
+      </div>
+
+      <div class="graphwrap">
+        <canvas id="speed-graph" height="72"></canvas>
+      </div>
+
+      <div class="listhead">
+        <span class="c-title">Title</span>
+        <span class="c-size">Size</span>
+        <span class="c-speed">Speed</span>
+        <span class="c-eta">ETA</span>
+        <span class="c-prog">Progress</span>
+        <span class="c-actions"></span>
+      </div>
+      <div id="queue-list" class="linklist"></div>
+      <div id="queue-empty" class="empty hidden">Queue is empty — add a link above.</div>
+    </section>
+
+    <!-- ============================ ALL LINKS ============================ -->
+    <section id="tab-all" class="tabpane">
+      <div class="filterrow">
+        <button class="chip active" data-f="all">all</button>
+        <button class="chip" data-f="active">active</button>
+        <button class="chip" data-f="finished">finished</button>
+        <button class="chip" data-f="failed">failed / error</button>
+        <button class="chip" data-f="parked">parked (captcha/login/paywall)</button>
+        <span class="grow"></span>
+        <button id="btn-clear-finished">clear finished</button>
+      </div>
+      <div id="all-list" class="linklist"></div>
+    </section>
+
+    <!-- ============================ ACCOUNTS =========================== -->
+    <section id="tab-accounts" class="tabpane">
+      <h2>Site accounts</h2>
+      <p class="hint">Stored locally in <code>accounts.json</code> in your OpenGrab data dir.
+      Plugins receive credentials via <code>ctx.account_for(site, url)</code>.</p>
+      <div class="formrow">
+        <input id="acc-site" placeholder="site domain, e.g. mega.co.nz">
+        <input id="acc-user" placeholder="username / email">
+        <input id="acc-pass" type="password" placeholder="password / password2">
+        <button id="btn-acc-add" class="primary">Add account</button>
+      </div>
+      <div id="accounts-list" class="linklist"></div>
+    </section>
+
+    <!-- ============================ FILTERS ============================ -->
+    <section id="tab-filters" class="tabpane">
+      <h2>Link filters</h2>
+      <p class="hint">Regex or glob. Exclude rules always win. If any <em>include</em>
+      rule exists, only links matching an include rule pass.</p>
+      <div class="formrow">
+        <select id="flt-kind">
+          <option value="exclude">exclude</option>
+          <option value="include">include</option>
+        </select>
+        <select id="flt-type">
+          <option value="regex">regex</option>
+          <option value="glob">glob</option>
+        </select>
+        <input id="flt-pattern" placeholder="pattern, e.g. .*\.exe$ or *.exe">
+        <button id="btn-flt-add" class="primary">Add filter</button>
+      </div>
+      <div id="filters-list" class="linklist"></div>
+    </section>
+
+    <!-- ============================ SETTINGS =========================== -->
+    <section id="tab-settings" class="tabpane">
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <label>download directory
+          <input id="set-download_dir" type="text"></label>
+        <label>max parallel links
+          <input id="set-max_parallel" type="number" min="1" max="32"></label>
+        <label>chunked ranges per link
+          <input id="set-per_link_chunks" type="number" min="1" max="16"></label>
+        <label>speed limit (kB/s, 0 = off)
+          <input id="set-speed_limit_kbps" type="number" min="0"></label>
+        <label>retries
+          <input id="set-retry_max" type="number" min="0" max="10"></label>
+        <label>TLS impersonation
+          <select id="set-impersonate">
+            <option>chrome</option><option>chrome124</option><option>firefox</option>
+            <option>safari</option><option>edge</option>
+          </select></label>
+        <label>proxy (blank = none)
+          <input id="set-proxy" type="text" placeholder="http://user:pass@host:port"></label>
+        <label>captcha provider
+          <select id="set-captcha_provider">
+            <option>auto</option><option>manual</option><option>2captcha</option>
+            <option>capmonster</option><option>capsolver</option><option>ddddocr</option>
+          </select></label>
+        <label>2Captcha API key (BYO)
+          <input id="set-captcha_2captcha_key" type="password"></label>
+        <label>CapMonster API key (BYO)
+          <input id="set-captcha_capmonster_key" type="password"></label>
+        <label>CapSolver API key (BYO)
+          <input id="set-captcha_capsolver_key" type="password"></label>
+        <label class="check"><input id="set-ua_rotation" type="checkbox"> rotate user agents</label>
+        <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> auto-start after grab</label>
+      </div>
+      <div class="formrow">
+        <button id="btn-set-save" class="primary">Save settings</button>
+        <button id="btn-set-reload-plugins">rescan plugins</button>
+        <span class="grow"></span>
+        <label class="check"><input id="set-confirm_delete" type="checkbox" style="display:inline-block"> confirm deletes</label>
+      </div>
+      <h2>Local API</h2>
+      <p class="hint">Console token (for LAN / browser access): <code id="token-display"></code>
+      LAN URL: <code id="lan-url"></code></p>
+      <h2>About</h2>
+      <p class="hint">OpenGrab — unpaywalled, modifiable link grabber &amp; downloader.
+      Plugins: drop a <code>.py</code> file into your OpenGrab <code>plugins</code> folder
+      and press <em>rescan plugins</em>.</p>
+    </section>
+  </main>
+</div>
+<div id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -69,6 +69,11 @@ class Settings(BaseModel):
     theme: str = "dark"
     poll_ms: int = 1000
 
+    # local api server
+    api_host: str = "127.0.0.1"
+    api_port: int = 8765
+    api_token: str = ""
+
     # maintenance
     confirm_delete: bool = True
 
