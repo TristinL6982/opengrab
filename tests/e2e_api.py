@@ -78,8 +78,9 @@ def sha256_of(path: Path) -> str:
 def main() -> int:
     dl_dir = _TMP / "downloads"
     dl_dir.mkdir()
+    # Keep the interruption window deterministic even on a fast connection.
     settings = Settings(download_dir=str(dl_dir), max_parallel=2,
-                        per_link_chunks=2)
+                        per_link_chunks=2, speed_limit_kbps=256)
 
     mgr = DownloadManager(settings)
     mgr.start()

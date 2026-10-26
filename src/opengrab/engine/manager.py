@@ -37,7 +37,7 @@ from ..plugins.base import (CaptchaRequired, LoginRequired, PaywallRequired,
                             PluginContext, PluginError)
 from ..plugins.registry import PluginRegistry
 from ..settings import Settings, app_data_dir, user_plugins_dir
-from .downloader import DownloadError, LinkDownload
+from .downloader import DownloadError, LinkDownload, _RateLimiter
 
 log = logging.getLogger("opengrab.engine")
 
@@ -52,9 +52,11 @@ class DownloadManager:
         self._links: dict[str, Link] = {}
         self._lock = threading.RLock()
         self._persist_lock = threading.Lock()
-        self._ready: "queue.Queue[str]" = queue.Queue()
+        self._ready: "queue.PriorityQueue[tuple[int, float, str]]" = queue.PriorityQueue()
         self._active: dict[str, LinkDownload] = {}
         self._reserved_downloads: set[tuple[str, str]] = set()
+        self._global_limiter = _RateLimiter(
+            max(0, settings.speed_limit_kbps) * 1024)
 
         self.client = HttpClient(settings)
         self.accounts = AccountManager()
@@ -335,7 +337,12 @@ class DownloadManager:
 
     # ------------------------------------------------------------- download
     def _ready_put(self, link_id: str) -> None:
-        self._ready.put(link_id)
+        link = self.get(link_id)
+        if link is None:
+            return
+        # PriorityQueue sorts lower keys first; negate user priority and keep
+        # insertion order stable by the link's creation timestamp.
+        self._ready.put((-link.priority, link.created, link.id))
 
     def start_download(self, link_id: str) -> None:
         """(Re)start or queue a link for download."""
@@ -518,7 +525,7 @@ class DownloadManager:
     def _worker(self) -> None:
         while True:
             try:
-                link_id = self._ready.get(timeout=1.0)
+                _, _, link_id = self._ready.get(timeout=1.0)
             except queue.Empty:
                 continue
             link = self.get(link_id)
@@ -584,6 +591,7 @@ class DownloadManager:
                               headers=link.direct_headers,
                               settings=self.settings,
                               cookies=self.client._cookies_for(url),
+                              rate_limiter=self._global_limiter,
                               on_tick=lambda d: self._on_tick(link, d))
             with self._lock:
                 self._active[link.id] = dl

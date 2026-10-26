@@ -36,6 +36,12 @@ selection, and separate audio/video formats fail visibly rather than silently
 losing audio. Fixture tests pass; live upstream extractor behavior remains
 unverified.
 
+**Queue controls are now enforced by the engine:** waiting downloads are
+dequeued by descending user priority and then creation time. All concurrent
+links share one token-bucket limiter, so the configured speed limit applies to
+the aggregate rather than once per active link. A focused test verifies both
+the ordering and that manager-created downloads receive the shared limiter.
+
 **M4 GUI lifecycle and M5 UI panels are implemented.** A mocked lifecycle test
 verifies close-to-tray, show, clipboard-monitor toggle, and Exit cleanup; the
 native WebView2/tray window has not been manually exercised. The UI now has

@@ -28,6 +28,12 @@ Settings and the queue live under `%APPDATA%/OpenGrab` on Windows,
 Downloads default to `~/Downloads`. Configure the download folder and
 concurrency in Settings.
 
+Queued links start by descending user priority, then older items first. The
+speed limit is shared across all active downloads. Eligible large downloads
+use parallel byte ranges; if a server rejects ranges, OpenGrab restarts that
+file as a single stream. Interrupted downloads retain their `.part` data and
+resume where the server supports it.
+
 Environment overrides:
 
 | Variable | Purpose |

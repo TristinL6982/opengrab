@@ -63,8 +63,11 @@ class _RateLimiter:
 
     def set_rate(self, bytes_per_s: float) -> None:
         with self._lock:
-            self.rate = float(bytes_per_s) if bytes_per_s > 0 else 0.0
-            self._bal = self.rate
+            new_rate = float(bytes_per_s) if bytes_per_s > 0 else 0.0
+            if new_rate == self.rate:
+                return
+            self.rate = new_rate
+            self._bal = min(self._bal, new_rate)
             self._ts = time.monotonic()
 
     def consume(self, n: int) -> None:
@@ -139,6 +142,7 @@ class LinkDownload:
                  stop_event: Optional[threading.Event] = None,
                  pause_event: Optional[threading.Event] = None,
                  cookies: Optional[dict] = None,
+                 rate_limiter: Optional[_RateLimiter] = None,
                  on_tick=None):
         self.link = link
         self.url = url
@@ -165,7 +169,7 @@ class LinkDownload:
         self._done = 0
         self._speed = 0.0
         self._samples: list[tuple[float, int]] = []
-        self._limiter = _RateLimiter(0.0)
+        self._limiter = rate_limiter or _RateLimiter(0.0)
         self._last_tick = 0.0
         self._active_threads = 0
 
