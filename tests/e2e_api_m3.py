@@ -7,11 +7,13 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+import time
 
 temp = Path(tempfile.mkdtemp(prefix="opengrab-m3-"))
 os.environ["OPENGRAB_DATA_DIR"] = str(temp / "data")
 
 from opengrab.engine.manager import DownloadManager  # noqa: E402
+from opengrab import server as server_module  # noqa: E402
 from opengrab.server import ApiServer  # noqa: E402
 from opengrab.settings import Settings  # noqa: E402
 
@@ -23,6 +25,26 @@ def main() -> int:
                         base_path="/open")
     manager = DownloadManager(settings)
     manager.start()
+
+    # Exercise the clipboard HTTP contract without reading or changing the
+    # user's actual Windows clipboard during automated verification.
+    real_make_handler = server_module._make_handler
+    clipboard_value = ""
+
+    def make_test_handler(api_server):
+        handler = real_make_handler(api_server)
+
+        def fake_clipboard(self, value=None):
+            nonlocal clipboard_value
+            if value is not None:
+                clipboard_value = value
+                return None
+            return clipboard_value
+
+        handler._clipboard = fake_clipboard
+        return handler
+
+    server_module._make_handler = make_test_handler
     server = ApiServer(settings, manager, port=0)
     port = server.start()
     base = f"http://127.0.0.1:{port}"
@@ -60,6 +82,10 @@ def main() -> int:
 
         _, _, providers = request("/api/captcha-test")
         check("captcha provider diagnostics", bool(json.loads(providers)["providers"]))
+        request("/api/clipboard", "POST", {"text": "fixture clipboard"})
+        _, _, clipboard = request("/api/clipboard")
+        check("clipboard API contract (mock backend)",
+              json.loads(clipboard)["text"] == "fixture clipboard")
 
         manager.on_change("finished", {"id": "test-link", "status": "finished",
                                         "title": "fixture.zip"})
@@ -111,11 +137,42 @@ def main() -> int:
               server.remote_transport_allowed("127.0.0.1", proxy_https))
         check("HTTPS proxy still requires bearer token",
               not server.authorize("127.0.0.1", proxy_https))
+
+        try:
+            request("/api/terminal")
+            disabled = False
+        except urllib.error.HTTPError as exc:
+            disabled = exc.code == 403
+        check("terminal disabled by default", disabled)
+
+        settings.terminal_enabled = True
+        try:
+            request("/api/terminal", "POST", {"command": "echo terminal-check"})
+            unauthenticated = False
+        except urllib.error.HTTPError as exc:
+            unauthenticated = exc.code == 401
+        check("terminal requires bearer token on localhost", unauthenticated)
+
+        auth = {"Authorization": f"Bearer {server.token}"}
+        status, _, started = request("/api/terminal", "POST",
+                                     {"command": "echo terminal-check"},
+                                     headers=auth)
+        job_id = json.loads(started)["id"]
+        result = None
+        for _ in range(40):
+            _, _, raw = request(f"/api/terminal/{job_id}", headers=auth)
+            result = json.loads(raw)
+            if not result["running"]:
+                break
+            time.sleep(0.1)
+        check("opt-in terminal job completes", status == 202 and result is not None
+              and not result["running"] and "terminal-check" in result["output"])
         print(f"{passes} checks passed")
         return 0
     finally:
         server.stop()
         manager.shutdown()
+        server_module._make_handler = real_make_handler
 
 
 if __name__ == "__main__":

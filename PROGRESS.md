@@ -11,13 +11,20 @@ port. Default port values are now 5678. `--data-dir` selects an isolated data
 directory; `OPENGRAB_DATA_DIR`, `OPENGRAB_BIND`/`OPENGRAB_API_HOST`, and
 `OPENGRAB_PORT`/`OPENGRAB_API_PORT`, and `OPENGRAB_BASE_PATH` are supported.
 
-**M3 API core is implemented and verified** with 19 endpoint checks: health
+**M3 API core is implemented and verified** with 23 endpoint checks: health
 alias, CAPTCHA diagnostics, notifications, download-folder-contained file
 operations, range streaming, base-path routing, and HTTPS-proxy/auth checks.
-Clipboard endpoints are implemented but not exercised against the live desktop
-clipboard. OpenGrab is **not production-ready**: tray/clipboard capture, UI
-completion, Docker, native builds, documentation, and other requirements remain
-incomplete or unverified. See `PROJECT_STATUS.md` and `PROJECT_SPEC.md`.
+Clipboard HTTP behavior is tested with a mock backend; the native Windows
+clipboard integration remains unverified. The terminal API is opt-in and
+requires the bearer token even on localhost. OpenGrab is **not
+production-ready**: tray/clipboard capture, UI completion, Docker, native
+builds, documentation, and other requirements remain incomplete or unverified.
+See `PROJECT_STATUS.md` and `PROJECT_SPEC.md`.
+
+The end-to-end rerun also caught and fixed a Windows race between debounced
+queue persistence and shutdown. Saves now serialize before replacing the state
+file; the 16-check download/resume/persistence suite and smoke check pass with
+no persistence warnings.
 
 > **Status note:** This file is an older handoff and its DONE/NOT YET WRITTEN
 > lists are stale. The engine, API server, and UI files now exist in the
@@ -83,12 +90,12 @@ Docker image (feature parity requested vs the JD2 docker docs).
   (`ie._match_valid_url.__code__ and []` hack) — clean it up on resume.
 
 ## Remaining work (resume order)
-1. **M3 — API remaining:** decide whether JD2-style terminal access is still
-   required; if so, implement it opt-in and token-authenticated. Clipboard
-   routes need platform validation without overwriting the live clipboard.
+1. **M3 — API remaining:** validate the native Windows clipboard backend
+   without reading or overwriting the user's live clipboard.
 2. **M4 — GUI:** validate the native pywebview window; add pystray and the
    visible, user-toggleable Click'n'Load clipboard watcher (decision #3).
-3. **M5 — UI completion:** notifications tab, audio player, PWA PNG icons.
+3. **M5 — UI completion:** notifications, file manager, clipboard, audio, and
+   opt-in terminal panels; generate PWA PNG icons.
 4. **M6 — Windows packaging:** PyInstaller spec/build script and verify the
    packaged app boots and serves the UI.
 5. **M7 — Docker:** add Dockerfile, compose and env example. Docker is not

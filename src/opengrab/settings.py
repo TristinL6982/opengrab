@@ -79,6 +79,7 @@ class Settings(BaseModel):
     api_port: int = 5678
     api_token: str = ""
     base_path: str = ""             # reverse-proxy path prefix, e.g. /opengrab
+    terminal_enabled: bool = False  # shell API is opt-in and always token-gated
 
     # maintenance
     confirm_delete: bool = True

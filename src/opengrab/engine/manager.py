@@ -51,6 +51,7 @@ class DownloadManager:
 
         self._links: dict[str, Link] = {}
         self._lock = threading.RLock()
+        self._persist_lock = threading.Lock()
         self._ready: "queue.Queue[str]" = queue.Queue()
         self._active: dict[str, LinkDownload] = {}
 
@@ -621,17 +622,21 @@ class DownloadManager:
         self._save_now()
 
     def _save_now(self) -> None:
-        self._last_persist = time.time()
-        try:
-            with self._lock:
-                data = [json.loads(l.model_dump_json())
-                        for l in self._links.values()
-                        if l.status != LinkStatus.DOWNLOADING]
-            tmp = self.links_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
-            tmp.replace(self.links_file)
-        except Exception:
-            log.warning("persist failed", exc_info=True)
+        # Debounced worker saves can overlap shutdown saves. Serialize the
+        # shared temporary file and atomic replacement, especially on Windows
+        # where concurrent rename/open operations fail with WinError 32.
+        with self._persist_lock:
+            self._last_persist = time.time()
+            try:
+                with self._lock:
+                    data = [json.loads(l.model_dump_json())
+                            for l in self._links.values()
+                            if l.status != LinkStatus.DOWNLOADING]
+                tmp = self.links_file.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+                tmp.replace(self.links_file)
+            except Exception:
+                log.warning("persist failed", exc_info=True)
 
     def _load_links(self) -> None:
         if not self.links_file.exists():

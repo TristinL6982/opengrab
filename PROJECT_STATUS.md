@@ -12,10 +12,11 @@ check verifies plugin discovery, API ping, and a real downloaded file's size
 and SHA-256. A headless CLI process served `/api/ping` on the requested local
 bind/port. Since then the API core added health, notifications, CAPTCHA
 provider diagnostics, sandboxed file operations, clipboard routes, audio byte
-ranges, proxy-path routing, and HTTPS-proxy enforcement. `tests/e2e_api_m3.py`
-passes 19 checks. The Windows clipboard routes were not tested against the
-live clipboard. This does not complete the product: GUI, UI, packaging, Docker,
-documentation, and compatibility requirements remain open.
+ranges, proxy-path routing, HTTPS-proxy enforcement, and an opt-in terminal
+API that requires the bearer token even locally. `tests/e2e_api_m3.py` passes
+23 checks, including a mock clipboard backend. The native Windows clipboard
+calls were not exercised. This does not complete the product: GUI, UI,
+packaging, Docker, documentation, and compatibility requirements remain open.
 
 ## 1. Overall goal
 
@@ -73,11 +74,14 @@ login + paywall handling, filters, accounts. Ship as platform builds
   sha256 `132529c83901437ff642f585216831bf5fd7a91df66829907e155192ead62498`;
   SSE `hello` event delivered; links persist across a full engine restart.
 
-### Bugs fixed this session (server.py)
+### Fixes verified in recent work
 1. `start()` returned port 0 for ephemeral binds → now records
    `self.httpd.server_address[1]`.
 2. `_static()` resolved request paths against CWD instead of the static root
    → 403 on all UI assets → now anchored to `static_dir().resolve()`.
+3. Debounced queue writes could race shutdown on the same `.tmp` file and
+   trigger Windows `WinError 32` → saves are now serialized; full e2e rerun
+   passed without the warning.
 
 ## 4. What is incomplete (NOT done — do not claim otherwise)
 
@@ -88,11 +92,11 @@ login + paywall handling, filters, accounts. Ship as platform builds
 - **GUI:** `app.py` now serves the UI in pywebview, but native window startup
   has not been verified. Tray and visible, user-toggleable clipboard
   Click'n'Load capture remain unimplemented.
-- **API remaining:** `/api/terminal` is not implemented. The server rejects
-  direct non-local HTTP and accepts proxied access only when the loopback proxy
-  marks HTTPS; direct TLS termination is not implemented. Clipboard routes
-  need validation without reading or changing the live desktop clipboard.
-  Multi-user auth is intentionally OUT for v1 per decision #2.
+- **API remaining:** native Windows clipboard calls need validation without
+  reading or changing the live desktop clipboard. The server rejects direct
+  non-local HTTP and accepts proxied access only when the loopback proxy marks
+  HTTPS; direct TLS termination is not implemented. Multi-user auth is
+  intentionally OUT for v1 per decision #2.
 - **UI gaps:** no notifications, file manager, clipboard, audio, or terminal
   panels; no PWA PNG icons (svg only).
 - **Packaging:** no PyInstaller spec/build script → no `OpenGrab.exe`;
@@ -150,15 +154,14 @@ Uncommitted (all part of the verified milestone, safe to commit):
 | `.venv\Scripts\python.exe -m opengrab --version/--help` | **PASS** |
 | `.venv\Scripts\python.exe -m opengrab --smoke-test` | **PASS** — plugin scan, API ping, verified download |
 | Headless CLI on explicit localhost bind/port → `/api/ping` | **PASS** |
-| `.venv\Scripts\python.exe tests\e2e_api_m3.py` | **19/19 PASS** — API, file path safety, range streaming, proxy and base path |
+| `.venv\Scripts\python.exe tests\e2e_api_m3.py` | **23/23 PASS** — API, safe files, range streaming, proxy, base path, opt-in terminal |
 | UI JS ↔ server API endpoint audit (grep) | all calls match |
 | Direct engine probe (mdurl URL → finished in ~3 s) | ok (earlier this session) |
 
 ## 8. Next concrete steps (resume order)
 
-0. **M3 follow-up:** determine whether to implement the requested terminal
-   parity; if implemented, keep it disabled until explicitly enabled and
-   require the API token even for local requests.
+0. **M3 follow-up:** validate the native Windows clipboard backend without
+   accessing or changing the user's live clipboard.
 1. **M4 — GUI:** validate the pywebview window; add pystray
    tray, Click'n'Load clipboard watcher — watcher must be visible in UI and
    user-toggleable (decision #3).

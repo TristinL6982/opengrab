@@ -122,6 +122,8 @@ class ApiServer:
         self._clients_lock = threading.Lock()
         self._notifications = deque(maxlen=200)
         self._notifications_lock = threading.Lock()
+        self._terminal_jobs: dict[str, dict] = {}
+        self._terminal_lock = threading.Lock()
         prev = manager.on_change
 
         def fanout(kind: str, payload) -> None:
@@ -616,6 +618,120 @@ def _make_handler(srv: ApiServer):
                 return self._err(400, "action must be mkdir, delete, or rename")
             return self._json({"ok": True})
 
+        def _terminal_authorized(self) -> bool:
+            if not mgr.settings.terminal_enabled:
+                self._err(403, "terminal access is disabled")
+                return False
+            if self.headers.get("Authorization", "") != f"Bearer {srv.token}":
+                self._err(401, "terminal access requires the API bearer token")
+                return False
+            return True
+
+        def _terminal_start(self, body: dict):
+            if not self._terminal_authorized():
+                return
+            command = body.get("command")
+            if not isinstance(command, str) or not command.strip() or len(command) > 4096 or "\x00" in command:
+                return self._err(400, "command must be a non-empty string of at most 4096 characters")
+            cwd = self._safe_file(str(body.get("cwd", "")), must_exist=True)
+            if not cwd.is_dir():
+                return self._err(400, "working directory must be a directory inside downloads")
+            try:
+                timeout_s = min(300.0, max(1.0, float(body.get("timeout_s", 30))))
+            except (TypeError, ValueError):
+                return self._err(400, "timeout_s must be a number")
+            with srv._terminal_lock:
+                for key, job in list(srv._terminal_jobs.items()):
+                    if (not job["running"] and time.time() - job["started"] > 3600):
+                        del srv._terminal_jobs[key]
+                if len(srv._terminal_jobs) >= 100:
+                    return self._err(429, "too many retained terminal sessions")
+            flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+            try:
+                process = subprocess.Popen(
+                    command, cwd=str(cwd), shell=True, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    creationflags=flags,
+                )
+            except OSError as exc:
+                return self._err(400, f"could not start command: {exc}")
+            job_id = uuid.uuid4().hex
+            job = {"id": job_id, "process": process, "started": time.time(),
+                   "timeout_s": timeout_s, "running": True, "returncode": None,
+                   "output": "", "truncated": False, "timed_out": False}
+            with srv._terminal_lock:
+                srv._terminal_jobs[job_id] = job
+
+            def collect_output():
+                limit = 256 * 1024
+                try:
+                    while True:
+                        chunk = process.stdout.read(8192)
+                        if not chunk:
+                            break
+                        decoded = chunk.decode("utf-8", "replace")
+                        with srv._terminal_lock:
+                            combined = job["output"] + decoded
+                            if len(combined) > limit:
+                                job["output"] = combined[-limit:]
+                                job["truncated"] = True
+                            else:
+                                job["output"] = combined
+                finally:
+                    process.stdout.close()
+
+            def monitor():
+                reader = threading.Thread(target=collect_output, daemon=True)
+                reader.start()
+                try:
+                    process.wait(timeout=timeout_s)
+                except subprocess.TimeoutExpired:
+                    job["timed_out"] = True
+                    try:
+                        process.terminate()
+                    except OSError:
+                        pass
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                reader.join(timeout=5)
+                with srv._terminal_lock:
+                    job["returncode"] = process.poll()
+                    job["running"] = False
+
+            threading.Thread(target=monitor, daemon=True,
+                             name=f"terminal-{job_id[:8]}").start()
+            return self._json({"id": job_id, "running": True}, 202)
+
+        def _terminal_poll(self, job_id: str):
+            if not self._terminal_authorized():
+                return
+            with srv._terminal_lock:
+                job = srv._terminal_jobs.get(job_id)
+                if job is None:
+                    return self._err(404, "terminal session not found")
+                return self._json({
+                    "id": job_id, "running": job["running"],
+                    "returncode": job["returncode"], "output": job["output"],
+                    "truncated": job["truncated"], "timed_out": job["timed_out"],
+                })
+
+        def _terminal_stop(self, job_id: str):
+            if not self._terminal_authorized():
+                return
+            with srv._terminal_lock:
+                job = srv._terminal_jobs.get(job_id)
+                if job is None:
+                    return self._err(404, "terminal session not found")
+                process = job["process"]
+                if job["running"]:
+                    try:
+                        process.terminate()
+                    except OSError:
+                        pass
+            return self._json({"ok": True})
+
         # -- api -----------------------------------------------------------
         def _link(self, lid: str):
             l = mgr.get(lid)
@@ -628,6 +744,18 @@ def _make_handler(srv: ApiServer):
             if p in ("/api/ping", "/api/health"):
                 return self._json({"ok": True, "app": "OpenGrab",
                                    "version": "0.1.0"})
+            if p == "/api/terminal":
+                if not self._terminal_authorized():
+                    return
+                with srv._terminal_lock:
+                    jobs = [{"id": job["id"], "running": job["running"],
+                             "returncode": job["returncode"]}
+                            for job in srv._terminal_jobs.values()]
+                return self._json({"jobs": jobs})
+            import re as _re
+            terminal_match = _re.fullmatch(r"/api/terminal/([a-f0-9]+)/?", p)
+            if terminal_match:
+                return self._terminal_poll(terminal_match.group(1))
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
             if p == "/api/links":
@@ -682,6 +810,11 @@ def _make_handler(srv: ApiServer):
 
         def _api_post(self, p: str, body: dict):
             import re
+            if p == "/api/terminal":
+                return self._terminal_start(body)
+            terminal_stop = re.fullmatch(r"/api/terminal/([a-f0-9]+)/stop", p)
+            if terminal_stop:
+                return self._terminal_stop(terminal_stop.group(1))
             m = re.fullmatch(r"/api/links/([^/]+)(/(\w+))?", p)
             if m:
                 lid, action = m.group(1), (m.group(3) or "")
