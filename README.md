@@ -46,13 +46,15 @@ scoped file operations, notifications, audio playback, and an opt-in web
 terminal. Terminal commands run with the OpenGrab process permissions, and
 require both the Settings toggle and the API bearer token.
 
-ZIP/CBZ and TAR-family files can be extracted after download. Extraction
+ZIP/CBZ, 7z, and TAR-family files can be extracted after download. Extraction
 rejects traversal paths, links, excessive file counts, expanded sizes above
 the configured limit, and extreme ZIP compression ratios; it writes to a new
-folder and preserves the source archive. Encrypted ZIP password lookup is off
-unless you set a local password-list file in Settings. That file is read as
-UTF-8, with a 1 MiB / 1,000-entry limit; keep it private. RAR and 7z extraction
-are not available yet.
+folder and preserves the source archive. Encrypted ZIP/7z/RAR password lookup is
+off unless you set a local password-list file in Settings. That file is read
+as UTF-8, with a 1 MiB / 1,000-entry limit; keep it private. RAR uses the
+`rarfile` adapter and needs a compatible `unrar`, `unar`, or `bsdtar` program on `PATH`;
+that external tool is not bundled, and RAR extraction has not yet been verified
+against a RAR fixture.
 
 ## Remote access and security
 
@@ -93,9 +95,19 @@ with OpenGrab's privileges; install only code you trust. The extractor bridge
 does not imply that every upstream site works. Playlist enumeration is capped
 and does not yet provide a full format/quality selection experience.
 
+## Packagizer
+
+Add rules in the Packagizer tab. Rules are evaluated in order and the first
+matching URL/filename glob or regex decides the rename and/or relative target
+subfolder. Preview shows the selected rule, path, and whether a collision
+already exists. Templates support `{name}`, `{stem}`, `{ext}`, and `{host}`.
+Rule paths and filenames are sanitized and confined to the download directory;
+existing downloads are preserved and new collisions receive numbered names.
+
 ## Current limitations
 
-- RAR/7z extraction, Packagizer rules, and router reconnect are not implemented.
+- RAR extraction has an adapter but requires an external tool and is unverified;
+  router reconnect is not implemented.
 - The requested maintained inventories of 110+ hosters, 300+ decryptors, and
   1,400+ router models are not present. Upstream extractor count is not
   compatibility evidence.

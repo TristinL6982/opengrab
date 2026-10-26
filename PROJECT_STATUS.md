@@ -7,16 +7,18 @@
 
 ## Latest update — 2026-10-25: M3–M6 progress
 
-The latest verification is recorded in `PROGRESS.md`. M3 now passes 29 API
+The latest verification is recorded in `PROGRESS.md`. M3 now passes 32 API
 checks; the GUI lifecycle mock passes; the completed UI panels are syntax/API
 checked; and the PyInstaller onedir bundle passes packaged `--version`, plugin
 discovery, and the real-download `--smoke-test`. Native WebView2/tray GUI
 interaction has not been manually run. Docker files are drafted, but Docker is
 not installed and remains unverified. The original M2 snapshot below is
 historical and its later checklist is stale. The project remains far from the
-full `PROJECT_SPEC.md`: ZIP/CBZ and TAR-family extraction are implemented with
-safety limits, but RAR/7z, Packagizer, router reconnect, browser capture, broad
-independently verified plugin catalogs, and non-Windows builds remain missing.
+full `PROJECT_SPEC.md`: ZIP/CBZ, 7z, and TAR-family extraction are implemented
+with safety limits; Packagizer rules are implemented with preview and safe
+collision handling; the RAR adapter needs an unverified external tool.
+Router reconnect, browser capture, broad independently verified plugin
+catalogs, and non-Windows builds remain missing.
 
 ## Historical update — M2 CLI milestone
 
@@ -27,7 +29,7 @@ bind/port. Since then the API core added health, notifications, CAPTCHA
 provider diagnostics, sandboxed file operations, clipboard routes, audio byte
 ranges, proxy-path routing, HTTPS-proxy enforcement, and an opt-in terminal
 API that requires the bearer token even locally. `tests/e2e_api_m3.py` passes
-23 checks, including a mock clipboard backend. The native Windows clipboard
+32 checks, including a mock clipboard backend. The native Windows clipboard
 calls were not exercised. This does not complete the product: GUI, UI,
 packaging, Docker, documentation, and compatibility requirements remain open.
 
@@ -167,7 +169,7 @@ Uncommitted (all part of the verified milestone, safe to commit):
 | `.venv\Scripts\python.exe -m opengrab --version/--help` | **PASS** |
 | `.venv\Scripts\python.exe -m opengrab --smoke-test` | **PASS** — plugin scan, API ping, verified download |
 | Headless CLI on explicit localhost bind/port → `/api/ping` | **PASS** |
-| `.venv\Scripts\python.exe tests\e2e_api_m3.py` | **23/23 PASS** — API, safe files, range streaming, proxy, base path, opt-in terminal |
+| `.venv\Scripts\python.exe tests\e2e_api_m3.py` | **32/32 PASS** — API, safe files, range streaming, proxy, base path, opt-in terminal, Packagizer |
 | UI JS ↔ server API endpoint audit (grep) | all calls match |
 | Direct engine probe (mdurl URL → finished in ~3 s) | ok (earlier this session) |
 

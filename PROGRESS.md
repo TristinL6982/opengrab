@@ -11,13 +11,12 @@ port. Default port values are now 5678. `--data-dir` selects an isolated data
 directory; `OPENGRAB_DATA_DIR`, `OPENGRAB_BIND`/`OPENGRAB_API_HOST`, and
 `OPENGRAB_PORT`/`OPENGRAB_API_PORT`, and `OPENGRAB_BASE_PATH` are supported.
 
-**M3 API core is implemented and verified** with 29 endpoint checks: health
+**M3 API core is implemented and verified** with 32 endpoint checks: health
 alias, CAPTCHA diagnostics, notifications, download-folder-contained file
 operations, range streaming and scoped audio tickets, base-path routing,
-HTTPS-proxy/auth checks, clipboard review/dedupe, and the opt-in token-gated
-terminal, and a diagnostics snapshot that omits tokens, proxy credentials, and
-download URLs. Clipboard HTTP behavior uses a mock; native OS clipboard
-interaction remains unverified.
+HTTPS-proxy/auth checks, clipboard review/dedupe, the opt-in token-gated
+terminal, diagnostics redaction, and Packagizer CRUD/preview. Clipboard HTTP
+behavior uses a mock; native OS clipboard interaction remains unverified.
 
 **M4 GUI lifecycle and M5 UI panels are implemented.** A mocked lifecycle test
 verifies close-to-tray, show, clipboard-monitor toggle, and Exit cleanup; the
@@ -28,20 +27,30 @@ review, opt-in terminal, and diagnostics export panels. `node --check` passes; M
 the backing operations. PWA 192/512 PNG icons and package data rules are added.
 
 **M6 Windows onedir packaging is implemented and verified.** `build/OpenGrab.spec`
-and `build/build.bat` produce `build/release/OpenGrab/OpenGrab.exe`.
-Packaged `--version`, `--list-plugins`, and `--smoke-test` pass; the packaged
-smoke performs a real API-backed download and SHA-256 check. Native interactive
+and `build/build.bat` produce `build/release/OpenGrab/OpenGrab.exe`. The clean
+PyInstaller rebuild on 2026-10-25 succeeded after Packagizer and archive
+changes. Packaged `--version`, `--list-plugins`, and `--smoke-test` pass; the
+packaged smoke serves all UI assets, performs a real API-backed download and
+SHA-256 check, and exercises 7z extraction. Native interactive
 WebView2/tray launch remains unverified. **M7 Docker files are drafted but
 unverified** because Docker is unavailable here. OpenGrab is **not
 production-ready**: broad spec requirements remain incomplete, including
-RAR/7z extraction, router reconnect, Packagizer, large maintained plugin
-catalogs, browser capture, and cross-platform builds. ZIP/CBZ and TAR-family
+verified RAR extraction, router reconnect, large maintained plugin
+catalogs, browser capture, and cross-platform builds. ZIP/CBZ, 7z, and TAR-family
 extraction now run after downloads into new directories with traversal,
 symlink, file-count, expanded-size, and compression-ratio checks. The source
 archive is preserved. Password-list lookup is opt-in and bounded; the source
-must be configured by the user. `tests/test_archives.py` verifies safe
-extraction, traversal/symlink rejection, quotas, overwrite prevention, and
-manager integration. See `PROJECT_STATUS.md` and `PROJECT_SPEC.md`.
+must be configured by the user. `tests/test_archives.py` verifies ZIP/7z safe
+extraction, encrypted 7z password lookup, traversal/symlink rejection, quotas,
+overwrite prevention, and manager integration. RAR uses the `rarfile` adapter,
+but requires an external `unrar`/`unar` tool and lacks a fixture test. See
+`PROJECT_STATUS.md` and `PROJECT_SPEC.md`.
+
+Packagizer rules match URLs and filenames using ordered glob or regex rules,
+support safe subfolders and `{name}`, `{stem}`, `{ext}`, and `{host}` templates,
+provide API/UI previews, and preserve existing files with numbered names.
+`tests/test_packagizer.py` and the API suite cover validation, traversal
+rejection, preview, rule persistence/deletion, and collision handling.
 
 The end-to-end rerun also caught and fixed a Windows race between debounced
 queue persistence and shutdown. Saves now serialize before replacing the state
@@ -114,7 +123,7 @@ Docker image (feature parity requested vs the JD2 docker docs).
 1. **M7 — Docker:** Dockerfile, compose, and environment example drafted;
    verify only if Docker becomes available. Implement safe container auth and
    deployment documentation.
-2. **M8 — Docs and hardening:** RAR/7z adapters, Packagizer rules, yt-dlp
+2. **M8 — Docs and hardening:** verified RAR toolchain, yt-dlp
    playlist/format improvements, security review, then acceptance pass. Large
    host/router compatibility targets remain unverified.
 

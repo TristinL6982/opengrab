@@ -7,6 +7,8 @@ lxml>=5.2
 pydantic>=2.7
 rich>=13.7
 yt-dlp>=2024.10.0
+py7zr>=1.0
+rarfile>=4.2
 
 # GUI / windowing
 pywebview>=5.1

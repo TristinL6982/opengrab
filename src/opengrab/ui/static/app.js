@@ -14,6 +14,7 @@ const S = {
 let terminalJobId = null;
 let terminalPollTimer = null;
 let filesPath = "";
+let packagizerCache = [];
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -387,6 +388,7 @@ function refreshData() {
   if ($("#tab-linkgrabber")?.classList.contains("active")) renderLinkGrabber();
   if ($("#tab-notifications")?.classList.contains("active")) renderNotifications();
   if ($("#tab-files")?.classList.contains("active")) renderFiles();
+  if ($("#tab-packagizer")?.classList.contains("active")) renderPackagizer();
 }
 
 async function renderNotifications() {
@@ -412,6 +414,20 @@ async function renderFiles() {
       return `<div class="krow"><span>${icon}</span><code class="file-name">${esc(item.name)}</code><span class="hint">${item.type === "file" ? humanBytes(item.size) : "folder"}</span><span class="grow"></span>${actions}<button class="sm" data-act="file-rename" data-path="${esc(item.path)}" data-name="${esc(item.name)}">Rename</button><button class="sm danger" data-act="file-delete" data-path="${esc(item.path)}">Delete</button></div>`;
     }).join("") : '<div class="empty">This folder is empty.</div>';
   } catch (e) { $("#files-list").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function renderPackagizer() {
+  try {
+    packagizerCache = await api("/api/packagizer");
+    $("#packagizer-list").innerHTML = packagizerCache.length
+      ? packagizerCache.map(rule => `<div class="krow">
+          <span class="badge">${esc(rule.name || "rule")}</span>
+          <code>${esc(rule.pattern_type)}: ${esc(rule.pattern)}</code>
+          <span class="grow">${esc(rule.target_subdir || "")}${rule.filename_template ? " → " + esc(rule.filename_template) : ""}</span>
+          <button class="sm danger" data-act="pack-del" data-id="${esc(rule.id)}">remove</button>
+        </div>`).join("")
+      : '<div class="empty">No Packagizer rules. Matching rules are applied in order.</div>';
+  } catch {}
 }
 
 function childPath(name) { return filesPath ? filesPath + "/" + name : name; }
@@ -496,6 +512,10 @@ async function act(action, el) {
         refreshData();
         break;
       }
+      case "pack-del":
+        await api(`/api/packagizer/${encodeURIComponent(id)}`, "DELETE");
+        await renderPackagizer();
+        return;
     }
     refreshData();
   } catch (e) {
@@ -518,6 +538,7 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   if (t.dataset.tab === "linkgrabber") renderLinkGrabber();
   if (t.dataset.tab === "notifications") renderNotifications();
   if (t.dataset.tab === "files") renderFiles();
+  if (t.dataset.tab === "packagizer") renderPackagizer();
   refreshData();
   renderGraph();
 }));
@@ -773,6 +794,30 @@ $("#file-upload").addEventListener("change", async ev => {
     toast("Uploaded " + file.name, "ok"); await renderFiles();
   } catch (e) { toast("Upload failed: " + e.message, "err"); }
   ev.target.value = "";
+});
+$("#btn-pack-add").addEventListener("click", async () => {
+  const body = {
+    name: $("#pack-name").value.trim(),
+    pattern: $("#pack-pattern").value.trim(),
+    pattern_type: $("#pack-pattern-type").value,
+    target_subdir: $("#pack-subdir").value.trim(),
+    filename_template: $("#pack-template").value.trim(),
+  };
+  try {
+    await api("/api/packagizer", "POST", body);
+    $("#pack-name").value = ""; $("#pack-pattern").value = "";
+    $("#pack-subdir").value = ""; $("#pack-template").value = "";
+    await renderPackagizer(); toast("Packagizer rule added", "ok");
+  } catch (e) { toast("Could not add rule: " + e.message, "err"); }
+});
+$("#btn-pack-preview").addEventListener("click", async () => {
+  try {
+    const plan = await api("/api/packagizer/preview", "POST", {
+      url: $("#pack-preview-url").value.trim(),
+      filename: $("#pack-preview-name").value.trim(),
+    });
+    $("#pack-preview-result").textContent = JSON.stringify(plan, null, 2);
+  } catch (e) { toast("Preview failed: " + e.message, "err"); }
 });
 
 /* ============================================================ toasts */

@@ -87,6 +87,7 @@ class Settings(BaseModel):
     archive_max_files: int = 10000
     archive_max_expanded_gib: int = 16
     archive_password_file: str = ""
+    packagizer_rules: list[dict] = Field(default_factory=list)
 
     # maintenance
     confirm_delete: bool = True

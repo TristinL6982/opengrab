@@ -7,6 +7,7 @@ import zipfile
 import os
 from pathlib import Path
 from unittest.mock import patch
+import py7zr
 
 from opengrab.engine.archives import ArchiveError, extract_archive
 from opengrab.engine import manager as manager_module
@@ -84,6 +85,32 @@ def main() -> int:
         except ArchiveError:
             pass
         print("[PASS] TAR links and special files rejected")
+
+        seven = root / "seven.7z"
+        with py7zr.SevenZipFile(seven, "w") as archive:
+            archive.write(good, "nested/original.zip")
+        result = extract_archive(seven)
+        assert result["status"] == "extracted"
+        assert (root / "seven/nested/original.zip").read_bytes() == good.read_bytes()
+        assert seven.exists()
+        print("[PASS] 7z extracts safely and preserves original")
+        try:
+            extract_archive(seven, max_bytes=1)
+            raise AssertionError("7z expanded-size limit was ignored")
+        except ArchiveError:
+            pass
+        print("[PASS] 7z expanded-size limit enforced")
+
+        encrypted = root / "encrypted.7z"
+        with py7zr.SevenZipFile(encrypted, "w", password="fixture-secret",
+                                header_encryption=True) as archive:
+            archive.write(good, "protected.zip")
+        password_list = root / "passwords.txt"
+        password_list.write_text("wrong\nfixture-secret\n", encoding="utf-8")
+        result = extract_archive(encrypted, password_file=str(password_list))
+        assert result["status"] == "extracted"
+        assert (root / "encrypted/protected.zip").read_bytes() == good.read_bytes()
+        print("[PASS] opt-in password list unlocks encrypted 7z")
 
         data = root / "data"
         downloads = root / "downloads"

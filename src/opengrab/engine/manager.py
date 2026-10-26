@@ -54,6 +54,7 @@ class DownloadManager:
         self._persist_lock = threading.Lock()
         self._ready: "queue.Queue[str]" = queue.Queue()
         self._active: dict[str, LinkDownload] = {}
+        self._reserved_downloads: set[tuple[str, str]] = set()
 
         self.client = HttpClient(settings)
         self.accounts = AccountManager()
@@ -526,13 +527,57 @@ class DownloadManager:
             self._run_download(link)
 
     def _run_download(self, link: Link) -> None:
+        reservation = None
         try:
+            previous_status = link.status
             link.status = LinkStatus.DOWNLOADING
             link.error = ""
             self._persist()
             self._broadcast("downloading", link)
             url = link.direct_url or link.url
-            dest = Path(self.settings.download_dir)
+            from .packagizer import plan_packagizer, safe_filename, safe_subdir
+            root = Path(self.settings.download_dir).expanduser().resolve()
+            saved_name = str(link.extra.get("download_target_filename", ""))
+            saved_subdir = str(link.extra.get("download_target_subdir", ""))
+            if saved_name:
+                plan = dict(link.extra.get("packagizer", {}))
+                plan.update({"filename": safe_filename(saved_name),
+                             "subdir": safe_subdir(saved_subdir)})
+            else:
+                source_name = link.filename or Path(urlparse(link.url).path).name
+                plan = plan_packagizer(self.settings.packagizer_rules,
+                                       link.url, source_name, root)
+            dest = (root / plan["subdir"]).resolve()
+            dest.relative_to(root)
+            filename = safe_filename(plan["filename"])
+            reusable_partial = bool(saved_name or previous_status == LinkStatus.PAUSED
+                                    or link.downloaded > 0)
+            base_path = Path(filename)
+            with self._lock:
+                for index in range(10000):
+                    candidate = (filename if index == 0 else
+                                 f"{base_path.stem}_{index}{base_path.suffix}")
+                    key = (str(dest).casefold(), candidate.casefold())
+                    final_path = dest / candidate
+                    partial_path = dest / (candidate + ".part")
+                    if (key not in self._reserved_downloads
+                            and not final_path.exists()
+                            and (reusable_partial or not partial_path.exists())):
+                        reservation = key
+                        self._reserved_downloads.add(key)
+                        filename = candidate
+                        break
+                else:
+                    raise RuntimeError("too many download filename collisions")
+            link.filename = filename
+            link.extra["download_target_filename"] = filename
+            link.extra["download_target_subdir"] = plan["subdir"]
+            if plan.get("matched"):
+                link.extra["packagizer"] = {
+                    "rule_id": plan["rule_id"], "rule_name": plan["rule_name"],
+                    "filename": filename, "subdir": plan["subdir"],
+                }
+            self._persist()
             dl = LinkDownload(link, url, dest,
                               headers=link.direct_headers,
                               settings=self.settings,
@@ -585,6 +630,9 @@ class DownloadManager:
             log.exception("download crashed: %s", link.url)
             self._fail(link, str(e), False)
         finally:
+            if reservation:
+                with self._lock:
+                    self._reserved_downloads.discard(reservation)
             self._persist()
 
     def _fail(self, link: Link, msg: str, transient: bool) -> None:

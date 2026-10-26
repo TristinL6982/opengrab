@@ -9,8 +9,8 @@ UI = SRC / "opengrab" / "ui" / "static"
 
 datas = [(str(UI), "ui/static")]
 binaries = []
-hiddenimports = ["webview", "pystray", "PIL", "curl_cffi", "yt_dlp", "ddddocr"]
-for package in ("yt_dlp", "ddddocr", "curl_cffi", "webview", "pystray"):
+hiddenimports = ["webview", "pystray", "PIL", "curl_cffi", "yt_dlp", "ddddocr", "py7zr", "rarfile", "opengrab.smoke", "opengrab.engine.archives", "opengrab.engine.packagizer"]
+for package in ("yt_dlp", "ddddocr", "curl_cffi", "webview", "pystray", "py7zr"):
     pkg_datas, pkg_bins, pkg_hidden = collect_all(package)
     datas += pkg_datas
     binaries += pkg_bins

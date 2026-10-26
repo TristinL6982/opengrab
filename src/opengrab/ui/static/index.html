@@ -27,6 +27,7 @@
       <button data-tab="linkgrabber" class="tab">LinkGrabber</button>
       <button data-tab="accounts" class="tab">Accounts</button>
       <button data-tab="filters" class="tab">Filters</button>
+      <button data-tab="packagizer" class="tab">Packagizer</button>
       <button data-tab="settings" class="tab">Settings</button>
       <button data-tab="terminal" class="tab">Terminal</button>
       <button data-tab="notifications" class="tab">Notifications</button>
@@ -170,6 +171,30 @@
       <div id="filters-list" class="linklist"></div>
     </section>
 
+    <!-- ============================ PACKAGIZER ========================== -->
+    <section id="tab-packagizer" class="tabpane">
+      <h2>Packagizer rules</h2>
+      <p class="hint">The first matching rule wins. Match a URL or filename with a glob or regex.
+      Templates support <code>{name}</code>, <code>{stem}</code>, <code>{ext}</code>, and <code>{host}</code>.
+      Subfolders stay inside the download directory. Existing files are kept and get a numbered filename.</p>
+      <div class="formrow">
+        <input id="pack-name" type="text" placeholder="rule name">
+        <input id="pack-pattern" type="text" placeholder="match, e.g. *.zip">
+        <select id="pack-pattern-type"><option value="glob">glob</option><option value="regex">regex</option></select>
+        <input id="pack-subdir" type="text" placeholder="target subfolder (optional)">
+        <input id="pack-template" type="text" placeholder="filename template (optional)">
+        <button id="btn-pack-add" class="primary">Add rule</button>
+      </div>
+      <div id="packagizer-list" class="linklist"></div>
+      <h2>Preview rule result</h2>
+      <div class="formrow">
+        <input id="pack-preview-url" type="text" placeholder="source URL">
+        <input id="pack-preview-name" type="text" placeholder="filename">
+        <button id="btn-pack-preview">Preview</button>
+      </div>
+      <pre id="pack-preview-result" class="terminal-output" style="min-height:5em"></pre>
+    </section>
+
     <!-- ============================ SETTINGS =========================== -->
     <section id="tab-settings" class="tabpane">
       <h2>Settings</h2>
@@ -206,12 +231,12 @@
         <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> auto-start after grab</label>
         <label class="check"><input id="set-clipboard_monitor_enabled" type="checkbox"> monitor copied links (review before adding)</label>
         <label class="check"><input id="set-terminal_enabled" type="checkbox"> enable authenticated web terminal (runs local commands)</label>
-        <label class="check"><input id="set-auto_extract_archives" type="checkbox"> extract ZIP/TAR archives after download</label>
+        <label class="check"><input id="set-auto_extract_archives" type="checkbox"> extract ZIP/7z/TAR archives after download</label>
         <label>archive extraction file limit
           <input id="set-archive_max_files" type="number" min="1" max="100000"></label>
         <label>archive expanded-size limit (GiB)
           <input id="set-archive_max_expanded_gib" type="number" min="1" max="1024"></label>
-        <label>optional ZIP password list file (one password per line)
+        <label>optional archive password list file (ZIP/7z/RAR; one per line)
           <input id="set-archive_password_file" type="text"></label>
       </div>
       <div class="formrow">

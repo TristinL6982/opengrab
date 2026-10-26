@@ -93,6 +93,28 @@ def main() -> int:
               and "example.invalid" not in diagnostics.decode()
               and "plugin_ids" in diagnostic_data)
         settings.proxy = ""
+        _, _, added_rule_raw = request("/api/packagizer", "POST", {
+            "name": "zip folder", "pattern": "*.zip", "pattern_type": "glob",
+            "target_subdir": "archives/{host}",
+            "filename_template": "{stem}-saved.{ext}",
+        })
+        pack_rule = json.loads(added_rule_raw)
+        _, _, preview_raw = request("/api/packagizer/preview", "POST", {
+            "url": "https://example.com/a.zip", "filename": "a.zip"})
+        preview = json.loads(preview_raw)
+        check("Packagizer rule CRUD and preview",
+              preview["matched"] and preview["relative_path"] ==
+              "archives/example.com/a-saved.zip")
+        request(f"/api/packagizer/{pack_rule['id']}", "DELETE")
+        _, _, removed_rules = request("/api/packagizer")
+        check("Packagizer rules persist and delete", json.loads(removed_rules) == [])
+        try:
+            request("/api/packagizer", "POST", {
+                "pattern": "*.zip", "target_subdir": "../outside"})
+            invalid_rule_rejected = False
+        except urllib.error.HTTPError as exc:
+            invalid_rule_rejected = exc.code == 400
+        check("Packagizer traversal rule rejected", invalid_rule_rejected)
         request("/api/clipboard", "POST", {"text": "fixture clipboard"})
         _, _, clipboard = request("/api/clipboard")
         check("clipboard API contract (mock backend)",

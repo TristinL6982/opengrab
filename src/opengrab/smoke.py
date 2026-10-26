@@ -7,6 +7,7 @@ import os
 import tempfile
 import time
 import urllib.request
+import py7zr
 from pathlib import Path
 
 
@@ -71,7 +72,18 @@ def run_smoke_test(timeout: int = 120) -> bool:
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
         if digest != SMOKE_SHA256:
             raise RuntimeError(f"smoke download checksum mismatch: {digest}")
-        print("OpenGrab smoke test passed (plugins, API, UI assets, download, SHA-256).")
+        from .engine.archives import extract_archive
+        archive_source = downloads / "archive-smoke.txt"
+        archive_source.write_text("7z smoke verification", encoding="utf-8")
+        archive_path = downloads / "archive-smoke.7z"
+        with py7zr.SevenZipFile(archive_path, "w") as archive:
+            archive.write(archive_source, archive_source.name)
+        archive_source.unlink()
+        extraction = extract_archive(archive_path)
+        extracted_file = Path(extraction["path"]) / "archive-smoke.txt"
+        if extracted_file.read_text(encoding="utf-8") != "7z smoke verification":
+            raise RuntimeError("7z archive smoke check failed")
+        print("OpenGrab smoke test passed (plugins, API, UI, download, SHA-256, 7z).")
         return True
     except Exception as exc:
         print(f"OpenGrab smoke test failed: {exc}")

@@ -876,6 +876,8 @@ def _make_handler(srv: ApiServer):
                 return self._json(mgr.accounts.snapshot())
             if p == "/api/filters":
                 return self._json(mgr.filters.snapshot())
+            if p == "/api/packagizer":
+                return self._json(mgr.settings.packagizer_rules)
             if p == "/api/plugins/scan":
                 n = mgr.registry.scan(force=True)
                 return self._json({"scanned": n})
@@ -887,6 +889,28 @@ def _make_handler(srv: ApiServer):
             import re
             if p == "/api/terminal":
                 return self._terminal_start(body)
+            if p == "/api/packagizer/preview":
+                from .engine.packagizer import plan_packagizer
+                try:
+                    return self._json(plan_packagizer(
+                        mgr.settings.packagizer_rules,
+                        str(body.get("url", "")),
+                        str(body.get("filename", "")),
+                        mgr.settings.download_dir,
+                    ))
+                except Exception as exc:
+                    return self._err(400, str(exc))
+            if p == "/api/packagizer":
+                from .engine.packagizer import PackagizerRule
+                if len(mgr.settings.packagizer_rules) >= 100:
+                    return self._err(400, "at most 100 Packagizer rules are supported")
+                try:
+                    rule = PackagizerRule.model_validate(body)
+                except Exception as exc:
+                    return self._err(400, str(exc))
+                mgr.settings.packagizer_rules.append(rule.model_dump())
+                mgr.settings.save()
+                return self._json(rule.model_dump(), 201)
             terminal_stop = re.fullmatch(r"/api/terminal/([a-f0-9]+)/stop", p)
             if terminal_stop:
                 return self._terminal_stop(terminal_stop.group(1))
@@ -1035,6 +1059,17 @@ def _make_handler(srv: ApiServer):
             m = re.fullmatch(r"/api/filters/([^/]+)", p)
             if m:
                 mgr.filters.remove(m.group(1))
+                return self._json({"ok": True})
+            m = re.fullmatch(r"/api/packagizer/([^/]+)", p)
+            if m:
+                before = len(mgr.settings.packagizer_rules)
+                mgr.settings.packagizer_rules = [
+                    item for item in mgr.settings.packagizer_rules
+                    if str(item.get("id", "")) != m.group(1)
+                ]
+                if before == len(mgr.settings.packagizer_rules):
+                    return self._err(404, "Packagizer rule not found")
+                mgr.settings.save()
                 return self._json({"ok": True})
             self._err(404, "unknown endpoint")
 
