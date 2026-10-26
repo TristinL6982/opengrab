@@ -31,16 +31,23 @@ Run standalone:  python -m opengrab.server  [--port N] [--host H] [--token T]
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import queue
+import shutil
 import socket
+import ssl
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 import uuid
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from .engine.manager import DownloadManager
 from .settings import Settings, app_data_dir
@@ -88,6 +95,19 @@ class ApiServer:
         self.manager = manager
         self.host = host
         self.port = port
+        raw_base_path = str(settings.base_path or "").strip()
+        if raw_base_path in ("", "/"):
+            self.base_path = ""
+        else:
+            if (not raw_base_path.startswith("/") or "\\" in raw_base_path
+                    or any(ord(char) < 32 for char in raw_base_path)
+                    or "?" in raw_base_path or "#" in raw_base_path):
+                raise ValueError("base_path must be a URL path beginning with '/'")
+            segments = [part for part in raw_base_path.split("/") if part]
+            if any(part in (".", "..") for part in segments):
+                raise ValueError("base_path cannot contain dot segments")
+            self.base_path = "/" + "/".join(segments)
+        self.settings.base_path = self.base_path
         # -- token ---------------------------------------------------------
         self.token = token or settings.api_token or \
             uuid.uuid4().hex + uuid.uuid4().hex[:8]
@@ -100,11 +120,30 @@ class ApiServer:
         # -- SSE fanout ----------------------------------------------------
         self._clients: list["queue.Queue"] = []
         self._clients_lock = threading.Lock()
+        self._notifications = deque(maxlen=200)
+        self._notifications_lock = threading.Lock()
         prev = manager.on_change
 
         def fanout(kind: str, payload) -> None:
             msg = json.dumps({"kind": kind, "payload": payload},
                              default=str)
+            status = payload.get("status") if isinstance(payload, dict) else ""
+            if kind in {"finished", "error"} or status in {
+                    "captcha", "login", "paywall"}:
+                title = ""
+                if isinstance(payload, dict):
+                    title = (payload.get("title") or payload.get("filename")
+                             or "").strip()
+                label = kind if kind in {"finished", "error"} else status
+                notice = {
+                    "id": uuid.uuid4().hex,
+                    "kind": label,
+                    "link_id": payload.get("id") if isinstance(payload, dict) else None,
+                    "message": f"{title}: {label}" if title else f"Download {label}",
+                    "timestamp": time.time(),
+                }
+                with self._notifications_lock:
+                    self._notifications.append(notice)
             with self._clients_lock:
                 dead = []
                 for q in self._clients:
@@ -153,10 +192,40 @@ class ApiServer:
 
     # ---------------------------------------------------------------- auth
     def authorize(self, client_ip: str, headers) -> bool:
-        if client_ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+        forwarded = (headers.get("X-Forwarded-For") or headers.get("Forwarded")
+                     or headers.get("X-Forwarded-Proto"))
+        if (client_ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+                and not forwarded):
             return True
         h = headers.get("Authorization", "")
         return h == f"Bearer {self.token}"
+
+    @staticmethod
+    def remote_transport_allowed(client_ip: str, headers,
+                                 is_tls: bool = False) -> bool:
+        """Allow localhost HTTP or HTTPS connections, including TLS proxies.
+
+        This HTTP server does not terminate TLS itself. A loopback reverse
+        proxy must explicitly mark its encrypted public scheme and client IP.
+        Direct non-local HTTP, including requests with spoofed forwarding
+        headers, is rejected.
+        """
+        if is_tls:
+            return True
+        local = client_ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+        if not local:
+            return False
+        forwarded = (headers.get("X-Forwarded-For") or headers.get("Forwarded")
+                     or headers.get("X-Forwarded-Proto"))
+        if not forwarded:
+            return True
+        proto = (headers.get("X-Forwarded-Proto") or "").lower()
+        if not proto:
+            forwarded_value = headers.get("Forwarded", "")
+            proto = next((part.split("=", 1)[1].strip(' "').lower()
+                          for part in forwarded_value.split(";")
+                          if part.strip().lower().startswith("proto=")), "")
+        return proto == "https"
 
 
 # ------------------------------------------------------------------ handler
@@ -174,7 +243,7 @@ def _make_handler(srv: ApiServer):
         def _cors(self):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods",
-                             "GET, POST, DELETE, OPTIONS")
+                             "GET, POST, PUT, DELETE, OPTIONS")
             self.send_header("Access-Control-Allow-Headers",
                              "Content-Type, Authorization")
 
@@ -210,6 +279,120 @@ def _make_handler(srv: ApiServer):
             ip = self.client_address[0]
             return srv.authorize(ip, self.headers)
 
+        def _transport_allowed(self) -> bool:
+            return srv.remote_transport_allowed(
+                self.client_address[0], self.headers,
+                isinstance(self.connection, ssl.SSLSocket),
+            )
+
+        def _route_path(self, path: str) -> str:
+            prefix = srv.base_path
+            if prefix and (path == prefix or path.startswith(prefix + "/")):
+                path = path[len(prefix):] or "/"
+            return path.rstrip("/") or "/"
+
+        def _download_root(self) -> Path:
+            root = Path(mgr.settings.download_dir).expanduser().resolve()
+            root.mkdir(parents=True, exist_ok=True)
+            return root
+
+        def _safe_file(self, relative: str, *, must_exist: bool = False) -> Path:
+            if not isinstance(relative, str) or "\x00" in relative:
+                raise ValueError("invalid path")
+            root = self._download_root()
+            rel = Path(relative)
+            if rel.is_absolute():
+                raise ValueError("absolute paths are not allowed")
+            result = (root / rel).resolve()
+            try:
+                result.relative_to(root)
+            except ValueError as exc:
+                raise ValueError("path is outside the download directory") from exc
+            if must_exist and not result.exists():
+                raise FileNotFoundError("file or directory not found")
+            return result
+
+        def _serve_file(self, file_path: Path, *, attachment: bool) -> None:
+            size = file_path.stat().st_size
+            start, end, code = 0, size - 1, 200
+            range_header = self.headers.get("Range", "")
+            if range_header:
+                import re
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+                if not match or (not match.group(1) and not match.group(2)):
+                    return self._send(416, b"", extra={"Content-Range": f"bytes */{size}"})
+                if match.group(1):
+                    start = int(match.group(1))
+                    end = int(match.group(2)) if match.group(2) else size - 1
+                else:
+                    suffix = int(match.group(2))
+                    start = max(0, size - suffix)
+                if start >= size or end < start:
+                    return self._send(416, b"", extra={"Content-Range": f"bytes */{size}"})
+                end = min(end, size - 1)
+                code = 206
+            length = max(0, end - start + 1)
+            ctype = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+            headers = {
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(length),
+            }
+            if code == 206:
+                headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+            if attachment:
+                safe_name = "".join(
+                    "_" if ord(char) < 32 or ord(char) == 127 or char in '"\\' else char
+                    for char in file_path.name
+                )
+                headers["Content-Disposition"] = (
+                    f"attachment; filename=\"{safe_name}\"; "
+                    f"filename*=UTF-8''{quote(file_path.name)}"
+                )
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(length))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self._cors()
+            if code == 206:
+                self.send_header("Content-Range", headers["Content-Range"])
+            if attachment:
+                self.send_header("Content-Disposition", headers["Content-Disposition"])
+            self.end_headers()
+            with file_path.open("rb") as stream:
+                stream.seek(start)
+                remaining = length
+                while remaining:
+                    chunk = stream.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+
+        def _file_listing(self, relative: str):
+            path = self._safe_file(relative, must_exist=True)
+            if not path.is_dir():
+                return self._err(400, "path is not a directory")
+            root = self._download_root()
+            items = []
+            for child in sorted(path.iterdir(), key=lambda item: item.name.casefold()):
+                try:
+                    resolved = self._safe_file(str(child.relative_to(root)))
+                    info = resolved.stat()
+                except (OSError, ValueError, RuntimeError):
+                    continue
+                items.append({
+                    "name": child.name,
+                    "path": resolved.relative_to(root).as_posix(),
+                    "type": "directory" if resolved.is_dir() else "file",
+                    "size": 0 if resolved.is_dir() else info.st_size,
+                    "modified": info.st_mtime,
+                })
+            return self._json({
+                "path": path.relative_to(root).as_posix() if path != root else "",
+                "items": items,
+            })
+
         # -- verbs ---------------------------------------------------------
         def do_OPTIONS(self):
             self.send_response(204)
@@ -217,16 +400,33 @@ def _make_handler(srv: ApiServer):
             self.end_headers()
 
         def do_GET(self):
+            if not self._transport_allowed():
+                return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
-            p = u.path.rstrip("/") or "/"
+            if srv.base_path and u.path == srv.base_path:
+                self.send_response(308)
+                self.send_header("Location", srv.base_path + "/")
+                self.end_headers()
+                return
+            p = self._route_path(u.path)
             if p.startswith("/api/"):
-                self._api_get(u, p, parse_qs(u.query))
+                try:
+                    self._api_get(u, p, parse_qs(u.query))
+                except FileNotFoundError as e:
+                    self._err(404, str(e))
+                except (ValueError, OSError, subprocess.SubprocessError) as e:
+                    self._err(400, str(e))
+                except Exception as e:  # noqa: BLE001
+                    log.exception("GET %s failed", p)
+                    self._err(500, str(e))
             else:
                 self._static(p)
 
         def do_POST(self):
+            if not self._transport_allowed():
+                return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
-            p = u.path.rstrip("/")
+            p = self._route_path(u.path)
             if not p.startswith("/api/"):
                 return self._err(404, "not found")
             if not self._authorized():
@@ -238,8 +438,10 @@ def _make_handler(srv: ApiServer):
                 self._err(500, str(e))
 
         def do_DELETE(self):
+            if not self._transport_allowed():
+                return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
-            p = u.path.rstrip("/")
+            p = self._route_path(u.path)
             if not p.startswith("/api/") or not self._authorized():
                 return self._err(403 if p.startswith("/api/") else 404,
                                  "forbidden")
@@ -247,6 +449,172 @@ def _make_handler(srv: ApiServer):
                 self._api_delete(p)
             except Exception as e:  # noqa: BLE001
                 self._err(500, str(e))
+
+        def do_PUT(self):
+            if not self._transport_allowed():
+                return self._err(403, "remote access requires HTTPS")
+            u = urlparse(self.path)
+            if self._route_path(u.path) != "/api/files/upload":
+                return self._err(404, "not found")
+            if not self._authorized():
+                return self._err(401, "unauthorized: send Bearer token")
+            try:
+                self._upload_file(parse_qs(u.query))
+            except (ValueError, FileNotFoundError, FileExistsError, OSError) as e:
+                self._err(400, str(e))
+
+        def _clipboard(self, value: Optional[str] = None):
+            if sys.platform == "win32":
+                import ctypes
+                from ctypes import wintypes
+                user32 = ctypes.WinDLL("user32", use_last_error=True)
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                user32.OpenClipboard.argtypes = [wintypes.HWND]
+                user32.OpenClipboard.restype = wintypes.BOOL
+                user32.CloseClipboard.restype = wintypes.BOOL
+                user32.GetClipboardData.argtypes = [wintypes.UINT]
+                user32.GetClipboardData.restype = wintypes.HANDLE
+                kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalLock.restype = ctypes.c_void_p
+                kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalUnlock.restype = wintypes.BOOL
+                if not user32.OpenClipboard(None):
+                    raise OSError("Windows clipboard is busy")
+                try:
+                    if value is None:
+                        handle = user32.GetClipboardData(13)  # CF_UNICODETEXT
+                        if not handle:
+                            return ""
+                        pointer = kernel32.GlobalLock(handle)
+                        if not pointer:
+                            raise OSError("could not read Windows clipboard")
+                        try:
+                            return ctypes.wstring_at(pointer)
+                        finally:
+                            kernel32.GlobalUnlock(handle)
+                    user32.EmptyClipboard.restype = wintypes.BOOL
+                    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+                    kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+                    kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+                    kernel32.GlobalFree.restype = wintypes.HGLOBAL
+                    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+                    user32.SetClipboardData.restype = wintypes.HANDLE
+                    raw = value.encode("utf-16-le") + b"\0\0"
+                    handle = kernel32.GlobalAlloc(0x0002, len(raw))  # GMEM_MOVEABLE
+                    if not handle:
+                        raise OSError("could not allocate clipboard memory")
+                    pointer = kernel32.GlobalLock(handle)
+                    if not pointer:
+                        kernel32.GlobalFree(handle)
+                        raise OSError("could not lock clipboard memory")
+                    ctypes.memmove(pointer, raw, len(raw))
+                    kernel32.GlobalUnlock(handle)
+                    if not user32.EmptyClipboard() or not user32.SetClipboardData(13, handle):
+                        kernel32.GlobalFree(handle)
+                        raise OSError("could not write Windows clipboard")
+                    return None
+                finally:
+                    user32.CloseClipboard()
+
+            if sys.platform == "darwin":
+                command = ["pbpaste"] if value is None else ["pbcopy"]
+            elif os.environ.get("WAYLAND_DISPLAY"):
+                command = ["wl-paste", "-n"] if value is None else ["wl-copy"]
+            elif shutil.which("xclip"):
+                command = ["xclip", "-selection", "clipboard", "-out"] if value is None else ["xclip", "-selection", "clipboard", "-in"]
+            elif shutil.which("xsel"):
+                command = ["xsel", "--clipboard", "--output"] if value is None else ["xsel", "--clipboard", "--input"]
+            else:
+                raise OSError("no supported clipboard utility is available")
+            proc = subprocess.run(
+                command, input=None if value is None else value.encode("utf-8"),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+                check=True,
+            )
+            return proc.stdout.decode("utf-8", "replace") if value is None else None
+
+        def _upload_file(self, query: dict) -> None:
+            relative = (query.get("path") or [""])[0]
+            target = self._safe_file(relative)
+            if target == self._download_root() or not target.parent.is_dir():
+                raise ValueError("upload path must name a file in an existing directory")
+            try:
+                length = int(self.headers.get("Content-Length") or "-1")
+            except ValueError as exc:
+                raise ValueError("invalid Content-Length") from exc
+            if length < 0:
+                raise ValueError("Content-Length is required")
+            overwrite = (query.get("overwrite") or ["false"])[0].lower() == "true"
+            if target.exists() and not overwrite:
+                raise FileExistsError("destination already exists")
+            fd, temporary = tempfile.mkstemp(prefix=".opengrab-upload-",
+                                             dir=str(target.parent))
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    remaining = length
+                    while remaining:
+                        chunk = self.rfile.read(min(64 * 1024, remaining))
+                        if not chunk:
+                            raise OSError("upload ended before Content-Length bytes arrived")
+                        output.write(chunk)
+                        remaining -= len(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if overwrite:
+                    os.replace(temporary, target)
+                else:
+                    try:
+                        os.link(temporary, target)
+                    except (NotImplementedError, OSError) as link_error:
+                        if isinstance(link_error, FileExistsError):
+                            raise
+                        target_fd = os.open(
+                            target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
+                        )
+                        try:
+                            with os.fdopen(target_fd, "wb") as destination, open(temporary, "rb") as source:
+                                shutil.copyfileobj(source, destination, 64 * 1024)
+                        except Exception:
+                            try:
+                                target.unlink()
+                            except OSError:
+                                pass
+                            raise
+                self._json({"ok": True, "path": target.relative_to(self._download_root()).as_posix()}, 201)
+            finally:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
+
+        def _files_post(self, body: dict) -> None:
+            action = str(body.get("action", ""))
+            relative = str(body.get("path", ""))
+            target = self._safe_file(relative, must_exist=action in {"delete", "rename"})
+            root = self._download_root()
+            if action == "mkdir":
+                if target == root:
+                    raise ValueError("choose a directory name")
+                target.mkdir(parents=True, exist_ok=False)
+            elif action == "delete":
+                if target == root:
+                    raise ValueError("the download directory itself cannot be deleted")
+                if target.is_dir():
+                    target.rmdir()  # non-empty directories are deliberately not recursive
+                else:
+                    target.unlink()
+            elif action == "rename":
+                if target == root:
+                    raise ValueError("the download directory itself cannot be renamed")
+                destination = self._safe_file(str(body.get("to", "")))
+                if destination == root or destination.exists():
+                    raise FileExistsError("destination already exists or is invalid")
+                if not destination.parent.is_dir():
+                    raise FileNotFoundError("destination directory not found")
+                target.rename(destination)
+            else:
+                return self._err(400, "action must be mkdir, delete, or rename")
+            return self._json({"ok": True})
 
         # -- api -----------------------------------------------------------
         def _link(self, lid: str):
@@ -257,7 +625,7 @@ def _make_handler(srv: ApiServer):
             return l
 
         def _api_get(self, u, p: str, q: dict):
-            if p == "/api/ping":
+            if p in ("/api/ping", "/api/health"):
                 return self._json({"ok": True, "app": "OpenGrab",
                                    "version": "0.1.0"})
             if not self._authorized():
@@ -273,6 +641,26 @@ def _make_handler(srv: ApiServer):
                 return self._json({"image": l.captcha_image})
             if p == "/api/stats":
                 return self._json(mgr.stats())
+            if p == "/api/files":
+                return self._file_listing((q.get("path") or [""])[0])
+            if p == "/api/files/download" or p == "/api/audio":
+                file_path = self._safe_file(
+                    (q.get("path") or [""])[0], must_exist=True
+                )
+                if not file_path.is_file():
+                    return self._err(404, "file not found")
+                return self._serve_file(file_path,
+                                        attachment=p == "/api/files/download")
+            if p == "/api/clipboard":
+                return self._json({"text": self._clipboard()})
+            if p == "/api/notifications":
+                with srv._notifications_lock:
+                    return self._json(list(srv._notifications))
+            if p == "/api/captcha-test":
+                return self._json({
+                    "selected": mgr.settings.captcha_provider,
+                    "providers": mgr.captcha_chain.status(),
+                })
             if p == "/api/settings":
                 d = mgr.settings.model_dump()
                 d["api_token"] = srv.token
@@ -345,6 +733,26 @@ def _make_handler(srv: ApiServer):
                 return self._json(out)
             if p == "/api/clear-finished":
                 return self._json({"cleared": mgr.clear_finished()})
+            if p == "/api/notifications/clear":
+                with srv._notifications_lock:
+                    cleared = len(srv._notifications)
+                    srv._notifications.clear()
+                return self._json({"cleared": cleared})
+            if p == "/api/files":
+                try:
+                    return self._files_post(body)
+                except FileNotFoundError as e:
+                    return self._err(404, str(e))
+                except (ValueError, FileExistsError, OSError) as e:
+                    return self._err(400, str(e))
+            if p == "/api/clipboard":
+                text = body.get("text", "")
+                if not isinstance(text, str):
+                    return self._err(400, "text must be a string")
+                if len(text) > 1_000_000:
+                    return self._err(413, "clipboard text exceeds 1 MB")
+                self._clipboard(text)
+                return self._json({"ok": True})
             if p == "/api/settings":
                 for k, v in body.items():
                     if hasattr(mgr.settings, k) and k != "api_token":
@@ -435,6 +843,15 @@ def _make_handler(srv: ApiServer):
                 return self._err(404, "no UI assets found (ui/static missing)")
             ctype = MIME.get(safe.suffix.lower(), "application/octet-stream")
             data = safe.read_bytes()
+            if safe.name == "index.html" and srv.base_path:
+                page = data.decode("utf-8")
+                bootstrap = ("<script>window.OPENGRAB_BASE_PATH="
+                             + json.dumps(srv.base_path) + ";</script>")
+                data = page.replace("</head>", bootstrap + "</head>", 1).encode("utf-8")
+            elif safe.name == "manifest.webmanifest" and srv.base_path:
+                manifest = json.loads(data)
+                manifest["start_url"] = srv.base_path + "/"
+                data = json.dumps(manifest).encode("utf-8")
             self._send(200, data, ctype,
                        extra={"Cache-Control": "max-age=60"})
 

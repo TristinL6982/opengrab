@@ -10,8 +10,12 @@
 The editable install and CLI options are now verified in `.venv`. The smoke
 check verifies plugin discovery, API ping, and a real downloaded file's size
 and SHA-256. A headless CLI process served `/api/ping` on the requested local
-bind/port. This does not complete the product: major API, GUI, UI, packaging,
-Docker, documentation, and compatibility requirements remain open.
+bind/port. Since then the API core added health, notifications, CAPTCHA
+provider diagnostics, sandboxed file operations, clipboard routes, audio byte
+ranges, proxy-path routing, and HTTPS-proxy enforcement. `tests/e2e_api_m3.py`
+passes 19 checks. The Windows clipboard routes were not tested against the
+live clipboard. This does not complete the product: GUI, UI, packaging, Docker,
+documentation, and compatibility requirements remain open.
 
 ## 1. Overall goal
 
@@ -84,18 +88,18 @@ login + paywall handling, filters, accounts. Ship as platform builds
 - **GUI:** `app.py` now serves the UI in pywebview, but native window startup
   has not been verified. Tray and visible, user-toggleable clipboard
   Click'n'Load capture remain unimplemented.
-- **API gaps vs spec §2:** `/api/health` (alias of `/api/ping`),
-  `/api/captcha-test`, `/api/notifications`, `/api/files` (file manager
-  list/mkdir/delete/rename/download/upload), `/api/terminal`,
-  `/api/clipboard`, `/api/audio` (Range streaming), base_path +
-  reverse-proxy header support. Multi-user auth (`/api/auth/users`)
-  intentionally OUT for v1 per decision #2.
-- **UI gaps:** no notifications tab, no audio player, no PWA PNG icons
-  (svg only).
+- **API remaining:** `/api/terminal` is not implemented. The server rejects
+  direct non-local HTTP and accepts proxied access only when the loopback proxy
+  marks HTTPS; direct TLS termination is not implemented. Clipboard routes
+  need validation without reading or changing the live desktop clipboard.
+  Multi-user auth is intentionally OUT for v1 per decision #2.
+- **UI gaps:** no notifications, file manager, clipboard, audio, or terminal
+  panels; no PWA PNG icons (svg only).
 - **Packaging:** no PyInstaller spec/build script → no `OpenGrab.exe`;
   no `Dockerfile`/`docker-compose.yml`/`.env.example` (and unbuildable here —
   no docker CLI); no `README.md`.
-- **Unit tests:** none (only e2e + `tests/probe_curl.py` probe).
+- **Tests:** `tests/e2e_api.py` (16/16) and `tests/e2e_api_m3.py` (19/19);
+  focused unit tests for downloader math and other modules remain absent.
 - **Default port** is now 5678 in settings and server defaults. An existing
   saved user setting can still select a different port.
 - `plugins/builtin/ytbridge.py` has a known dead loop in
@@ -146,15 +150,15 @@ Uncommitted (all part of the verified milestone, safe to commit):
 | `.venv\Scripts\python.exe -m opengrab --version/--help` | **PASS** |
 | `.venv\Scripts\python.exe -m opengrab --smoke-test` | **PASS** — plugin scan, API ping, verified download |
 | Headless CLI on explicit localhost bind/port → `/api/ping` | **PASS** |
+| `.venv\Scripts\python.exe tests\e2e_api_m3.py` | **19/19 PASS** — API, file path safety, range streaming, proxy and base path |
 | UI JS ↔ server API endpoint audit (grep) | all calls match |
 | Direct engine probe (mdurl URL → finished in ~3 s) | ok (earlier this session) |
 
 ## 8. Next concrete steps (resume order)
 
-0. **M3 — API completeness:** `/api/health` alias, `/api/notifications`,
-   `/api/captcha-test`, `/api/files`, `/api/clipboard`, `/api/audio`,
-   base_path + X-Forwarded-* handling. Keep token enforcement for all
-   non-local callers (decisions #2/#5).
+0. **M3 follow-up:** determine whether to implement the requested terminal
+   parity; if implemented, keep it disabled until explicitly enabled and
+   require the API token even for local requests.
 1. **M4 — GUI:** validate the pywebview window; add pystray
    tray, Click'n'Load clipboard watcher — watcher must be visible in UI and
    user-toggleable (decision #3).

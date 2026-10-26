@@ -14,6 +14,8 @@ const S = {
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const BASE_PATH = String(window.OPENGRAB_BASE_PATH || "").replace(/\/$/, "");
+const withBasePath = path => BASE_PATH + (path.startsWith("/") ? path : "/" + path);
 
 /* ============================================================ utils */
 function esc(s) {
@@ -51,7 +53,7 @@ async function api(path, method = "GET", body) {
   const headers = {};
   if (body) headers["Content-Type"] = "application/json";
   if (S.token) headers["Authorization"] = "Bearer " + S.token;
-  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(withBasePath(path), { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 401) {
     showAuthBanner();
     throw new Error("unauthorized");
@@ -73,7 +75,7 @@ function showAuthBanner() {
 let sseSource = null, sseRetry = 0;
 function connectSSE() {
   if (sseSource) sseSource.close();
-  sseSource = new EventSource("/api/events");
+  sseSource = new EventSource(withBasePath("/api/events"));
   sseSource.onopen = () => {
     sseRetry = 0;
     S.conn = "live";
@@ -553,8 +555,8 @@ async function loadSettings() {
     $("#set-confirm_delete").checked = !!s.confirm_delete;
     $("#token-display").textContent = s.api_token || "(local only)";
     $("#lan-url").textContent = s.api_host === "127.0.0.1"
-      ? "http://<your-ip>:" + s.api_port + "/#token=" + s.api_token
-      : "http://" + s.api_host + ":" + s.api_port + "/";
+      ? "http://<your-ip>:" + s.api_port + BASE_PATH + "/#token=" + s.api_token
+      : location.origin + BASE_PATH + "/";
   } catch { /* banner shown on 401 */ }
 }
 
@@ -608,7 +610,7 @@ $("#auth-save").addEventListener("click", () => {
   connectSSE();
   // PWA service worker (best effort; http contexts only register on https/localhost)
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register(withBasePath("/sw.js")).catch(() => {});
   }
   if (location.hash.includes("token=")) history.replaceState(null, "", location.pathname);
   setInterval(() => { renderGraph(); }, 1000);

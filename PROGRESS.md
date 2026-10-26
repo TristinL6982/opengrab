@@ -9,13 +9,15 @@ discovery, downloads a 9,979-byte fixture, and checks its SHA-256. A headless
 CLI instance also served `/api/ping` on an explicitly selected bind address and
 port. Default port values are now 5678. `--data-dir` selects an isolated data
 directory; `OPENGRAB_DATA_DIR`, `OPENGRAB_BIND`/`OPENGRAB_API_HOST`, and
-`OPENGRAB_PORT`/`OPENGRAB_API_PORT` are supported.
+`OPENGRAB_PORT`/`OPENGRAB_API_PORT`, and `OPENGRAB_BASE_PATH` are supported.
 
-This completes the CLI milestone only. OpenGrab is **not production-ready**:
-the file manager, clipboard and audio APIs, notifications, tray/clipboard
-capture, Docker deployment, native builds, documentation, and other spec items
-remain incomplete or unverified. See the latest section in `PROJECT_STATUS.md`
-and `PROJECT_SPEC.md` for scope and acceptance requirements.
+**M3 API core is implemented and verified** with 19 endpoint checks: health
+alias, CAPTCHA diagnostics, notifications, download-folder-contained file
+operations, range streaming, base-path routing, and HTTPS-proxy/auth checks.
+Clipboard endpoints are implemented but not exercised against the live desktop
+clipboard. OpenGrab is **not production-ready**: tray/clipboard capture, UI
+completion, Docker, native builds, documentation, and other requirements remain
+incomplete or unverified. See `PROJECT_STATUS.md` and `PROJECT_SPEC.md`.
 
 > **Status note:** This file is an older handoff and its DONE/NOT YET WRITTEN
 > lists are stale. The engine, API server, and UI files now exist in the
@@ -81,10 +83,9 @@ Docker image (feature parity requested vs the JD2 docker docs).
   (`ie._match_valid_url.__code__ and []` hack) — clean it up on resume.
 
 ## Remaining work (resume order)
-1. **M3 — API completeness:** `/api/health` alias, `/api/notifications`,
-   `/api/captcha-test`, `/api/files`, `/api/clipboard`, `/api/audio`,
-   base_path + X-Forwarded-* handling. Keep token enforcement for all
-   non-local callers (decisions #2/#5).
+1. **M3 — API remaining:** decide whether JD2-style terminal access is still
+   required; if so, implement it opt-in and token-authenticated. Clipboard
+   routes need platform validation without overwriting the live clipboard.
 2. **M4 — GUI:** validate the native pywebview window; add pystray and the
    visible, user-toggleable Click'n'Load clipboard watcher (decision #3).
 3. **M5 — UI completion:** notifications tab, audio player, PWA PNG icons.

@@ -39,6 +39,8 @@ def main(argv=None) -> int:
     if args.data_dir:
         os.environ["OPENGRAB_DATA_DIR"] = args.data_dir
     settings = load_settings()
+    if os.environ.get("OPENGRAB_BASE_PATH") is not None:
+        settings.base_path = os.environ["OPENGRAB_BASE_PATH"]
     host = (args.bind or os.environ.get("OPENGRAB_BIND")
             or os.environ.get("OPENGRAB_API_HOST") or settings.api_host)
     try:

@@ -1,14 +1,16 @@
 /* OpenGrab service worker — cache-first for static UI assets.
    API calls always go to the network (never cached). */
 const CACHE = "opengrab-ui-v1";
+const SCOPE = new URL("./", self.registration.scope);
 const ASSETS = [
-  "/",
-  "/index.html",
-  "/style.css",
-  "/app.js",
-  "/opengrab.svg",
-  "/manifest.webmanifest",
-];
+  "",
+  "index.html",
+  "style.css",
+  "app.js",
+  "opengrab.svg",
+  "manifest.webmanifest",
+].map((path) => new URL(path, SCOPE).href);
+const API_PREFIX = new URL("api/", SCOPE).pathname;
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
@@ -26,7 +28,7 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
-  if (url.pathname.startsWith("/api/")) return; // never cache API
+  if (url.pathname.startsWith(API_PREFIX)) return; // never cache API
   e.respondWith(
     caches.match(e.request).then((hit) => {
       if (hit) return hit;

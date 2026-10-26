@@ -78,6 +78,7 @@ class Settings(BaseModel):
     api_host: str = "127.0.0.1"
     api_port: int = 5678
     api_token: str = ""
+    base_path: str = ""             # reverse-proxy path prefix, e.g. /opengrab
 
     # maintenance
     confirm_delete: bool = True
