@@ -82,6 +82,12 @@ class Settings(BaseModel):
     terminal_enabled: bool = False  # shell API is opt-in and always token-gated
     clipboard_monitor_enabled: bool = False
 
+    # Password search remains opt-in and uses only a user-selected local file.
+    auto_extract_archives: bool = True
+    archive_max_files: int = 10000
+    archive_max_expanded_gib: int = 16
+    archive_password_file: str = ""
+
     # maintenance
     confirm_delete: bool = True
 

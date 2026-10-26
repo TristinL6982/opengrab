@@ -256,6 +256,7 @@ function linkRow(l, showStatus = true) {
       ${l.status === "error" && l.error ? `<div class="u" style="color:var(--err)">${esc(l.error)}</div>` : ""}
       ${l.status === "paywall" && l.paywall_note ? `<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>` : ""}
       ${l.status === "finished" && l.path ? `<div class="u" style="color:var(--ok)">${esc(l.path)}</div>` : ""}
+      ${l.extra?.archive_extraction ? `<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>` : ""}
     </div>
     <div class="c-size">${l.size ? humanBytes(l.size) : (l.filename ? "" : "—")}</div>
     <div class="c-speed">${l.status === "downloading" ? humanBytes(l.speed) + "/s" : "—"}</div>
@@ -630,7 +631,8 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "speed_limit_kbps", "retry_max", "impersonate", "proxy", "captcha_provider",
   "captcha_2captcha_key", "captcha_capmonster_key", "captcha_capsolver_key",
   "ua_rotation", "auto_start_after_grab", "clipboard_monitor_enabled",
-  "terminal_enabled"];
+  "terminal_enabled", "auto_extract_archives", "archive_max_files",
+  "archive_max_expanded_gib", "archive_password_file"];
 
 async function loadSettings() {
   try {
@@ -662,7 +664,8 @@ $("#btn-set-save").addEventListener("click", async () => {
     const el = $("#set-" + f);
     if (!el) continue;
     body[f] = el.type === "checkbox" ? el.checked
-      : ["max_parallel", "per_link_chunks", "speed_limit_kbps", "retry_max"].includes(f)
+      : ["max_parallel", "per_link_chunks", "speed_limit_kbps", "retry_max",
+        "archive_max_files", "archive_max_expanded_gib"].includes(f)
         ? +el.value : el.value;
   }
   body.confirm_delete = $("#set-confirm_delete").checked;

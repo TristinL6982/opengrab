@@ -46,6 +46,14 @@ scoped file operations, notifications, audio playback, and an opt-in web
 terminal. Terminal commands run with the OpenGrab process permissions, and
 require both the Settings toggle and the API bearer token.
 
+ZIP/CBZ and TAR-family files can be extracted after download. Extraction
+rejects traversal paths, links, excessive file counts, expanded sizes above
+the configured limit, and extreme ZIP compression ratios; it writes to a new
+folder and preserves the source archive. Encrypted ZIP password lookup is off
+unless you set a local password-list file in Settings. That file is read as
+UTF-8, with a 1 MiB / 1,000-entry limit; keep it private. RAR and 7z extraction
+are not available yet.
+
 ## Remote access and security
 
 Keep the default loopback binding for local use. Remote clients require the
@@ -87,8 +95,7 @@ and does not yet provide a full format/quality selection experience.
 
 ## Current limitations
 
-- ZIP/RAR/7z automatic extraction, configurable archive password search,
-  Packagizer rules, and router reconnect are not implemented.
+- RAR/7z extraction, Packagizer rules, and router reconnect are not implemented.
 - The requested maintained inventories of 110+ hosters, 300+ decryptors, and
   1,400+ router models are not present. Upstream extractor count is not
   compatibility evidence.

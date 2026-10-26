@@ -7,16 +7,16 @@
 
 ## Latest update — 2026-10-25: M3–M6 progress
 
-The latest verification is recorded in `PROGRESS.md`. M3 now passes 28 API
+The latest verification is recorded in `PROGRESS.md`. M3 now passes 29 API
 checks; the GUI lifecycle mock passes; the completed UI panels are syntax/API
 checked; and the PyInstaller onedir bundle passes packaged `--version`, plugin
 discovery, and the real-download `--smoke-test`. Native WebView2/tray GUI
 interaction has not been manually run. Docker files are drafted, but Docker is
 not installed and remains unverified. The original M2 snapshot below is
 historical and its later checklist is stale. The project remains far from the
-full `PROJECT_SPEC.md`: archives, Packagizer, router reconnect, browser
-capture, broad independently verified plugin catalogs, and non-Windows builds
-remain missing.
+full `PROJECT_SPEC.md`: ZIP/CBZ and TAR-family extraction are implemented with
+safety limits, but RAR/7z, Packagizer, router reconnect, browser capture, broad
+independently verified plugin catalogs, and non-Windows builds remain missing.
 
 ## Historical update — M2 CLI milestone
 

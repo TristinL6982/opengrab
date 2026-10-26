@@ -546,6 +546,21 @@ class DownloadManager:
                 with self._lock:
                     self._active.pop(link.id, None)
             link.path = str(path)
+            if self.settings.auto_extract_archives:
+                from .archives import extract_archive, is_supported_archive
+                if is_supported_archive(Path(path)):
+                    try:
+                        link.extra["archive_extraction"] = extract_archive(
+                            Path(path),
+                            max_files=max(1, min(self.settings.archive_max_files, 100000)),
+                            max_bytes=max(1, self.settings.archive_max_expanded_gib)
+                            * 1024 * 1024 * 1024,
+                            password_file=self.settings.archive_password_file,
+                        )
+                    except Exception as exc:  # preserve the completed download
+                        link.extra["archive_extraction"] = {
+                            "status": "failed", "message": str(exc)[:500]
+                        }
             try:
                 link.size = Path(path).stat().st_size
             except OSError:

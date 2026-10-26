@@ -206,6 +206,13 @@
         <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> auto-start after grab</label>
         <label class="check"><input id="set-clipboard_monitor_enabled" type="checkbox"> monitor copied links (review before adding)</label>
         <label class="check"><input id="set-terminal_enabled" type="checkbox"> enable authenticated web terminal (runs local commands)</label>
+        <label class="check"><input id="set-auto_extract_archives" type="checkbox"> extract ZIP/TAR archives after download</label>
+        <label>archive extraction file limit
+          <input id="set-archive_max_files" type="number" min="1" max="100000"></label>
+        <label>archive expanded-size limit (GiB)
+          <input id="set-archive_max_expanded_gib" type="number" min="1" max="1024"></label>
+        <label>optional ZIP password list file (one password per line)
+          <input id="set-archive_password_file" type="text"></label>
       </div>
       <div class="formrow">
         <button id="btn-set-save" class="primary">Save settings</button>

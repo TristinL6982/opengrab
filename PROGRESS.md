@@ -34,9 +34,14 @@ smoke performs a real API-backed download and SHA-256 check. Native interactive
 WebView2/tray launch remains unverified. **M7 Docker files are drafted but
 unverified** because Docker is unavailable here. OpenGrab is **not
 production-ready**: broad spec requirements remain incomplete, including
-archives, router reconnect, Packagizer, large maintained plugin catalogs,
-browser capture, and cross-platform builds. See `PROJECT_STATUS.md` and
-`PROJECT_SPEC.md`.
+RAR/7z extraction, router reconnect, Packagizer, large maintained plugin
+catalogs, browser capture, and cross-platform builds. ZIP/CBZ and TAR-family
+extraction now run after downloads into new directories with traversal,
+symlink, file-count, expanded-size, and compression-ratio checks. The source
+archive is preserved. Password-list lookup is opt-in and bounded; the source
+must be configured by the user. `tests/test_archives.py` verifies safe
+extraction, traversal/symlink rejection, quotas, overwrite prevention, and
+manager integration. See `PROJECT_STATUS.md` and `PROJECT_SPEC.md`.
 
 The end-to-end rerun also caught and fixed a Windows race between debounced
 queue persistence and shutdown. Saves now serialize before replacing the state
@@ -102,17 +107,16 @@ Docker image (feature parity requested vs the JD2 docker docs).
 - `src/opengrab/plugins/builtin/direct.py` — DirectLinkPlugin (HEAD/GET sniff, CD filename)
 - `src/opengrab/plugins/builtin/generic.py` — GenericPagePlugin (og:title, <a>/magnet/
   <video>/embedded-JSON link extraction, file-content sniff)
-- `src/opengrab/plugins/builtin/ytbridge.py` — yt-dlp bridge (1000+ sites, best-format
-  picker, playlist children). NOTE: `_supported_domains()` has a dead loop
-  (`ie._match_valid_url.__code__ and []` hack) — clean it up on resume.
+- `src/opengrab/plugins/builtin/ytbridge.py` — yt-dlp bridge (best-format
+  picker, playlist children); upstream coverage is not independently verified.
 
 ## Remaining work (resume order)
 1. **M7 — Docker:** Dockerfile, compose, and environment example drafted;
    verify only if Docker becomes available. Implement safe container auth and
    deployment documentation.
-2. **M8 — Docs and hardening:** README, archive extraction, diagnostics,
-   Packagizer rules, yt-dlp bridge cleanup, security review, then acceptance
-   pass. Large host/router compatibility targets remain unverified.
+2. **M8 — Docs and hardening:** RAR/7z adapters, Packagizer rules, yt-dlp
+   playlist/format improvements, security review, then acceptance pass. Large
+   host/router compatibility targets remain unverified.
 
 Historical work inventory continues below; files mentioned there already exist.
 Do not interpret their presence as proof that each requirement is complete.
