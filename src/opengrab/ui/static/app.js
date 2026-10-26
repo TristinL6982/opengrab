@@ -11,6 +11,9 @@ const S = {
   graph: [],               // [{t, bps}] last 60 s of aggregate speed
   conn: "connecting…",
 };
+let terminalJobId = null;
+let terminalPollTimer = null;
+let filesPath = "";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -349,6 +352,28 @@ async function renderFilters() {
     : '<div class="empty">No filters.</div>';
 }
 
+async function renderLinkGrabber() {
+  const el = $("#linkgrabber-list");
+  if (!el) return;
+  try {
+    const candidates = await api("/api/linkgrabber");
+    const status = await api("/api/clipboard/status");
+    $("#clipboard-state").textContent = {
+      off: "Clipboard monitoring is off.",
+      watching: "Clipboard monitoring is on; copied links wait here for your approval.",
+      unavailable: "Clipboard monitoring is on, but the desktop clipboard is unavailable.",
+    }[status.status] || "Clipboard status unknown.";
+    el.innerHTML = candidates.length
+      ? candidates.map(item => `<div class="krow">
+          <code style="overflow-wrap:anywhere">${esc(item.url)}</code>
+          <span class="grow"></span>
+          <button class="sm primary" data-act="candidate-add" data-id="${esc(item.id)}">Add</button>
+          <button class="sm" data-act="candidate-dismiss" data-id="${esc(item.id)}">Dismiss</button>
+        </div>`).join("")
+      : '<div class="empty">No copied links waiting for review.</div>';
+  } catch { /* api() handles authorization feedback */ }
+}
+
 function refreshData() {
   api("/api/links").then(links => {
     S.links = new Map(links.map(l => [l.id, l]));
@@ -358,7 +383,37 @@ function refreshData() {
   api("/api/stats").then(s => { S.stats = s; updatePills(); }).catch(() => {});
   api("/api/accounts").then(a => { accountsCache = a; renderAccounts(); }).catch(() => {});
   api("/api/filters").then(f => { filtersCache = f; renderFilters(); }).catch(() => {});
+  if ($("#tab-linkgrabber")?.classList.contains("active")) renderLinkGrabber();
+  if ($("#tab-notifications")?.classList.contains("active")) renderNotifications();
+  if ($("#tab-files")?.classList.contains("active")) renderFiles();
 }
+
+async function renderNotifications() {
+  try {
+    const items = await api("/api/notifications");
+    $("#notifications-list").innerHTML = items.length ? items.map(n =>
+      `<div class="krow"><span class="st ${esc(n.kind || "")}">${esc(n.kind || "notice")}</span><span class="grow">${esc(n.message || n.text || JSON.stringify(n))}</span><span class="hint">${n.timestamp ? new Date(n.timestamp * 1000).toLocaleString() : ""}</span></div>`
+    ).join("") : '<div class="empty">No recent notifications.</div>';
+  } catch {}
+}
+
+async function renderFiles() {
+  try {
+    const data = await api("/api/files?path=" + encodeURIComponent(filesPath));
+    filesPath = data.path || "";
+    $("#files-path").textContent = "/" + filesPath;
+    $("#btn-files-up").disabled = !filesPath;
+    $("#files-list").innerHTML = data.items.length ? data.items.map(item => {
+      const icon = item.type === "directory" ? "📁" : "📄";
+      const actions = item.type === "directory"
+        ? `<button class="sm" data-act="file-open" data-path="${esc(item.path)}">Open</button>`
+        : `<button class="sm" data-act="file-audio" data-path="${esc(item.path)}">Play</button><button class="sm" data-act="file-download" data-path="${esc(item.path)}">Download</button>`;
+      return `<div class="krow"><span>${icon}</span><code class="file-name">${esc(item.name)}</code><span class="hint">${item.type === "file" ? humanBytes(item.size) : "folder"}</span><span class="grow"></span>${actions}<button class="sm" data-act="file-rename" data-path="${esc(item.path)}" data-name="${esc(item.name)}">Rename</button><button class="sm danger" data-act="file-delete" data-path="${esc(item.path)}">Delete</button></div>`;
+    }).join("") : '<div class="empty">This folder is empty.</div>';
+  } catch (e) { $("#files-list").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function childPath(name) { return filesPath ? filesPath + "/" + name : name; }
 
 /* ============================================================ actions */
 async function act(action, el) {
@@ -375,6 +430,36 @@ async function act(action, el) {
         if (!confirm("Remove this link?")) return;
         await api(`/api/links/${id}/remove`, "POST");
         break;
+      }
+      case "candidate-add":
+        await api(`/api/linkgrabber/${id}/add`, "POST", {});
+        toast("Link added to the queue", "ok");
+        break;
+      case "candidate-dismiss":
+        await api(`/api/linkgrabber/${id}/dismiss`, "POST", {});
+        break;
+      case "file-open": filesPath = el.dataset.path; await renderFiles(); return;
+      case "file-download": {
+        const url = withBasePath("/api/files/download") + "?path=" + encodeURIComponent(el.dataset.path);
+        const response = await fetch(url, { headers: S.token ? { Authorization: "Bearer " + S.token } : {} });
+        if (!response.ok) throw new Error("download failed: " + response.status);
+        const blob = await response.blob(), link = document.createElement("a");
+        link.href = URL.createObjectURL(blob); link.download = el.dataset.path.split("/").pop(); link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000); return;
+      }
+      case "file-audio": {
+        const ticket = await api("/api/audio-ticket", "POST", { path: el.dataset.path });
+        const player = $("#audio-player"); player.src = ticket.url; player.hidden = false; await player.play(); return;
+      }
+      case "file-delete":
+        if (!confirm("Delete " + el.dataset.path + "? (folders must be empty)")) return;
+        await api("/api/files", "POST", { action: "delete", path: el.dataset.path });
+        await renderFiles(); return;
+      case "file-rename": {
+        const name = prompt("New name", el.dataset.name); if (!name || name === el.dataset.name) return;
+        const parent = el.dataset.path.includes("/") ? el.dataset.path.slice(0, el.dataset.path.lastIndexOf("/") + 1) : "";
+        await api("/api/files", "POST", { action: "rename", path: el.dataset.path, to: parent + name });
+        await renderFiles(); return;
       }
       case "paywall": await api(`/api/links/${id}/paywall-accept`, "POST"); break;
       case "queue-child":
@@ -429,6 +514,9 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   t.classList.add("active");
   $("#tab-" + t.dataset.tab).classList.add("active");
   if (t.dataset.tab === "settings") loadSettings();
+  if (t.dataset.tab === "linkgrabber") renderLinkGrabber();
+  if (t.dataset.tab === "notifications") renderNotifications();
+  if (t.dataset.tab === "files") renderFiles();
   refreshData();
   renderGraph();
 }));
@@ -541,11 +629,16 @@ $("#btn-clear-finished").addEventListener("click", async () => {
 const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "speed_limit_kbps", "retry_max", "impersonate", "proxy", "captcha_provider",
   "captcha_2captcha_key", "captcha_capmonster_key", "captcha_capsolver_key",
-  "ua_rotation", "auto_start_after_grab"];
+  "ua_rotation", "auto_start_after_grab", "clipboard_monitor_enabled",
+  "terminal_enabled"];
 
 async function loadSettings() {
   try {
     const s = await api("/api/settings");
+    if (!S.token && s.api_token) {
+      S.token = s.api_token;
+      localStorage.setItem("og_token", S.token);
+    }
     for (const f of SET_FIELDS) {
       const el = $("#set-" + f);
       if (!el) continue;
@@ -553,6 +646,9 @@ async function loadSettings() {
       else el.value = s[f] ?? "";
     }
     $("#set-confirm_delete").checked = !!s.confirm_delete;
+    $("#clipboard-state").textContent = s.clipboard_monitor_enabled
+      ? "Clipboard monitoring is on; new links wait here for your approval."
+      : "Clipboard monitoring is off.";
     $("#token-display").textContent = s.api_token || "(local only)";
     $("#lan-url").textContent = s.api_host === "127.0.0.1"
       ? "http://<your-ip>:" + s.api_port + BASE_PATH + "/#token=" + s.api_token
@@ -572,6 +668,9 @@ $("#btn-set-save").addEventListener("click", async () => {
   body.confirm_delete = $("#set-confirm_delete").checked;
   try {
     await api("/api/settings", "POST", body);
+    $("#clipboard-state").textContent = body.clipboard_monitor_enabled
+      ? "Clipboard monitoring is on; new links wait here for your approval."
+      : "Clipboard monitoring is off.";
     toast("Settings saved", "ok");
   } catch (e) { toast("Save failed: " + e.message, "err"); }
 });
@@ -581,6 +680,96 @@ $("#btn-set-reload-plugins").addEventListener("click", async () => {
     const r = await api("/api/plugins/scan", "POST");
     toast("Plugin scan: " + (r?.scanned ?? 0) + " plugin(s)", "ok");
   } catch (e) { toast("Scan failed: " + e.message, "err"); }
+});
+
+$("#btn-diagnostics-export").addEventListener("click", async () => {
+  try {
+    const snapshot = await api("/api/diagnostics");
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob); link.download = "opengrab-diagnostics.json";
+    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch (e) { toast("Could not create diagnostics: " + e.message, "err"); }
+});
+
+async function pollTerminal() {
+  if (!terminalJobId) return;
+  try {
+    const result = await api(`/api/terminal/${terminalJobId}`);
+    $("#terminal-output").textContent = result.output || "";
+    if (result.running) {
+      terminalPollTimer = setTimeout(pollTerminal, 500);
+    } else {
+      if (result.timed_out) $("#terminal-output").textContent += "\n[command timed out]";
+      if (result.truncated) $("#terminal-output").textContent += "\n[earlier output omitted]";
+      terminalJobId = null;
+      $("#btn-terminal-stop").disabled = true;
+    }
+  } catch (e) {
+    $("#terminal-output").textContent = e.message;
+    terminalJobId = null;
+    $("#btn-terminal-stop").disabled = true;
+  }
+}
+
+$("#btn-terminal-run").addEventListener("click", async () => {
+  const command = $("#terminal-command").value.trim();
+  if (!command) return;
+  try {
+    if (!S.token) {
+      const settings = await api("/api/settings");
+      S.token = settings.api_token || "";
+      if (S.token) localStorage.setItem("og_token", S.token);
+    }
+    const result = await api("/api/terminal", "POST", { command });
+    terminalJobId = result.id;
+    $("#terminal-output").textContent = "Running…";
+    $("#btn-terminal-stop").disabled = false;
+    pollTerminal();
+  } catch (e) { toast("Terminal failed: " + e.message, "err"); }
+});
+
+$("#btn-terminal-stop").addEventListener("click", async () => {
+  if (!terminalJobId) return;
+  try {
+    await api(`/api/terminal/${terminalJobId}/stop`, "POST", {});
+    clearTimeout(terminalPollTimer);
+    pollTerminal();
+  } catch (e) { toast("Could not stop command: " + e.message, "err"); }
+});
+
+$("#btn-linkgrabber-clear").addEventListener("click", async () => {
+  try {
+    await api("/api/linkgrabber/clear", "POST", {});
+    renderLinkGrabber();
+  } catch (e) { toast("Could not clear candidates: " + e.message, "err"); }
+});
+
+$("#btn-notifications-clear").addEventListener("click", async () => {
+  try { await api("/api/notifications/clear", "POST", {}); await renderNotifications(); }
+  catch (e) { toast("Could not clear notifications: " + e.message, "err"); }
+});
+$("#btn-files-refresh").addEventListener("click", renderFiles);
+$("#btn-files-up").addEventListener("click", () => {
+  filesPath = filesPath.includes("/") ? filesPath.slice(0, filesPath.lastIndexOf("/")) : "";
+  renderFiles();
+});
+$("#btn-files-mkdir").addEventListener("click", async () => {
+  const name = prompt("Folder name"); if (!name) return;
+  try { await api("/api/files", "POST", { action: "mkdir", path: childPath(name) }); await renderFiles(); }
+  catch (e) { toast("Could not create folder: " + e.message, "err"); }
+});
+$("#file-upload").addEventListener("change", async ev => {
+  const file = ev.target.files?.[0]; if (!file) return;
+  try {
+    const path = childPath(file.name);
+    const headers = { "Content-Type": "application/octet-stream" };
+    if (S.token) headers.Authorization = "Bearer " + S.token;
+    const response = await fetch(withBasePath("/api/files/upload") + "?path=" + encodeURIComponent(path), { method: "PUT", headers, body: file });
+    if (!response.ok) throw new Error((await response.json()).error || response.statusText);
+    toast("Uploaded " + file.name, "ok"); await renderFiles();
+  } catch (e) { toast("Upload failed: " + e.message, "err"); }
+  ev.target.value = "";
 });
 
 /* ============================================================ toasts */
@@ -613,5 +802,8 @@ $("#auth-save").addEventListener("click", () => {
     navigator.serviceWorker.register(withBasePath("/sw.js")).catch(() => {});
   }
   if (location.hash.includes("token=")) history.replaceState(null, "", location.pathname);
-  setInterval(() => { renderGraph(); }, 1000);
+  setInterval(() => {
+    renderGraph();
+    if ($("#tab-linkgrabber")?.classList.contains("active")) renderLinkGrabber();
+  }, 2000);
 })();

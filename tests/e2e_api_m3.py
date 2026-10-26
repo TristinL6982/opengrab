@@ -16,6 +16,7 @@ from opengrab.engine.manager import DownloadManager  # noqa: E402
 from opengrab import server as server_module  # noqa: E402
 from opengrab.server import ApiServer  # noqa: E402
 from opengrab.settings import Settings  # noqa: E402
+from opengrab.models import Link  # noqa: E402
 
 
 def main() -> int:
@@ -49,6 +50,7 @@ def main() -> int:
     port = server.start()
     base = f"http://127.0.0.1:{port}"
     passes = 0
+    original_add_url = manager.add_url
 
     def request(path: str, method: str = "GET", body=None,
                 data: bytes | None = None, headers=None):
@@ -82,10 +84,41 @@ def main() -> int:
 
         _, _, providers = request("/api/captcha-test")
         check("captcha provider diagnostics", bool(json.loads(providers)["providers"]))
+        settings.proxy = "http://alice:secret@example.invalid:8080"
+        _, _, diagnostics = request("/api/diagnostics")
+        diagnostic_data = json.loads(diagnostics)
+        check("diagnostics omit tokens, proxy credentials, and download URLs",
+              server.token not in diagnostics.decode()
+              and "secret" not in diagnostics.decode()
+              and "example.invalid" not in diagnostics.decode()
+              and "plugin_ids" in diagnostic_data)
+        settings.proxy = ""
         request("/api/clipboard", "POST", {"text": "fixture clipboard"})
         _, _, clipboard = request("/api/clipboard")
         check("clipboard API contract (mock backend)",
               json.loads(clipboard)["text"] == "fixture clipboard")
+        added_urls = []
+
+        def fake_add_url(url, **kwargs):
+            added_urls.append(url)
+            return Link(url=url)
+
+        manager.add_url = fake_add_url
+        captured = "https://example.com/a https://example.com/b."
+        check("clipboard capture disabled by default",
+              server.capture_clipboard_text(captured) == 0)
+        settings.clipboard_monitor_enabled = True
+        check("clipboard capture queues candidates for review",
+              server.capture_clipboard_text(captured) == 2 and not added_urls)
+        check("clipboard capture deduplicates repeated text",
+              server.capture_clipboard_text(captured) == 0)
+        _, _, candidates_raw = request("/api/linkgrabber")
+        candidates = json.loads(candidates_raw)
+        request(f"/api/linkgrabber/{candidates[0]['id']}/dismiss", "POST", {})
+        _, _, added = request(f"/api/linkgrabber/{candidates[1]['id']}/add", "POST", {})
+        check("candidate is added only after explicit approval",
+              json.loads(added)["ok"] and len(added_urls) == 1)
+        request("/api/linkgrabber/clear", "POST", {})
 
         manager.on_change("finished", {"id": "test-link", "status": "finished",
                                         "title": "fixture.zip"})
@@ -109,6 +142,16 @@ def main() -> int:
                                         headers={"Range": "bytes=8-11"})
         check("audio byte range", status == 206 and body == payload[8:12]
               and headers["Content-Range"] == f"bytes 8-11/{len(payload)}")
+        _, _, ticket_raw = request("/api/audio-ticket", "POST",
+                                   {"path": "sub/sample.txt"})
+        ticket = json.loads(ticket_raw)["url"].split("?", 1)[1]
+        proxy_headers = {"X-Forwarded-For": "203.0.113.8",
+                         "X-Forwarded-Proto": "https",
+                         "Range": "bytes=0-3"}
+        status, _, body = request("/api/audio?" + ticket,
+                                  headers=proxy_headers)
+        check("scoped audio ticket streams through HTTPS proxy",
+              status == 206 and body == payload[:4])
 
         request("/api/files", "POST", {"action": "rename", "path": "sub/sample.txt",
                                         "to": "sub/renamed.txt"})
@@ -170,6 +213,7 @@ def main() -> int:
         print(f"{passes} checks passed")
         return 0
     finally:
+        manager.add_url = original_add_url
         server.stop()
         manager.shutdown()
         server_module._make_handler = real_make_handler

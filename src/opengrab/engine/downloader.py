@@ -109,7 +109,7 @@ def _open_session(settings) -> object:
     import httpx
     return httpx.Client(proxy=settings.proxy or None,
                         timeout=settings.timeout_s or 30.0,
-                        follow_redirects=True)
+                        allow_redirects=True)
 
 
 def _is_transient(e: Exception) -> bool:

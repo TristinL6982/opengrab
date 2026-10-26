@@ -24,9 +24,13 @@
     <nav id="tabs">
       <button data-tab="queue" class="tab active">Queue</button>
       <button data-tab="all" class="tab">All Links</button>
+      <button data-tab="linkgrabber" class="tab">LinkGrabber</button>
       <button data-tab="accounts" class="tab">Accounts</button>
       <button data-tab="filters" class="tab">Filters</button>
       <button data-tab="settings" class="tab">Settings</button>
+      <button data-tab="terminal" class="tab">Terminal</button>
+      <button data-tab="notifications" class="tab">Notifications</button>
+      <button data-tab="files" class="tab">Files &amp; Audio</button>
     </nav>
   </header>
 
@@ -66,6 +70,56 @@
       </div>
       <div id="queue-list" class="linklist"></div>
       <div id="queue-empty" class="empty hidden">Queue is empty — add a link above.</div>
+    </section>
+
+    <!-- ============================ TERMINAL =========================== -->
+    <section id="tab-terminal" class="tabpane">
+      <h2>Web terminal</h2>
+      <p class="hint">Runs commands as the OpenGrab user in the download directory.
+      Disabled by default; enabling it allows authenticated users to execute commands.</p>
+      <div class="formrow">
+        <input id="terminal-command" type="text" placeholder="Command" style="flex:1">
+        <button id="btn-terminal-run" class="primary">Run</button>
+        <button id="btn-terminal-stop" class="danger" disabled>Stop</button>
+      </div>
+      <pre id="terminal-output" class="terminal-output" aria-live="polite"></pre>
+    </section>
+
+    <!-- ============================ NOTIFICATIONS ====================== -->
+    <section id="tab-notifications" class="tabpane">
+      <h2>Notifications</h2>
+      <div class="formrow"><span class="hint">Recent completions, errors, and items waiting for action.</span>
+        <span class="grow"></span><button id="btn-notifications-clear">Clear</button></div>
+      <div id="notifications-list" class="linklist"></div>
+    </section>
+
+    <!-- ============================ FILES & AUDIO ====================== -->
+    <section id="tab-files" class="tabpane">
+      <h2>Download files</h2>
+      <p class="hint">This file manager is limited to the configured download directory.</p>
+      <div class="formrow">
+        <code id="files-path">/</code>
+        <button id="btn-files-up">Up</button>
+        <button id="btn-files-mkdir">New folder</button>
+        <label class="buttonlike">Upload<input id="file-upload" type="file" hidden></label>
+        <button id="btn-files-refresh">Refresh</button>
+      </div>
+      <div id="files-list" class="linklist"></div>
+      <h2>Audio player</h2>
+      <audio id="audio-player" controls hidden></audio>
+    </section>
+
+    <!-- ============================ LINKGRABBER ======================== -->
+    <section id="tab-linkgrabber" class="tabpane">
+      <h2>LinkGrabber</h2>
+      <p class="hint">Copied URLs appear here for review when clipboard monitoring is enabled.
+      Nothing is queued until you choose <em>Add</em>.</p>
+      <div class="formrow">
+        <span id="clipboard-state" class="hint">Clipboard monitoring is off.</span>
+        <span class="grow"></span>
+        <button id="btn-linkgrabber-clear">Dismiss all</button>
+      </div>
+      <div id="linkgrabber-list" class="linklist"></div>
     </section>
 
     <!-- ============================ ALL LINKS ============================ -->
@@ -150,6 +204,8 @@
           <input id="set-captcha_capsolver_key" type="password"></label>
         <label class="check"><input id="set-ua_rotation" type="checkbox"> rotate user agents</label>
         <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> auto-start after grab</label>
+        <label class="check"><input id="set-clipboard_monitor_enabled" type="checkbox"> monitor copied links (review before adding)</label>
+        <label class="check"><input id="set-terminal_enabled" type="checkbox"> enable authenticated web terminal (runs local commands)</label>
       </div>
       <div class="formrow">
         <button id="btn-set-save" class="primary">Save settings</button>
@@ -160,6 +216,9 @@
       <h2>Local API</h2>
       <p class="hint">Console token (for LAN / browser access): <code id="token-display"></code>
       LAN URL: <code id="lan-url"></code></p>
+      <h2>Diagnostics</h2>
+      <p class="hint">Export a support snapshot. It excludes URLs, credentials, API tokens, cookies, and proxy settings.</p>
+      <button id="btn-diagnostics-export">Download diagnostics JSON</button>
       <h2>About</h2>
       <p class="hint">OpenGrab — unpaywalled, modifiable link grabber &amp; downloader.
       Plugins: drop a <code>.py</code> file into your OpenGrab <code>plugins</code> folder

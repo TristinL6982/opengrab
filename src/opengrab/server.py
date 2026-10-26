@@ -124,6 +124,11 @@ class ApiServer:
         self._notifications_lock = threading.Lock()
         self._terminal_jobs: dict[str, dict] = {}
         self._terminal_lock = threading.Lock()
+        self._audio_tickets: dict[str, dict] = {}
+        self._audio_tickets_lock = threading.Lock()
+        self._clipboard_candidates: dict[str, dict] = {}
+        self._clipboard_candidates_lock = threading.Lock()
+        self.clipboard_status = "off"
         prev = manager.on_change
 
         def fanout(kind: str, payload) -> None:
@@ -161,11 +166,37 @@ class ApiServer:
             prev(kind, payload)
 
         manager.on_change = fanout
-
-        import queue as _queue
-        self._q = _queue
         self.httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
+
+    def capture_clipboard_text(self, text: str) -> int:
+        """Queue filtered URL candidates for user review; never auto-add them."""
+        import re
+        if (not self.settings.clipboard_monitor_enabled
+                or not isinstance(text, str) or not text):
+            return 0
+        found = re.findall(r"(?:https?://|magnet:\?)[^\s<>\"']+", text,
+                           flags=re.IGNORECASE)
+        existing = {link.url for link in self.manager.all_links()}
+        added = 0
+        with self._clipboard_candidates_lock:
+            for raw_url in found:
+                url = raw_url.rstrip(".,;:!?)]}")
+                if not url or url in existing or any(
+                        item["url"] == url
+                        for item in self._clipboard_candidates.values()):
+                    continue
+                allowed, _ = self.manager.filters.allows(url, "")
+                if not allowed:
+                    continue
+                candidate_id = uuid.uuid4().hex
+                self._clipboard_candidates[candidate_id] = {
+                    "id": candidate_id, "url": url, "seen_at": time.time()
+                }
+                added += 1
+            while len(self._clipboard_candidates) > 200:
+                self._clipboard_candidates.pop(next(iter(self._clipboard_candidates)))
+        return added
 
     # ------------------------------------------------------------------ run
     def start(self) -> int:
@@ -756,6 +787,18 @@ def _make_handler(srv: ApiServer):
             terminal_match = _re.fullmatch(r"/api/terminal/([a-f0-9]+)/?", p)
             if terminal_match:
                 return self._terminal_poll(terminal_match.group(1))
+            if p == "/api/audio" and q.get("ticket"):
+                ticket = q["ticket"][0]
+                with srv._audio_tickets_lock:
+                    record = srv._audio_tickets.get(ticket)
+                    for key, value in list(srv._audio_tickets.items()):
+                        if value["expires"] < time.time():
+                            del srv._audio_tickets[key]
+                if record and record["expires"] >= time.time():
+                    file_path = self._safe_file(record["path"], must_exist=True)
+                    if not file_path.is_file():
+                        return self._err(404, "audio file not found")
+                    return self._serve_file(file_path, attachment=False)
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
             if p == "/api/links":
@@ -781,6 +824,11 @@ def _make_handler(srv: ApiServer):
                                         attachment=p == "/api/files/download")
             if p == "/api/clipboard":
                 return self._json({"text": self._clipboard()})
+            if p == "/api/clipboard/status":
+                return self._json({"status": srv.clipboard_status})
+            if p == "/api/linkgrabber":
+                with srv._clipboard_candidates_lock:
+                    return self._json(list(srv._clipboard_candidates.values()))
             if p == "/api/notifications":
                 with srv._notifications_lock:
                     return self._json(list(srv._notifications))
@@ -794,6 +842,33 @@ def _make_handler(srv: ApiServer):
                 d["api_token"] = srv.token
                 d["download_dir"] = str(Path(mgr.settings.download_dir))
                 return self._json(d)
+            if p == "/api/diagnostics":
+                links = mgr.all_links()
+                counts: dict[str, int] = {}
+                for link in links:
+                    key = link.status.value
+                    counts[key] = counts.get(key, 0) + 1
+                plugins = mgr.registry.snapshot()
+                errors = mgr.registry.errors_snapshot()
+                from . import __version__
+                return self._json({
+                    "generated_at": time.time(),
+                    "app_version": __version__,
+                    "python_version": sys.version.split()[0],
+                    "platform": sys.platform,
+                    "queue_counts": counts,
+                    "plugin_ids": sorted(str(p.get("id", "")) for p in plugins),
+                    "plugin_error_count": len(errors),
+                    "settings": {
+                        "api_host": mgr.settings.api_host,
+                        "api_port": mgr.settings.api_port,
+                        "base_path_configured": bool(mgr.settings.base_path),
+                        "max_parallel": mgr.settings.max_parallel,
+                        "per_link_chunks": mgr.settings.per_link_chunks,
+                        "terminal_enabled": mgr.settings.terminal_enabled,
+                        "clipboard_monitor_enabled": mgr.settings.clipboard_monitor_enabled,
+                    },
+                })
             if p == "/api/plugins":
                 return self._json({"plugins": mgr.registry.snapshot(),
                                    "errors": mgr.registry.errors_snapshot()})
@@ -886,6 +961,41 @@ def _make_handler(srv: ApiServer):
                     return self._err(413, "clipboard text exceeds 1 MB")
                 self._clipboard(text)
                 return self._json({"ok": True})
+            if p == "/api/audio-ticket":
+                relative = str(body.get("path", ""))
+                file_path = self._safe_file(relative, must_exist=True)
+                if not file_path.is_file():
+                    return self._err(400, "audio path must name a file")
+                ticket = uuid.uuid4().hex + uuid.uuid4().hex
+                with srv._audio_tickets_lock:
+                    now = time.time()
+                    for key, value in list(srv._audio_tickets.items()):
+                        if value["expires"] < now:
+                            del srv._audio_tickets[key]
+                    srv._audio_tickets[ticket] = {
+                        "path": file_path.relative_to(self._download_root()).as_posix(),
+                        "expires": now + 3600,
+                    }
+                return self._json({"url": f"{srv.base_path}/api/audio?ticket={ticket}",
+                                   "expires_in": 3600})
+            if p == "/api/linkgrabber/clear":
+                with srv._clipboard_candidates_lock:
+                    cleared = len(srv._clipboard_candidates)
+                    srv._clipboard_candidates.clear()
+                return self._json({"cleared": cleared})
+            candidate_action = re.fullmatch(
+                r"/api/linkgrabber/([a-f0-9]+)/(add|dismiss)", p
+            )
+            if candidate_action:
+                candidate_id, action = candidate_action.groups()
+                with srv._clipboard_candidates_lock:
+                    candidate = srv._clipboard_candidates.pop(candidate_id, None)
+                if candidate is None:
+                    return self._err(404, "clipboard candidate not found")
+                if action == "dismiss":
+                    return self._json({"ok": True, "dismissed": True})
+                link = mgr.add_url(candidate["url"])
+                return self._json({"ok": True, "link": link.to_public()}, 201)
             if p == "/api/settings":
                 for k, v in body.items():
                     if hasattr(mgr.settings, k) and k != "api_token":

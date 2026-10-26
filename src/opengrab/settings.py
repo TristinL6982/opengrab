@@ -80,6 +80,7 @@ class Settings(BaseModel):
     api_token: str = ""
     base_path: str = ""             # reverse-proxy path prefix, e.g. /opengrab
     terminal_enabled: bool = False  # shell API is opt-in and always token-gated
+    clipboard_monitor_enabled: bool = False
 
     # maintenance
     confirm_delete: bool = True
@@ -98,9 +99,13 @@ def load_settings() -> Settings:
     p = app_data_dir() / "settings.json"
     if p.exists():
         try:
-            return Settings.model_validate(json.loads(p.read_text(encoding="utf-8")))
+            settings = Settings.model_validate(json.loads(p.read_text(encoding="utf-8")))
+            if os.environ.get("OPENGRAB_DOWNLOAD_DIR"):
+                settings.download_dir = os.environ["OPENGRAB_DOWNLOAD_DIR"]
+            return settings
         except Exception:
             pass
-    s = Settings()
+    s = Settings(download_dir=os.environ.get(
+        "OPENGRAB_DOWNLOAD_DIR", str(Path.home() / "Downloads")))
     s.save()
     return s

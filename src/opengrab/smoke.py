@@ -46,6 +46,11 @@ def run_smoke_test(timeout: int = 120) -> bool:
             ping = json.loads(response.read())
         if ping.get("ok") is not True or ping.get("app") != "OpenGrab":
             raise RuntimeError(f"API health check failed: {ping}")
+        for asset in ("/", "/app.js", "/style.css", "/manifest.webmanifest",
+                      "/icon-192.png", "/icon-512.png"):
+            with urllib.request.urlopen(base + asset, timeout=10) as response:
+                if response.status != 200 or not response.read(64):
+                    raise RuntimeError(f"static asset check failed: {asset}")
 
         link = manager.add_url(SMOKE_URL, auto_download=True)
         deadline = time.monotonic() + timeout
@@ -66,7 +71,7 @@ def run_smoke_test(timeout: int = 120) -> bool:
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
         if digest != SMOKE_SHA256:
             raise RuntimeError(f"smoke download checksum mismatch: {digest}")
-        print("OpenGrab smoke test passed (plugins, API, download, SHA-256).")
+        print("OpenGrab smoke test passed (plugins, API, UI assets, download, SHA-256).")
         return True
     except Exception as exc:
         print(f"OpenGrab smoke test failed: {exc}")
