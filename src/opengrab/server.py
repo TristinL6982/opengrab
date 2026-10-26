@@ -67,7 +67,7 @@ def static_dir() -> Path:
     return base / "ui" / "static"
 
 
-def find_free_port(host: str, start: int = 8765, tries: int = 40) -> int:
+def find_free_port(host: str, start: int = 5678, tries: int = 40) -> int:
     for p in range(start, start + tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
@@ -82,7 +82,7 @@ class ApiServer:
     """Threading HTTP server bound to a DownloadManager instance."""
 
     def __init__(self, settings: Settings, manager: DownloadManager,
-                 host: str = "127.0.0.1", port: int = 8765,
+                 host: str = "127.0.0.1", port: int = 5678,
                  token: Optional[str] = None):
         self.settings = settings
         self.manager = manager
@@ -442,7 +442,7 @@ def _make_handler(srv: ApiServer):
 
 
 # ------------------------------------------------------------------ main
-def run(settings: Settings, host: str = "127.0.0.1", port: int = 8765,
+def run(settings: Settings, host: str = "127.0.0.1", port: int = 5678,
         block: bool = False) -> tuple[ApiServer, DownloadManager, int]:
     """Convenience: build manager + server, start both.  Returns (srv, mgr, port)."""
     from .settings import user_plugins_dir
@@ -468,7 +468,7 @@ def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(prog="opengrab-server")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=5678)
     ap.add_argument("--token", default="")
     ap.add_argument("--auto-port", action="store_true",
                     help="pick a free port starting at --port")

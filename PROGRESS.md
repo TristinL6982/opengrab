@@ -1,4 +1,21 @@
-# OpenGrab — build state (pause point)
+# OpenGrab — build state
+
+## Latest verified update — 2026-10-25
+
+**M2 CLI milestone implemented and verified.** The editable install succeeds in
+`.venv`; `python -m opengrab --version`, `--help`, `--list-plugins`, and
+`--smoke-test` work. The smoke check starts the local API, verifies plugin
+discovery, downloads a 9,979-byte fixture, and checks its SHA-256. A headless
+CLI instance also served `/api/ping` on an explicitly selected bind address and
+port. Default port values are now 5678. `--data-dir` selects an isolated data
+directory; `OPENGRAB_DATA_DIR`, `OPENGRAB_BIND`/`OPENGRAB_API_HOST`, and
+`OPENGRAB_PORT`/`OPENGRAB_API_PORT` are supported.
+
+This completes the CLI milestone only. OpenGrab is **not production-ready**:
+the file manager, clipboard and audio APIs, notifications, tray/clipboard
+capture, Docker deployment, native builds, documentation, and other spec items
+remain incomplete or unverified. See the latest section in `PROJECT_STATUS.md`
+and `PROJECT_SPEC.md` for scope and acceptance requirements.
 
 > **Status note:** This file is an older handoff and its DONE/NOT YET WRITTEN
 > lists are stale. The engine, API server, and UI files now exist in the
@@ -16,7 +33,7 @@ Git repo initialized at this pause point — check `git log` for the commit.
 3. Tray + LinkGrabber clipboard capture: yes; monitoring must be visible + user-controllable.
 4. Docker: supported target; unbuildable/unverifiable on this machine (no docker CLI) — document as unverified.
 5. HTTPS: local-only default, HTTPS off on localhost; remote requires HTTPS (trusted proxy or explicit TLS); never unauthenticated HTTP.
-6. Default port: 5678 (JD2 parity), configurable. (Code currently 8765 — change pending.)
+6. Default port: 5678 (JD2 parity), configurable.
 
 ## What OpenGrab is
 A modern, unpaywalled JDownloader-2-style grabber/downloader for Windows.
@@ -39,7 +56,7 @@ Docker image (feature parity requested vs the JD2 docker docs).
   `s.get(url, stream=True)`, `resp.iter_content(chunk_size=)`, `.status_code`,
   `.headers` (dict-able), `.content`, `.url`. (probe file: tests/probe_curl.py)
 
-## DONE (written, not yet executed/tested)
+## Earlier implementation inventory (not a current verification record)
 - `requirements.txt` (all installed)
 - `src/opengrab/__init__.py` — app metadata (name OpenGrab, v0.1.0)
 - `src/opengrab/models.py` — Link/Package/Account/FilterRule/PluginInfo + LinkStatus enum
@@ -63,7 +80,24 @@ Docker image (feature parity requested vs the JD2 docker docs).
   picker, playlist children). NOTE: `_supported_domains()` has a dead loop
   (`ie._match_valid_url.__code__ and []` hack) — clean it up on resume.
 
-## NOT YET WRITTEN (resume order)
+## Remaining work (resume order)
+1. **M3 — API completeness:** `/api/health` alias, `/api/notifications`,
+   `/api/captcha-test`, `/api/files`, `/api/clipboard`, `/api/audio`,
+   base_path + X-Forwarded-* handling. Keep token enforcement for all
+   non-local callers (decisions #2/#5).
+2. **M4 — GUI:** validate the native pywebview window; add pystray and the
+   visible, user-toggleable Click'n'Load clipboard watcher (decision #3).
+3. **M5 — UI completion:** notifications tab, audio player, PWA PNG icons.
+4. **M6 — Windows packaging:** PyInstaller spec/build script and verify the
+   packaged app boots and serves the UI.
+5. **M7 — Docker:** add Dockerfile, compose and env example. Docker is not
+   available on this machine, so its build must remain marked unverified.
+6. **M8 — Docs and hardening:** README, unit tests, yt-dlp bridge cleanup,
+   security review, and final acceptance pass against the spec.
+
+Historical work inventory continues below; files mentioned there already exist.
+Do not interpret their presence as proof that each requirement is complete.
+
 1. `src/opengrab/plugins/__init__.py` (export registry+base)
 2. `src/opengrab/engine/__init__.py`, `engine/downloader.py` — resumable .part
    download, N parallel range chunks (verified: 206 + content-range work),
@@ -116,7 +150,11 @@ Docker image (feature parity requested vs the JD2 docker docs).
     troubleshooting (won't start: WebView2 runtime, port, firewall, smoke
     test), support.
 
-## Feature-parity checklist (user requirement: "match and exceed")
+## Requested JD2 feature-parity target (not implementation status)
+
+The checklist below is a historical planning target. Its check marks and
+planned labels are not verification evidence; use the latest verified update
+above and the acceptance criteria in `PROJECT_SPEC.md`.
 JD2 docker docs sections → our implementation (see README numbering above):
 env vars ✓(planned), volumes ✓, ports ✓(5678), runtime param changes
 (= /api/settings + env) ✓, compose ✓, versioning/tags ✓, updates ✓,

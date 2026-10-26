@@ -15,6 +15,11 @@ from . import APP_ID, APP_NAME
 
 def app_data_dir() -> Path:
     """Per-user data dir:  %APPDATA%/OpenGrab   (settings.json, accounts, state)"""
+    override = os.environ.get("OPENGRAB_DATA_DIR")
+    if override:
+        p = Path(override).expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        return p
     if sys.platform.startswith("win"):
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     elif sys.platform == "darwin":
@@ -71,7 +76,7 @@ class Settings(BaseModel):
 
     # local api server
     api_host: str = "127.0.0.1"
-    api_port: int = 8765
+    api_port: int = 5678
     api_token: str = ""
 
     # maintenance

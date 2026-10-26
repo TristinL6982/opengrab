@@ -1,9 +1,17 @@
 # PROJECT_STATUS.md — handoff snapshot
 
-> Written at a pause point (2026-10-25, before a model switch).
-> `PROJECT_SPEC.md` is the source of truth for requirements. This file is a
-> state snapshot, not a spec. Everything below was verified on this machine
-> unless explicitly marked otherwise.
+> Original snapshot written at a pause point (2026-10-25, before a model switch).
+> `PROJECT_SPEC.md` is the source of truth for requirements. This file began
+> as a state snapshot; §4 and §8 have been updated after the original pause.
+> Historical git state in §6 does not describe the current working tree.
+
+## Latest update — M2 CLI milestone
+
+The editable install and CLI options are now verified in `.venv`. The smoke
+check verifies plugin discovery, API ping, and a real downloaded file's size
+and SHA-256. A headless CLI process served `/api/ping` on the requested local
+bind/port. This does not complete the product: major API, GUI, UI, packaging,
+Docker, documentation, and compatibility requirements remain open.
 
 ## 1. Overall goal
 
@@ -33,7 +41,6 @@ login + paywall handling, filters, accounts. Ship as platform builds
    requires HTTPS via a trusted reverse proxy or explicitly configured TLS.
    Never expose an unauthenticated HTTP service.
 6. **Default port:** 5678 (JD2 parity), user-configurable.
-   (Current code default is 8765 in `settings.py` — change pending, see M2.)
 
 ## 3. What works (verified)
 
@@ -70,11 +77,13 @@ login + paywall handling, filters, accounts. Ship as platform builds
 
 ## 4. What is incomplete (NOT done — do not claim otherwise)
 
-- **Entry points:** no `cli.py` / `__main__.py` / `smoke.py` →
-  `python -m opengrab --smoke-test` (spec §5) does not exist yet.
-  (`tests/e2e_api.py` covers the same ground but is not wired up.)
-- **GUI:** no `app.py` — no pywebview window, no tray, no clipboard
-  Click'n'Load watcher. (Deps ARE installed and importable — see §7.)
+- **CLI milestone:** `cli.py`, `__main__.py`, and `smoke.py` now exist.
+  Editable install and `--version`, `--help`, `--list-plugins`, and
+  `--smoke-test` were verified in `.venv`. The smoke check covers plugin scan,
+  local API ping, and a checksum-verified download; it does not cover resume.
+- **GUI:** `app.py` now serves the UI in pywebview, but native window startup
+  has not been verified. Tray and visible, user-toggleable clipboard
+  Click'n'Load capture remain unimplemented.
 - **API gaps vs spec §2:** `/api/health` (alias of `/api/ping`),
   `/api/captcha-test`, `/api/notifications`, `/api/files` (file manager
   list/mkdir/delete/rename/download/upload), `/api/terminal`,
@@ -87,7 +96,8 @@ login + paywall handling, filters, accounts. Ship as platform builds
   no `Dockerfile`/`docker-compose.yml`/`.env.example` (and unbuildable here —
   no docker CLI); no `README.md`.
 - **Unit tests:** none (only e2e + `tests/probe_curl.py` probe).
-- **Default port** is 8765 in code; decision #6 wants 5678.
+- **Default port** is now 5678 in settings and server defaults. An existing
+  saved user setting can still select a different port.
 - `plugins/builtin/ytbridge.py` has a known dead loop in
   `_supported_domains()` (`ie._match_valid_url.__code__ and []` hack) —
   clean up when touching that file.
@@ -110,7 +120,7 @@ login + paywall handling, filters, accounts. Ship as platform builds
   the system `python` (3.14). DNS is filtered: hetzner domains do NOT
   resolve; pypi.org / files.pythonhosted.org DO.
 
-## 6. Files changed at this pause point (git state)
+## 6. Files changed at the original pause point (historical git state)
 
 Uncommitted (all part of the verified milestone, safe to commit):
 - `M  PROGRESS.md` — refreshed build-state doc (user-updated)
@@ -132,31 +142,29 @@ Uncommitted (all part of the verified milestone, safe to commit):
 | `import webview` (pywebview 6.x import name) | **ok** (note: `import pywebview` FAILS — wrong module name; use `webview`) |
 | `import pystray` | ok (no `__version__` attr; that's normal) |
 | `docker --version` | **not found** — Docker unavailable on this machine |
+| `.venv\Scripts\python.exe -m pip install -e .` | **PASS** — editable install |
+| `.venv\Scripts\python.exe -m opengrab --version/--help` | **PASS** |
+| `.venv\Scripts\python.exe -m opengrab --smoke-test` | **PASS** — plugin scan, API ping, verified download |
+| Headless CLI on explicit localhost bind/port → `/api/ping` | **PASS** |
 | UI JS ↔ server API endpoint audit (grep) | all calls match |
 | Direct engine probe (mdurl URL → finished in ~3 s) | ok (earlier this session) |
 
 ## 8. Next concrete steps (resume order)
 
-0. **Commit the verified milestone** (§6 files) with a clear message — this
-   pause point. (Do this first so the switch loses nothing.)
-1. **M2 — entry points:** `cli.py` + `__main__.py` with `--smoke-test`
-   (wrap `tests/e2e_api.py`), `--version`, `--list-plugins`, `--headless`,
-   `--port/--bind`. Change default `api_port` 8765 → **5678** (decision #6).
-   Verify `python -m opengrab --smoke-test` exits 0.
-2. **M3 — API completeness:** `/api/health` alias, `/api/notifications`,
+0. **M3 — API completeness:** `/api/health` alias, `/api/notifications`,
    `/api/captcha-test`, `/api/files`, `/api/clipboard`, `/api/audio`,
    base_path + X-Forwarded-* handling. Keep token enforcement for all
    non-local callers (decisions #2/#5).
-3. **M4 — GUI:** `app.py` with pywebview window (`import webview`), pystray
+1. **M4 — GUI:** validate the pywebview window; add pystray
    tray, Click'n'Load clipboard watcher — watcher must be visible in UI and
    user-toggleable (decision #3).
-4. **M5 — UI completion:** notifications tab, audio player, PWA PNG icons
+2. **M5 — UI completion:** notifications tab, audio player, PWA PNG icons
    (generate with Pillow).
-5. **M6 — Windows packaging:** `build/OpenGrab.spec` + `build/build.bat`
+3. **M6 — Windows packaging:** `build/OpenGrab.spec` + `build/build.bat`
    (PyInstaller onedir) → verify `OpenGrab.exe` boots and serves UI here.
-6. **M7 — Docker:** `Dockerfile`, `docker-compose.yml`, `.env.example` per
+4. **M7 — Docker:** `Dockerfile`, `docker-compose.yml`, `.env.example` per
    spec §4. This machine cannot build/verify (no docker CLI) → mark
    UNVERIFIED in docs (decision #4).
-7. **M8 — Docs & hardening:** `README.md` (JD2-docs section parity), unit
+5. **M8 — Docs & hardening:** `README.md` (JD2-docs section parity), unit
    tests (downloader resume math), fix ytbridge `_supported_domains()` dead
    loop, final acceptance pass against spec §5 checklist.
