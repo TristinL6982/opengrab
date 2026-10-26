@@ -92,8 +92,14 @@ Built-in plugins include direct HTTP links, generic HTML page extraction, and
 the `yt-dlp` extractor bridge. Add custom Python plugins to the user `plugins`
 folder and use **rescan plugins**. Treat plugins as executable code running
 with OpenGrab's privileges; install only code you trust. The extractor bridge
-does not imply that every upstream site works. Playlist enumeration is capped
-and does not yet provide a full format/quality selection experience.
+does not imply that every upstream site works. Playlist and channel URLs are
+enumerated as reviewable child links (10,000 by default, configurable up to
+50,000); nothing is queued until individual children are selected or “queue
+all” is chosen. Media downloads use the best progressive stream by default,
+with an optional maximum resolution. Separate video/audio streams require
+merging and currently fail with a clear message rather than silently dropping
+audio. Playlist enumeration and format choice have fixture tests; live
+extractor compatibility is not independently verified.
 
 ## Packagizer
 

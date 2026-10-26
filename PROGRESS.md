@@ -27,6 +27,15 @@ fixture verifies both paths; the 16-check interrupted-download/resume suite and
 real-network smoke test also pass. Per-host concurrency and richer bandwidth
 profiles remain open.
 
+**Media playlist handling is corrected and verified** with mocked yt-dlp
+metadata: playlist entries now become real reviewable item URLs, enumeration
+is configurable (10,000 default, capped at 50,000), and the UI warns when the
+cap truncated results. Users can select children or queue all. The best
+progressive format is selected by default; a max-resolution setting constrains
+selection, and separate audio/video formats fail visibly rather than silently
+losing audio. Fixture tests pass; live upstream extractor behavior remains
+unverified.
+
 **M4 GUI lifecycle and M5 UI panels are implemented.** A mocked lifecycle test
 verifies close-to-tray, show, clipboard-monitor toggle, and Exit cleanup; the
 native WebView2/tray window has not been manually exercised. The UI now has

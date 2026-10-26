@@ -238,6 +238,8 @@ class DownloadManager:
 
     def _apply_grab(self, link: Link, plugin_id: str, g) -> None:
         link.plugin = plugin_id
+        if g.extra:
+            link.extra.update(g.extra)
         if g.title:
             link.title = g.title
         if g.filename:

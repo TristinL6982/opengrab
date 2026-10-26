@@ -207,6 +207,11 @@
           <input id="set-per_link_chunks" type="number" min="1" max="16"></label>
         <label>speed limit (kB/s, 0 = off)
           <input id="set-speed_limit_kbps" type="number" min="0"></label>
+        <label>media max resolution (0 = best progressive)
+          <input id="set-media_max_height" type="number" min="0" max="4320" step="120"></label>
+        <label>playlist items to enumerate (max 50000)
+          <input id="set-media_playlist_max_entries" type="number" min="1" max="50000"></label>
+        <p class="hint">Media downloads use a single progressive stream. Separate video/audio tracks need merging, which this build does not yet provide. Playlists stay as reviewable packages until you queue selected items or choose “queue all”.</p>
         <label>retries
           <input id="set-retry_max" type="number" min="0" max="10"></label>
         <label>TLS impersonation

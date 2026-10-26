@@ -91,7 +91,11 @@ class YtDlpBridgePlugin(BridgePlugin):
         return any(host == d or host.endswith("." + d) for d in doms)
 
     def _extract(self, url: str, ctx: PluginContext, pick: str = "best") -> dict:
-        opts = {"quiet": True, "no_warnings": True, "noplaylist": True,
+        max_entries = max(1, min(
+            int(getattr(ctx.settings, "media_playlist_max_entries", 10000)),
+            50000))
+        opts = {"quiet": True, "no_warnings": True, "noplaylist": False,
+                "extract_flat": "in_playlist", "playlistend": max_entries + 1,
                 "skip_download": True, "socket_timeout": ctx.settings.timeout_s}
         if ctx.settings.proxy:
             opts["proxy"] = ctx.settings.proxy
@@ -105,18 +109,37 @@ class YtDlpBridgePlugin(BridgePlugin):
         if info.get("_type") == "playlist":
             entries = info.get("entries") or []
             keep = []
-            for en in entries[:100]:
+            truncated = False
+            for en in entries:
                 if not en:
                     continue
-                try:
-                    keep.append(self._pick_url(en))
-                except Exception:
-                    pass
+                child_url = self._playlist_entry_url(en, url)
+                if child_url:
+                    if len(keep) >= max_entries:
+                        truncated = True
+                        break
+                    keep.append((child_url, str(en.get("title") or en.get("id") or "video")))
             info["_children"] = keep
+            info["_children_truncated"] = truncated
         return info
 
     @staticmethod
-    def _pick_url(info: dict) -> dict:
+    def _playlist_entry_url(entry: dict, playlist_url: str) -> str:
+        for key in ("webpage_url", "original_url", "url"):
+            value = str(entry.get(key) or "")
+            if value.startswith(("http://", "https://")):
+                return value
+        video_id = str(entry.get("id") or "")
+        extractor = str(entry.get("ie_key") or entry.get("extractor_key") or "").lower()
+        host = urlparse(playlist_url).netloc.lower()
+        if video_id and ("youtube" in extractor
+                         or host == "youtube.com" or host.endswith(".youtube.com")
+                         or host == "youtu.be"):
+            return f"https://www.youtube.com/watch?v={video_id}"
+        return ""
+
+    @staticmethod
+    def _pick_url(info: dict, max_height: int = 0) -> dict:
         formats = info.get("formats") or []
         url = info.get("url")
         if url:
@@ -126,14 +149,20 @@ class YtDlpBridgePlugin(BridgePlugin):
         prog = [f for f in formats if f.get("vcodec") != "none"
                 and f.get("acodec") != "none" and f.get("url")]
         if prog:
-            best = max(prog, key=lambda f: (f.get("height") or 0))
+            eligible = ([f for f in prog if (f.get("height") or 0) <= max_height]
+                        if max_height else prog)
+            if max_height and not eligible:
+                raise PluginError(f"no progressive format at or below {max_height}p")
+            best = max(eligible, key=lambda f: (f.get("height") or 0,
+                                                f.get("tbr") or 0))
             return {"url": best["url"], "ext": best.get("ext", "mp4"),
                     "size": best.get("filesize") or best.get("filesize_approx")}
-        v = [f for f in formats if f.get("vcodec") != "none" and f.get("url")]
+        v = [f for f in formats if f.get("vcodec") != "none" and f.get("url")
+             and (not max_height or (f.get("height") or 0) <= max_height)]
         a = [f for f in formats if f.get("acodec") != "none" and f.get("url")]
         if v and a:
-            return {"url": max(v, key=lambda f: (f.get("height") or 0))["url"],
-                    "ext": "mp4", "size": None, "_note": "video+audio merged format not picked"}
+            raise PluginError(
+                "this stream uses separate video and audio tracks; choose a progressive format")
         if v:
             best = max(v, key=lambda f: (f.get("height") or 0))
             return {"url": best["url"], "ext": best.get("ext", "mp4"),
@@ -150,8 +179,12 @@ class YtDlpBridgePlugin(BridgePlugin):
         title = info.get("title") or url
         if info.get("_children"):
             return GrabResult(title=title, site=host, plugin_id=self.id,
-                              children=[(u, "video") for u in info["_children"]])
-        pick = self._pick_url(info)
+                              children=info["_children"],
+                              extra={"playlist_truncated": info.get("_children_truncated", False),
+                                     "playlist_count": len(info["_children"])})
+        pick = self._pick_url(
+            info, max_height=max(0, min(
+                4320, int(getattr(ctx.settings, "media_max_height", 0)))))
         ext = pick.get("ext") or "mp4"
         fname = f"{title[:80]}.{ext}"
         return GrabResult(

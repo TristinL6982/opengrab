@@ -56,6 +56,8 @@ class Settings(BaseModel):
     timeout_s: float = 30.0
     ua_rotation: bool = False
     ua_pool: list[str] = Field(default_factory=list)
+    media_max_height: int = 0          # 0 = best progressive format
+    media_playlist_max_entries: int = 10000
 
     # captcha solving (unpaywalled: BYO keys, local OCR, or manual)
     captcha_provider: str = "auto"     # auto|manual|2captcha|capmonster|capsolver|ddddocr

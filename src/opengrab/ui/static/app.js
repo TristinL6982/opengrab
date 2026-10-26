@@ -240,6 +240,8 @@ function childrenBlock(l) {
       }).join("")
     : "";
   return `<div class="kids">
+    ${l.extra?.playlist_truncated ? `<div class="u" style="color:var(--warn)">Showing ${l.children.length} items; increase the playlist limit in Settings to enumerate more.</div>` : ""}
+    <div class="u">${l.children.length} item(s) found. Nothing downloads until you queue a selection or choose “queue all”.</div>
     <button class="sm" data-act="toggle-kids" data-id="${l.id}">${open ? "▾ hide" : "▸ show " + l.children.length + " children"}</button>
     ${open ? `<button class="sm" data-act="queue-children" data-id="${l.id}">queue all</button>` : ""}
     ${rows}
@@ -649,7 +651,8 @@ $("#btn-clear-finished").addEventListener("click", async () => {
 
 /* ============================================================ settings */
 const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
-  "speed_limit_kbps", "retry_max", "impersonate", "proxy", "captcha_provider",
+  "speed_limit_kbps", "media_max_height", "media_playlist_max_entries",
+  "retry_max", "impersonate", "proxy", "captcha_provider",
   "captcha_2captcha_key", "captcha_capmonster_key", "captcha_capsolver_key",
   "ua_rotation", "auto_start_after_grab", "clipboard_monitor_enabled",
   "terminal_enabled", "auto_extract_archives", "archive_max_files",
@@ -686,7 +689,8 @@ $("#btn-set-save").addEventListener("click", async () => {
     if (!el) continue;
     body[f] = el.type === "checkbox" ? el.checked
       : ["max_parallel", "per_link_chunks", "speed_limit_kbps", "retry_max",
-        "archive_max_files", "archive_max_expanded_gib"].includes(f)
+        "archive_max_files", "archive_max_expanded_gib", "media_max_height",
+        "media_playlist_max_entries"].includes(f)
         ? +el.value : el.value;
   }
   body.confirm_delete = $("#set-confirm_delete").checked;

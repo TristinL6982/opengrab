@@ -8,8 +8,9 @@
 ## Latest update — 2026-10-25: M3–M6 progress
 
 The latest verification is recorded in `PROGRESS.md`. M3 now passes 32 API
-checks; the GUI lifecycle mock passes; the completed UI panels are syntax/API
-checked; and the PyInstaller onedir bundle passes packaged `--version`, plugin
+checks; the GUI lifecycle mock passes; range fallback and playlist selection
+have targeted fixture tests; the completed UI panels are syntax/API checked;
+and the PyInstaller onedir bundle passes packaged `--version`, plugin
 discovery, and the real-download `--smoke-test`. Native WebView2/tray GUI
 interaction has not been manually run. Docker files are drafted, but Docker is
 not installed and remains unverified. The original M2 snapshot below is

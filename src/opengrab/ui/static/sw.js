@@ -1,6 +1,6 @@
 /* OpenGrab service worker — cache-first for static UI assets.
    API calls always go to the network (never cached). */
-const CACHE = "opengrab-ui-v3";
+const CACHE = "opengrab-ui-v4";
 const SCOPE = new URL("./", self.registration.scope);
 const ASSETS = [
   "",
