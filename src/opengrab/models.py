@@ -52,16 +52,21 @@ class Link(BaseModel):
     created: float = Field(default_factory=time.time)
     finished: Optional[float] = None
     extra: dict[str, Any] = Field(default_factory=dict)
-    # internal
-    _direct_url: Optional[str] = None
-    _direct_headers: dict[str, str] = Field(default_factory=dict, repr=False)
+    # resolution / package context
+    plugin: str = ""
+    children: list = Field(default_factory=list)  # [[url, title], ...]
+    parent: str = ""          # parent link id (package child)
+    path: str = ""            # final file path when FINISHED
+    # direct-download info (set after resolve; not shown in to_public)
+    direct_url: Optional[str] = None
+    direct_headers: dict[str, str] = Field(default_factory=dict, repr=False)
 
     model_config = {"protected_namespaces": ()}
 
     def to_public(self) -> dict[str, Any]:
-        d = self.model_dump(exclude={"_direct_url", "_direct_headers", "captcha_image"})
+        d = self.model_dump(exclude={"direct_url", "direct_headers", "captcha_image"})
         d["has_captcha_image"] = bool(self.captcha_image)
-        d["direct_url"] = self._direct_url is not None
+        d["direct_url"] = self.direct_url is not None
         return d
 
 

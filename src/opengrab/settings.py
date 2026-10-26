@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from . import APP_ID, APP_NAME
 
@@ -79,7 +79,7 @@ class Settings(BaseModel):
             tmp.write_text(self.model_dump_json(indent=2), encoding="utf-8")
             tmp.replace(p)
 
-    _lock = threading.Lock()
+    _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
 
 def load_settings() -> Settings:

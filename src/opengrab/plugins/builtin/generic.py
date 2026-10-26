@@ -75,6 +75,7 @@ class GenericPagePlugin(SitePlugin):
     origin = "builtin"
     supports_captcha = True
     supports_login = False
+    universal = True
     description = ("Falls back for any host: parses the page for download "
                    "links, embedded media and magnets.")
 

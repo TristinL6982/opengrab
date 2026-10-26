@@ -89,9 +89,17 @@ class PluginRegistry:
             except Exception:
                 continue
         def specificity(p: SitePlugin) -> tuple:
-            # longer site match = more specific; non-bridges win over bridges
-            return (0 if p.origin != "bridge" and not p.__class__.__name__.endswith("BridgePlugin") else 1,
-                    -len(p.site))
+            host = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(url).netloc.lower()
+            s = (p.site or "").lower()
+            if s and (host == s or host.endswith("." + s)):
+                tier = 0                       # dedicated site plugin
+            elif getattr(p, "universal", False):
+                tier = 3                       # catch-all fallback
+            elif p.origin == "bridge" or type(p).__name__.endswith("BridgePlugin"):
+                tier = 2                       # bridge (yt-dlp etc.)
+            else:
+                tier = 1                       # generic non-bridge (direct, user)
+            return (tier, -len(s))
         out.sort(key=specificity)
         return out
 

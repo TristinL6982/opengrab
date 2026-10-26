@@ -213,6 +213,7 @@ class SitePlugin:
     origin: str = "user"
     supports_captcha: bool = True
     supports_login: bool = False
+    universal: bool = False          # True = catch-all fallback (lowest priority)
     description: str = ""
 
     def supports(self, url: str) -> bool:

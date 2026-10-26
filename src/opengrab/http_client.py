@@ -213,6 +213,100 @@ class HttpClient:
     def post(self, url: str, **kw) -> Response:
         return self.request("POST", url, **kw)
 
+    # -- streaming (large downloads) -----------------------------------------
+    def stream(self, url: str, headers: Optional[dict] = None,
+               timeout: Optional[float] = None,
+               referer: Optional[str] = None) -> "StreamHandle":
+        """Streaming GET for file downloads.  Returns a StreamHandle with
+        .status/.headers/.url/.iter_content()/ .close() — the body is NOT
+        buffered in memory.  Use for anything that might be big."""
+        s = self.settings
+        h = dict(self._base_headers(referer))
+        for k, v in (headers or {}).items():
+            if v is not None:
+                h[k] = v
+        cookie_hdr = "; ".join(f"{k}={v}"
+                               for k, v in self._cookies_for(url).items())
+        if cookie_hdr:
+            h["cookie"] = cookie_hdr
+        timeout = timeout if timeout is not None else max(s.timeout_s, 60.0)
+        proxy = s.proxy or None
+
+        if HAVE_CURL_CFFI:
+            imp = s.impersonate or "chrome"
+            try:
+                sess = _crl.Session(impersonate=imp)
+            except Exception:
+                sess = _crl.Session()
+            kw: dict = dict(headers=h, timeout=timeout,
+                            allow_redirects=True, stream=True)
+            if proxy:
+                kw["proxies"] = {"http": proxy, "https": proxy}
+            raw = sess.get(url, **kw)
+            self._store_cookies(url, raw.headers)
+            return StreamHandle(raw, raw.status_code, dict(raw.headers),
+                                str(raw.url), owner=sess)
+        import httpx
+        kw2: dict = dict(verify=True, timeout=timeout, follow_redirects=True)
+        if proxy:
+            kw2["proxy"] = proxy
+        cli = httpx.Client(**kw2)
+        cm = cli.stream("GET", url, headers=h)
+        raw = cm.__enter__()
+        self._store_cookies(url, raw.headers)
+        return StreamHandle(raw, raw.status_code, dict(raw.headers),
+                            str(raw.url), owner=cli, exit_cm=cm)
+
+
+class StreamHandle:
+    """Streaming response for large downloads (see HttpClient.stream)."""
+
+    def __init__(self, raw, status: int, headers: dict, final_url: str,
+                 owner=None, exit_cm=None):
+        self._raw = raw
+        self.status = status
+        self.headers = headers
+        self.url = final_url
+        self._owner = owner
+        self._exit_cm = exit_cm
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status < 300
+
+    def iter_content(self, chunk_size: int = 262144):
+        it = self._raw.iter_content(chunk_size=chunk_size) \
+            if hasattr(self._raw, "iter_content") else _iter_read(self._raw)
+        for chunk in it:
+            if chunk:
+                yield chunk
+
+    def close(self) -> None:
+        try:
+            if self._exit_cm is not None:
+                self._exit_cm.__exit__(None, None, None)
+            elif self._raw is not None and hasattr(self._raw, "close"):
+                self._raw.close()
+        except Exception:
+            pass
+        try:
+            if self._owner is not None and hasattr(self._owner, "close"):
+                self._owner.close()
+        except Exception:
+            pass
+
+
+def _iter_read(raw, chunk_size: int = 262144):
+    """Fallback iterator for responses without iter_content."""
+    while True:
+        try:
+            piece = raw.read(chunk_size)
+        except Exception:
+            break
+        if not piece:
+            break
+        yield piece
+
 
 class _FakeRequest:
     def __init__(self, url: str):

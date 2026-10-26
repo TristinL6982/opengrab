@@ -11,6 +11,7 @@ Requires:  pip install -U yt-dlp   (bundled in requirements.txt)
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import urlparse
 
 from ..base import (BridgePlugin, GrabResult, ResolveResult, PluginError,
@@ -49,16 +50,18 @@ def _supported_domains() -> list[str]:
         import yt_dlp
         ies = yt_dlp.gen_extractors()
         doms: set[str] = set()
+        # Each extractor has a `_VALID_URL` regex (or list of regexes);
+        # pull any literal domains out.
         for ie in ies:
-            try:
-                for _ie_class, _ie in (ie._match_valid_url.__code__ and []):
-                    pass
-            except Exception:
-                pass
-            # each extractor has a `_VALID_URL`; parse domain(s) from it
-            v = getattr(ie, "_VALID_URL", "")
-            for m in __import__("re").findall(r"\*\.(?:www\.)?([a-z0-9\-]+(?:\.[a-z]{2,})+)", v, re.I):
-                doms.add(m.lower())
+            v = getattr(ie, "_VALID_URL", "") or ""
+            vals = v if isinstance(v, (list, tuple)) else [v]
+            for raw in vals:
+                s = str(raw).replace("\\.", ".").replace("\\", "")  # unescape
+                for m in re.finditer(r"[a-z0-9\-]+(?:\.[a-z0-9\-]+)+", s, re.I):
+                    d = m.group(0).lower()
+                    # keep only host-like tokens (drop scheme fragments)
+                    if re.fullmatch(r"[a-z0-9\-]+(\.[a-z]{2,})+", d):
+                        doms.add(d)
         _supported_cache = sorted(doms)
     except Exception:
         _supported_cache = []

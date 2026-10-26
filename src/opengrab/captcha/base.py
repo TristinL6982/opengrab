@@ -180,10 +180,6 @@ class TwoCaptchaSolver(BaseSolver, _TwoCaptchaMixin):
 
     def solve(self, req: CaptchaRequest, timeout_s: float = 90.0, client=None) -> CaptchaResult:
         key = self.settings.captcha_2captcha_key
-        if not client:
-            from .http_client import HttpClient
-            from .settings import Settings
-            client = HttpClient(Settings())
         img_b64 = self.fetch_image_b64(req, client)
         params: dict = {"key": key}
         if req.kind in ("recaptcha", "hcaptcha", "turnstile"):
