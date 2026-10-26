@@ -1,0 +1,20 @@
+services:
+  opengrab:
+    build: .
+    image: opengrab:0.1.0
+    container_name: opengrab
+    restart: unless-stopped
+    ports:
+      - "${OPENGRAB_PORT:-5678}:5678"
+    environment:
+      OPENGRAB_BIND: 0.0.0.0
+      OPENGRAB_PORT: 5678
+      OPENGRAB_DATA_DIR: /config
+      OPENGRAB_DOWNLOAD_DIR: /downloads
+      OPENGRAB_BASE_PATH: ${OPENGRAB_BASE_PATH:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./config:/config
+      - ./downloads:/downloads
+    security_opt:
+      - no-new-privileges:true

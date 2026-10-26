@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 dist/
+build/OpenGrab/
+build/work/
+build/release/
+*.egg-info/
 build/OpenGrab/dist/
 *.spec.bak
 .venv.bak

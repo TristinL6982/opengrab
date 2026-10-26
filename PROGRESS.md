@@ -11,15 +11,32 @@ port. Default port values are now 5678. `--data-dir` selects an isolated data
 directory; `OPENGRAB_DATA_DIR`, `OPENGRAB_BIND`/`OPENGRAB_API_HOST`, and
 `OPENGRAB_PORT`/`OPENGRAB_API_PORT`, and `OPENGRAB_BASE_PATH` are supported.
 
-**M3 API core is implemented and verified** with 23 endpoint checks: health
+**M3 API core is implemented and verified** with 29 endpoint checks: health
 alias, CAPTCHA diagnostics, notifications, download-folder-contained file
-operations, range streaming, base-path routing, and HTTPS-proxy/auth checks.
-Clipboard HTTP behavior is tested with a mock backend; the native Windows
-clipboard integration remains unverified. The terminal API is opt-in and
-requires the bearer token even on localhost. OpenGrab is **not
-production-ready**: tray/clipboard capture, UI completion, Docker, native
-builds, documentation, and other requirements remain incomplete or unverified.
-See `PROJECT_STATUS.md` and `PROJECT_SPEC.md`.
+operations, range streaming and scoped audio tickets, base-path routing,
+HTTPS-proxy/auth checks, clipboard review/dedupe, and the opt-in token-gated
+terminal, and a diagnostics snapshot that omits tokens, proxy credentials, and
+download URLs. Clipboard HTTP behavior uses a mock; native OS clipboard
+interaction remains unverified.
+
+**M4 GUI lifecycle and M5 UI panels are implemented.** A mocked lifecycle test
+verifies close-to-tray, show, clipboard-monitor toggle, and Exit cleanup; the
+native WebView2/tray window has not been manually exercised. The UI now has
+notifications, a download-root-contained file browser (mkdir, upload, rename,
+delete, download), audio playback through expiring scoped tickets, LinkGrabber
+review, opt-in terminal, and diagnostics export panels. `node --check` passes; M3 API tests verify
+the backing operations. PWA 192/512 PNG icons and package data rules are added.
+
+**M6 Windows onedir packaging is implemented and verified.** `build/OpenGrab.spec`
+and `build/build.bat` produce `build/release/OpenGrab/OpenGrab.exe`.
+Packaged `--version`, `--list-plugins`, and `--smoke-test` pass; the packaged
+smoke performs a real API-backed download and SHA-256 check. Native interactive
+WebView2/tray launch remains unverified. **M7 Docker files are drafted but
+unverified** because Docker is unavailable here. OpenGrab is **not
+production-ready**: broad spec requirements remain incomplete, including
+archives, router reconnect, Packagizer, large maintained plugin catalogs,
+browser capture, and cross-platform builds. See `PROJECT_STATUS.md` and
+`PROJECT_SPEC.md`.
 
 The end-to-end rerun also caught and fixed a Windows race between debounced
 queue persistence and shutdown. Saves now serialize before replacing the state
@@ -90,18 +107,12 @@ Docker image (feature parity requested vs the JD2 docker docs).
   (`ie._match_valid_url.__code__ and []` hack) — clean it up on resume.
 
 ## Remaining work (resume order)
-1. **M3 — API remaining:** validate the native Windows clipboard backend
-   without reading or overwriting the user's live clipboard.
-2. **M4 — GUI:** validate the native pywebview window; add pystray and the
-   visible, user-toggleable Click'n'Load clipboard watcher (decision #3).
-3. **M5 — UI completion:** notifications, file manager, clipboard, audio, and
-   opt-in terminal panels; generate PWA PNG icons.
-4. **M6 — Windows packaging:** PyInstaller spec/build script and verify the
-   packaged app boots and serves the UI.
-5. **M7 — Docker:** add Dockerfile, compose and env example. Docker is not
-   available on this machine, so its build must remain marked unverified.
-6. **M8 — Docs and hardening:** README, unit tests, yt-dlp bridge cleanup,
-   security review, and final acceptance pass against the spec.
+1. **M7 — Docker:** Dockerfile, compose, and environment example drafted;
+   verify only if Docker becomes available. Implement safe container auth and
+   deployment documentation.
+2. **M8 — Docs and hardening:** README, archive extraction, diagnostics,
+   Packagizer rules, yt-dlp bridge cleanup, security review, then acceptance
+   pass. Large host/router compatibility targets remain unverified.
 
 Historical work inventory continues below; files mentioned there already exist.
 Do not interpret their presence as proof that each requirement is complete.
