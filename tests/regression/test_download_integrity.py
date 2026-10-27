@@ -3,12 +3,10 @@ import tempfile
 import pytest
 from tests.regression.conftest import run_repro
 
-@pytest.mark.xfail(strict=True, reason="C1: stopped multi-chunk download is marked finished with a corrupt file")
 def test_c1_stop_keeps_file_unfinished():
     r = run_repro("resume_parallel.py")
     assert r.returncode == 0, r.stdout[-800:]
 
-@pytest.mark.xfail(strict=True, reason="C2: resume after exit finishes instantly with a corrupt file")
 def test_c2_resume_after_exit_is_intact():
     tmp_path = tempfile.mkdtemp(prefix="og-c2-")
     run_repro("restart.py", "graceful", tmp_path)

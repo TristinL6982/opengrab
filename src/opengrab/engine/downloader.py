@@ -14,6 +14,7 @@ Design (mirrors JD2's downloader internals, modernized):
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -134,6 +135,12 @@ def _sanitize(name: str) -> str:
     return name[:200] or "download"
 
 
+def _cancelled():
+    e = DownloadError("cancelled", transient=False)
+    e.cancelled = True
+    return e
+
+
 class LinkDownload:
     """Downloads one link's file.  Run inside a worker thread."""
 
@@ -173,6 +180,12 @@ class LinkDownload:
         self._last_tick = 0.0
         self._active_threads = 0
 
+        # Sidecar chunk map
+        self.meta = str(self.part) + ".json"
+        self._chunks = None
+        self._meta_lock = threading.Lock()
+        self._abort = threading.Event()
+
     # ------------------------------------------------------------------ API
     def pause(self) -> None:
         self.pause_event.set()
@@ -191,13 +204,17 @@ class LinkDownload:
     # ------------------------------------------------------------- internals
     def _stop_check(self) -> None:
         if self.stop_event.is_set():
-            raise DownloadError("cancelled", transient=False)
+            raise _cancelled()
+        if self._abort.is_set():
+            raise _cancelled()
 
     def _sleep_paused(self) -> None:
         """Block while paused; cancel wins."""
         while self.pause_event.is_set():
             if self.stop_event.is_set():
-                raise DownloadError("cancelled", transient=False)
+                raise _cancelled()
+            if self._abort.is_set():
+                raise _cancelled()
             time.sleep(0.2)
 
     def _update_speed(self, n: int) -> None:
@@ -257,6 +274,49 @@ class LinkDownload:
             except Exception:
                 pass
 
+    def _save_meta(self) -> None:
+        if self._chunks is None:
+            return
+        # Chunk threads checkpoint concurrently: serialize the snapshot,
+        # the shared temp file and the atomic replace.
+        with self._meta_lock:
+            with self._state_lock:
+                data = {"url": self.url, "total": self._total,
+                        "chunks": [list(c) for c in self._chunks]}
+            tmp_path = self.meta + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.meta)
+
+    def _load_meta(self) -> list[list[int]]:
+        if not os.path.exists(self.meta):
+            return None
+        try:
+            with open(self.meta, "r") as f:
+                data = json.load(f)
+            if (data.get("total") != self._total or
+                    not isinstance(data.get("chunks"), list)):
+                return None
+            chunks = []
+            for ch in data["chunks"]:
+                if (not isinstance(ch, list) or len(ch) != 3 or
+                        any(not isinstance(x, int) for x in ch) or
+                        ch[0] < 0 or ch[2] < 0 or ch[2] > ch[1] - ch[0]):
+                    return None
+                chunks.append(ch)
+            return chunks
+        except Exception:
+            return None
+
+    def _drop_meta(self) -> None:
+        with self._meta_lock:
+            try:
+                os.remove(self.meta)
+            except Exception:
+                pass
+
     def run(self) -> Path:
         """Execute the download; returns final file path. Raises
         DownloadError on failure/cancel."""
@@ -272,74 +332,108 @@ class LinkDownload:
                 self.link.filename = m.group(1).strip()
                 self.dest = self.dest_dir / _sanitize(self.link.filename)
                 self.part = self.dest_dir / (self.link.filename + ".part")
-
-        part_size = self.part.stat().st_size if self.part.exists() else 0
-        if self._total is not None and 0 < part_size > self._total:
-            part_size = 0  # stale/larger part -> start over
-        self._done = part_size if part_size <= (self._total or part_size) else 0
+                # Update meta path when part file changes
+                self.meta = str(self.part) + ".json"
 
         # speed limit: settings value is KB/s (JD2-style)
         limit = (getattr(self.settings, "speed_limit_kbps", 0) or 0) * 1024
         self._limiter.set_rate(limit)
 
-        if self._total is not None and self._done >= self._total:
-            self._finalize()
-            return self.final_path
-
-        chunks = 1
-        if (probe.accept_ranges and self._total
-                and self._total - self._done >= CHUNK_MIN):
-            chunks = max(1, min(getattr(self.settings, "per_link_chunks", 2) or 1,
-                                8))
+        chunks_meta = self._load_meta() if self._total else None
         try:
-            if chunks == 1:
-                self._stream(self._done, None)
+            if chunks_meta is not None:
+                # Resume a multi-chunk download from its sidecar map. The
+                # .part size is meaningless here (it was pre-allocated).
+                self._chunks = chunks_meta
+                with self._state_lock:
+                    self._done = sum(ch[2] for ch in chunks_meta)
+                self._parallel(self._total, self._chunks)
             else:
-                try:
-                    self._parallel(self._done, self._total, chunks)
-                except RangeUnsupported:
-                    # A probe header is only a hint. If a chunk request is
-                    # ignored or malformed, discard all partial chunk writes
-                    # and restart sequentially to avoid silently corrupting a
-                    # file. The server may still accept a normal GET.
-                    with self._file_lock:
-                        with self.part.open("wb"):
-                            pass
-                    with self._state_lock:
-                        self._done = 0
-                        self._samples.clear()
-                        self._speed = 0.0
-                    self._stream(0, None)
+                if os.path.exists(self.meta):
+                    # Invalid or stale map: the .part cannot be trusted.
+                    self._drop_meta()
+                    if self.part.exists():
+                        self.part.unlink()
+                part_size = self.part.stat().st_size if self.part.exists() else 0
+                if self._total is not None and part_size > self._total:
+                    self.part.unlink()
+                    part_size = 0
+                with self._state_lock:
+                    self._done = part_size
+                if self._total is not None and part_size == self._total:
+                    pass  # complete single-stream part: finalize below
+                elif (probe.accept_ranges and self._total and part_size == 0
+                        and self._total >= CHUNK_MIN
+                        and (getattr(self.settings, "per_link_chunks", 2) or 1) > 1):
+                    n = max(2, min(getattr(self.settings, "per_link_chunks", 2), 8))
+                    size = self._total // n
+                    self._chunks = [[i * size, self._total if i == n - 1 else (i + 1) * size, 0]
+                                    for i in range(n)]
+                    self._save_meta()
+                    try:
+                        self._parallel(self._total, self._chunks)
+                    except RangeUnsupported:
+                        # A probe header is only a hint: restart sequentially.
+                        self._drop_meta()
+                        self._chunks = None
+                        self._abort.clear()  # siblings aborted; start clean
+                        with self._file_lock:
+                            with self.part.open("wb"):
+                                pass
+                        with self._state_lock:
+                            self._done = 0
+                            self._samples.clear()
+                            self._speed = 0.0
+                        self._stream(0, None)
+                else:
+                    self._abort.clear()
+                    self._stream(part_size, None)
         except DownloadError:
             raise
         except Exception as e:
             if self.stop_event.is_set():
-                raise DownloadError("cancelled", transient=False)
+                raise _cancelled()
             raise DownloadError(f"download failed: {e}",
                                 transient=_is_transient(e))
+        if (self._total is not None and self.part.exists()
+                and self.part.stat().st_size != self._total):
+            raise DownloadError("size mismatch", transient=True)
         self._finalize()
+        self._drop_meta()
         return self.final_path
 
     # -- single stream -----------------------------------------------------
-    def _stream(self, start: int, end: Optional[int]) -> None:
+    def _stream(self, start: int, end: Optional[int], idx: int = None) -> None:
         """(Re)fetch [start, end) appending into the part file."""
         backoff = 1.0
+        attempts = 0
+        
+        # The caller passes the real resume offset; pos tracks every byte
+        # written so retries continue from where the data actually ends.
+        pos = start
+        track = idx is not None and self._chunks is not None
+        chunk_start = self._chunks[idx][0] if track else 0
+
         while True:
             self._stop_check()
             self._sleep_paused()
+            
             sess = _open_session(self.settings)
             try:
                 headers = dict(self.headers)
                 if self._cookies:
                     headers["Cookie"] = "; ".join(
                         f"{k}={v}" for k, v in self._cookies.items())
-                ranged = start > 0 or end is not None
+                    
+                ranged = pos > 0 or end is not None
                 if ranged:
-                    headers["Range"] = f"bytes={start}-"
+                    headers["Range"] = f"bytes={pos}-"
                     if end is not None:
-                        headers["Range"] = f"bytes={start}-{end - 1}"
+                        headers["Range"] = f"bytes={pos}-{end - 1}"
+                        
                 r = sess.get(self.url, headers=headers, stream=True,
                              timeout=60.0, allow_redirects=True)
+                
                 if ranged:
                     if r.status_code == 200:
                         raise RangeUnsupported("server ignored Range request")
@@ -350,19 +444,24 @@ class LinkDownload:
                                 Exception(f"HTTP {r.status_code}")))
                     cr = r.headers.get("content-range", "")
                     match = re.fullmatch(r"bytes\s+(\d+)-(\d+)/(\d+)", cr.strip(), re.I)
+                    
+                    # Validate content range against what we expect
                     expected_end = (end - 1 if end is not None
                                     else (self._total - 1 if self._total else None))
-                    if (not match or int(match.group(1)) != start
+                    
+                    if (not match or int(match.group(1)) != pos
                             or (expected_end is not None
                                 and int(match.group(2)) != expected_end)
                             or (self._total is not None
                                 and int(match.group(3)) != self._total)):
                         raise RangeUnsupported(
                             "server returned an invalid Content-Range")
+                        
                 elif r.status_code >= 400:
                     raise DownloadError(f"HTTP {r.status_code}",
                                         transient=_is_transient(
                                             Exception(f"HTTP {r.status_code}")))
+                
                 # unknown-size probe: learn total now
                 if self._total is None:
                     cr = r.headers.get("content-range", "")
@@ -370,38 +469,72 @@ class LinkDownload:
                     if m:
                         self._total = int(m.group(1))
                     elif _int_hdr(r.headers.get("content-length")) is not None:
-                        self._total = start + int(r.headers["content-length"])
-                expected_bytes = (end - start if ranged and end is not None
-                                  else (self._total - start if ranged
+                        self._total = pos + int(r.headers["content-length"])
+                        
+                expected_bytes = (end - pos if ranged and end is not None
+                                  else (self._total - pos if ranged
                                         and self._total is not None else None))
+                                  
                 received = 0
+                
                 mode = "r+b" if self.part.exists() else "wb"
                 with open(self.part, mode) as f:
-                    if start > 0:
-                        f.seek(start)
-                    for piece in r.iter_content(READ_CHUNK):
-                        if not piece:
-                            continue
-                        self._stop_check()
-                        self._sleep_paused()
-                        self._limiter.consume(len(piece))
-                        f.write(piece)
-                        received += len(piece)
-                        self._update_speed(len(piece))
+                    if pos > 0:
+                        f.seek(pos)
+                    last_save = time.monotonic()
+
+                    def checkpoint() -> None:
+                        # The sidecar may only claim bytes that are on disk.
+                        f.flush()
+                        os.fsync(f.fileno())
+                        if track:
+                            with self._state_lock:
+                                self._chunks[idx][2] = pos - chunk_start
+                            self._save_meta()
+
+                    try:
+                        for piece in r.iter_content(READ_CHUNK):
+                            if not piece:
+                                continue
+                            self._stop_check()
+                            self._sleep_paused()
+                            self._limiter.consume(len(piece))
+                            f.write(piece)
+                            pos += len(piece)
+                            received += len(piece)
+                            self._update_speed(len(piece))
+                            now = time.monotonic()
+                            if track and now - last_save >= 1.0:
+                                checkpoint()
+                                last_save = now
+                    finally:
+                        checkpoint()
+
                 if expected_bytes is not None and received != expected_bytes:
                     raise DownloadError(
                         f"range ended early: received {received} of {expected_bytes} bytes",
                         transient=True)
                 return
+                
             except DownloadError:
                 raise
             except Exception as e:
+                attempts += 1
                 if self.stop_event.is_set():
-                    raise DownloadError("cancelled", transient=False)
+                    raise _cancelled()
+                
+                if attempts > max(1, getattr(self.settings, 'retry_max', 2)):
+                    raise DownloadError(f"download failed after {attempts} attempts: {e}", 
+                                       transient=True)
+                    
                 backoff = min(backoff * 2, 30.0)
                 log.warning("stream %s interrupted (%s) - retrying in %.0fs",
                             self.url, e, backoff)
-                time.sleep(backoff)
+                # Interruptible backoff: stop/abort must not wait it out.
+                deadline = time.monotonic() + backoff
+                while time.monotonic() < deadline:
+                    self._stop_check()
+                    self.stop_event.wait(min(0.25, max(0.0, deadline - time.monotonic())))
             finally:
                 try:
                     sess.close()
@@ -409,51 +542,79 @@ class LinkDownload:
                     pass
 
     # -- parallel chunks ------------------------------------------------------
-    def _parallel(self, start: int, total: int, n: int) -> None:
+    def _parallel(self, total: int, chunks: list[list[int]]) -> None:
         # Prepare the file before workers open independent handles at offsets.
         # Holding one lock around an entire stream would serialize the chunks.
         self.part.parent.mkdir(parents=True, exist_ok=True)
+        
         with self._file_lock:
-            mode = "r+b" if self.part.exists() else "w+b"
+            if not self.part.exists():
+                mode = "w+b"
+            else:
+                stat = self.part.stat()
+                if stat.st_size < total:
+                    mode = "r+b"  # Open and truncate to desired size
+                else:
+                    mode = "r+b"  # File exists at full size, open for read-write
+                
             with open(self.part, mode) as f:
                 f.truncate(total)
-        span = total - start
-        size = span // n
-        ranges = []
-        for i in range(n):
-            s = start + i * size
-            e = total if i == n - 1 else start + (i + 1) * size
-            ranges.append((s, e))
+        
         errors: list[Exception] = []
         err_lock = threading.Lock()
         threads = []
 
-        def worker(rng: tuple[int, int]) -> None:
+        def worker(rng: tuple[int, int], idx: int) -> None:
             try:
-                self._stream(*rng)
+                # Start at the correct position based on chunk progress
+                start, end, written = rng
+                if self._chunks is None:
+                    self._chunks = chunks
+                _start = start + written
+                self._stream(_start, end, idx)
             except DownloadError as e:
-                if not e.cancelled and not self.stop_event.is_set():
-                    with err_lock:
-                        errors.append(e)
+                if e.cancelled or self.stop_event.is_set():
+                    # cancelled chunk: do not record it and do not abort the
+                    # siblings — a stop is a clean request, not a failure (B9)
+                    return
+                with err_lock:
+                    errors.append(e)
+                self._abort.set()
             except Exception as e:
                 with err_lock:
                     errors.append(e)
+                self._abort.set()
 
-        for rng in ranges:
-            t = threading.Thread(target=worker, args=(rng,), daemon=True,
-                                 name=f"dl-{self.link.id[:8]}")
-            threads.append(t)
-            t.start()
+        for i, rng in enumerate(chunks):
+            s, e, written = rng
+            if written < (e - s):  # Only start chunks that are not already completed
+                t = threading.Thread(target=worker, args=(rng, i), daemon=True,
+                                     name=f"dl-{self.link.id[:8]}")
+                threads.append(t)
+                t.start()
+                
         for t in threads:
             t.join()
-        if any(isinstance(error, RangeUnsupported) for error in errors):
+
+        if self.stop_event.is_set():
+            # Save metadata before raising cancellation
+            self._save_meta()
+            raise _cancelled()
+        elif any(isinstance(error, RangeUnsupported) for error in errors):
             raise RangeUnsupported(str(next(e for e in errors
                                            if isinstance(e, RangeUnsupported))))
-        if errors and self.stop_event.is_set():
-            raise DownloadError("cancelled", transient=False)
-        if errors:
+        elif errors:
+            # Save metadata on error
+            self._save_meta()
             raise DownloadError(f"chunk failed: {errors[0]}",
                                 transient=_is_transient(errors[0]))
+        
+        # Make sure all chunks are completed properly
+        for i, ch in enumerate(self._chunks):
+            start, end, written = ch
+            if written != (end - start):
+                self._save_meta()
+                raise DownloadError("incomplete chunks", transient=True)
 
     # -- finalize -------------------------------------------------------------
     def _finalize(self) -> None:
@@ -472,6 +633,10 @@ class LinkDownload:
             if self._total is None:
                 self._total = final.stat().st_size
                 self._done = self._total
+
+        # Clean up metadata on successful finalization
+        self._drop_meta()
+
 
 
 def _int_hdr(v: Optional[str]) -> Optional[int]:
