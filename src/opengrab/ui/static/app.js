@@ -661,10 +661,6 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
 async function loadSettings() {
   try {
     const s = await api("/api/settings");
-    if (!S.token && s.api_token) {
-      S.token = s.api_token;
-      localStorage.setItem("og_token", S.token);
-    }
     for (const f of SET_FIELDS) {
       const el = $("#set-" + f);
       if (!el) continue;
@@ -675,9 +671,9 @@ async function loadSettings() {
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
-    $("#token-display").textContent = s.api_token || "(local only)";
+    $("#token-display").textContent = S.token || "(local only)";
     $("#lan-url").textContent = s.api_host === "127.0.0.1"
-      ? "http://<your-ip>:" + s.api_port + BASE_PATH + "/#token=" + s.api_token
+      ? "http://<your-ip>:" + s.api_port + BASE_PATH + "/#token="  + S.token
       : location.origin + BASE_PATH + "/";
   } catch { /* banner shown on 401 */ }
 }

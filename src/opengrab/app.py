@@ -80,7 +80,8 @@ def run_gui_mode(settings: Optional[Settings] = None,
                 was_enabled, previous = False, ""
                 continue
             try:
-                with urllib.request.urlopen(endpoint, timeout=5) as response:
+                req = urllib.request.Request(endpoint, headers={"Authorization": f"Bearer {server.token}"})
+                with urllib.request.urlopen(req, timeout=5) as response:
                     current = json.loads(response.read()).get("text", "")
                 server.clipboard_status = "watching"
                 if not was_enabled:
@@ -99,7 +100,7 @@ def run_gui_mode(settings: Optional[Settings] = None,
                                name="opengrab-clipboard")
     try:
         window = webview.create_window(
-            "OpenGrab", f"http://127.0.0.1:{bound_port}{settings.base_path}/",
+            "OpenGrab", f"http://127.0.0.1:{bound_port}{settings.base_path}/#token={server.token}",
             min_size=(900, 600)
         )
 

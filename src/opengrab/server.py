@@ -43,6 +43,7 @@ import tempfile
 import threading
 import time
 import uuid
+import hmac
 import re  # Added for host checks
 import ipaddress  # Added for IP address checks  
 from collections import deque
@@ -227,13 +228,8 @@ class ApiServer:
 
     # ---------------------------------------------------------------- auth
     def authorize(self, client_ip: str, headers) -> bool:
-        forwarded = (headers.get("X-Forwarded-For") or headers.get("Forwarded")
-                     or headers.get("X-Forwarded-Proto"))
-        if (client_ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
-                and not forwarded):
-            return True
         h = headers.get("Authorization", "")
-        return h == f"Bearer {self.token}"
+        return hmac.compare_digest(h, f"Bearer {self.token}")
 
     @staticmethod
     def remote_transport_allowed(client_ip: str, headers,
@@ -943,13 +939,7 @@ def _make_handler(srv: ApiServer):
             if p == "/api/settings":
                 d = mgr.settings.model_dump()
                 d["download_dir"] = str(Path(mgr.settings.download_dir))
-                # Only return api_token for same-origin requests (same host as Origin or no Origin)
-                origin_header = self.headers.get("Origin")
-                host_header = self.headers.get("Host")
-                if origin_header and not ((origin_header == "http://" + host_header) or (origin_header == "https://" + host_header)):
-                    d.pop("api_token", None)  # Remove api_token for cross-origin requests
-                else:
-                    d["api_token"] = srv.token  # Add the token for same-origin requests
+                d.pop("api_token", None)  # Never include api_token in settings response
                 return self._json(d)
             if p == "/api/diagnostics":
                 links = mgr.all_links()
