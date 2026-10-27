@@ -97,23 +97,21 @@ class DownloadManager:
         log.info("engine started (%d workers)", n)
 
     def shutdown(self) -> None:
-        for dl in list(self._active.values()):
-            try:
-                dl.stop_event.set()
-            except Exception:
-                pass
         with self._lock:
             for l in self._links.values():
                 if l.status == LinkStatus.DOWNLOADING:
                     l.status = LinkStatus.PAUSED
                     l.extra["note"] = "was downloading when app closed"
-        self._save_now()
-        # Wait up to 3 seconds for downloads to finish
-        start = time.time()
-        while time.time() - start < 3.0:
-            if not self._active:
-                break
+        for dl in list(self._active.values()):
+            try:
+                dl.stop_event.set()
+            except Exception:
+                pass
+        # Give transfers up to 3 s to checkpoint their chunk maps and exit.
+        deadline = time.monotonic() + 3.0
+        while self._active and time.monotonic() < deadline:
             time.sleep(0.1)
+        self._save_now()
         self._started = False
         log.info("engine stopped")
 
@@ -386,18 +384,15 @@ class DownloadManager:
         link = self.get(link_id)
         if not link or link.status != LinkStatus.PAUSED:
             return
-        if dl:
-            # worker thread still alive — unpause in place
-            dl.resume()
-            link.status = LinkStatus.DOWNLOADING
+        # Pause stops the transfer (progress is kept in the .part + chunk
+        # map), so resuming always re-queues. If the old transfer is still
+        # winding down, its worker re-queues the link when it exits.
+        link.status = LinkStatus.WAITING
+        link.extra.pop("note", None)
+        if dl is not None:
+            link.extra["requeue_on_stop"] = True
         else:
-            # app restarted mid-download: .part file resumes from disk
-            link.status = LinkStatus.WAITING
-            link.extra.pop("note", None)
-            if link_id in self._active:
-                link.extra["requeue_on_stop"] = True
-            else:
-                self._ready_put(link_id)
+            self._ready_put(link_id)
         self._persist()
         self._broadcast("resumed", link)
 
@@ -647,16 +642,18 @@ class DownloadManager:
             msg = str(e)
             if "cancel" in msg.lower():
                 if link.status == LinkStatus.WAITING:
-                    # User resumed while it was stopping — leave it WAITING
-                    pass
-                else:
+                    pass  # user resumed while it was stopping
+                elif link.status != LinkStatus.PAUSED:
                     link.status = LinkStatus.PAUSED
-                    if "paused by user" not in link.extra.get("note", ""):
-                        link.extra["note"] = "stopped by user"
+                    link.extra["note"] = "stopped by user"
+                # already PAUSED: keep its note ("paused by user", app closed)
                 self._persist()
                 self._broadcast("stopped", link)
             else:
                 self._fail(link, msg, e.transient)
+        except Exception as e:
+            log.exception("download crashed: %s", link.url)
+            self._fail(link, str(e), False)
         finally:
             if reservation:
                 with self._lock:
