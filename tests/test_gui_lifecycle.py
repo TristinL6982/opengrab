@@ -115,5 +115,9 @@ def main() -> int:
             os.environ["OPENGRAB_DATA_DIR"] = old_data
 
 
+def test_main():
+    assert main() == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

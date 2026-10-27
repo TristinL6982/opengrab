@@ -241,5 +241,9 @@ def main() -> int:
         server_module._make_handler = real_make_handler
 
 
+def test_main():
+    assert main() == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
