@@ -30,7 +30,8 @@ def start_download(datadir, dldir):
     
     s = Settings(download_dir=dldir, per_link_chunks=4, max_parallel=1, speed_limit_kbps=20480)
     m = DownloadManager(s)
-    
+    m.start()
+
     url = sys.argv[4]  # Should be passed after datadir and dldir
     link = m.add_url(url)
     

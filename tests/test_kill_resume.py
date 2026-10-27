@@ -36,12 +36,12 @@ def test_kill_resume():
     # Bind to localhost:0 to get an ephemeral port
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(('127.0.0.1', 0))
-    sock.listen(1)
     port = sock.getsockname()[1]
+    sock.close()
     server = serve(test_file, port)
     
     try:
-        url = f"http://localhost:{port}"
+        url = f"http://127.0.0.1:{port}/test_200mb.bin"
         
         # Create data and download directories
         datadir = os.path.join(tmpdir, "data")
@@ -146,8 +146,8 @@ def test_kill_resume():
             assert not file.endswith('.part')
             assert not file.endswith('.part.json')
     finally:
-        server.terminate()
-        sock.close()
+        server.shutdown()
+        server.server_close()
 
 if __name__ == "__main__":
     test_kill_resume()
