@@ -44,7 +44,6 @@ def _req(port, method, path, body=None, headers=None):
     return resp, data
 
 
-@pytest.mark.xfail(strict=True, reason="C4: GET /api/settings leaks api_token cross-origin with ACAO *")
 def test_c4_settings_does_not_leak_token(port):
     resp, data = _req(port, "GET", "/api/settings", headers={"Origin": "https://evil.example"})
     token = json.loads(data).get("api_token") if resp.status == 200 else None
@@ -59,7 +58,6 @@ def test_c4_settings_write_requires_token(port):
     assert resp.status in (401, 403), f"status={resp.status}"
 
 
-@pytest.mark.xfail(strict=True, reason="C4: no Host header check (DNS rebinding)")
 def test_c4_rejects_foreign_host(port):
     resp, _ = _req(port, "GET", "/api/ping", headers={"Host": "attacker.example"})
     assert 400 <= resp.status < 500, f"status={resp.status}"

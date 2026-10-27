@@ -43,6 +43,8 @@ import tempfile
 import threading
 import time
 import uuid
+import re  # Added for host checks
+import ipaddress  # Added for IP address checks  
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -269,16 +271,84 @@ def _make_handler(srv: ApiServer):
         protocol_version = "HTTP/1.1"
         server_version = "OpenGrab/0.1"
 
+        def _is_host_allowed(self, host_header: str | None) -> bool:
+            # If Host header is missing, assume it's from loopback (safe)
+            if not host_header:
+                return True
+                
+            # Parse the host and optionally get port
+            # Examples: 'localhost', '127.0.0.1', '[::1]:8080', 'localhost:8080'
+            import re
+            match = re.match(r'^\[[^]]+\]:(\d+)$|^(.+):(\d+)$', host_header)
+            if match:
+                # Extract the non-null group (either 3rd or 2nd group since first is IPv6 with port handling)
+                groups = match.groups()
+                if groups[0]:  # For IPv6 case
+                    host = groups[0]
+                else:  # For IPv4 case  
+                    host = groups[1] if groups[1] else groups[2]
+            else:
+                host = host_header
+                
+            # Simplified checks for standard localhost/loopback types
+            if host in {"127.0.0.1", "localhost", "::1"}:
+                return True
+            
+            # Allow any IP address in loopback subnet or localhost domain  
+            try:
+                ip = ipaddress.ip_address(host)
+                if ip.is_loopback or (ip.version == 6 and str(ip) == "::1"):
+                    return True
+                elif host.endswith(".localhost"):
+                    return True
+            except ValueError:
+                # Not an IP address, so check against allowed hosts
+                pass
+
+            # Allow specific bind host for same machine access, or when in LAN mode
+            if srv.host and srv.host not in ("0.0.0.0", "::"):
+                try:
+                    bind_ip = ipaddress.ip_address(srv.host)
+                    if bind_ip.is_loopback or str(bind_ip) == "::1":
+                        allowed_hosts = {srv.host, "127.0.0.1", "localhost", "::1"}
+                    else: 
+                        allowed_hosts = {srv.host}
+                except ValueError:
+                    # srv.host is hostname not IP
+                    allowed_hosts = {srv.host}
+            else:
+                # When binding to all interfaces, any IP is allowed
+                # The authorization logic still prevents access from outside the machine  
+                allowed_hosts = set()
+
+            if host in allowed_hosts:
+                return True
+                
+            # If the request carries a valid Authorization header with the API token, we allow it
+            auth_header = self.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1]
+                if token == srv.token:
+                    return True
+
+            # In LAN mode (binding to all interfaces)
+            if srv.host in ("0.0.0.0", "::"):
+                # Allow any valid IP address as valid for local access when host is zero IP
+                try:
+                    ip_addr = ipaddress.ip_address(host)  
+                    return True  # All IP addresses allowed in LAN mode
+                except ValueError:
+                    # Non-IP name, reject (not safe)
+                    pass
+
+            # Any other host is not allowed.
+            return False
+
         # -- plumbing ----------------------------------------------------
         def log_message(self, format, *args):  # keep console quiet
             log.debug(format, *args)
 
-        def _cors(self):
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods",
-                             "GET, POST, PUT, DELETE, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers",
-                             "Content-Type, Authorization")
+
 
         def _send(self, code: int, body: bytes,
                   ctype: str = "application/json; charset=utf-8",
@@ -287,7 +357,7 @@ def _make_handler(srv: ApiServer):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
-            self._cors()
+            
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
@@ -386,7 +456,7 @@ def _make_handler(srv: ApiServer):
             self.send_header("Content-Length", str(length))
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Cache-Control", "no-store")
-            self._cors()
+            
             if code == 206:
                 self.send_header("Content-Range", headers["Content-Range"])
             if attachment:
@@ -428,11 +498,17 @@ def _make_handler(srv: ApiServer):
 
         # -- verbs ---------------------------------------------------------
         def do_OPTIONS(self):
+            # Check host header for security (DNS rebinding prevention)
+            if not self._is_host_allowed(self.headers.get("Host")):
+                return self._err(403, "forbidden host")
             self.send_response(204)
-            self._cors()
+            
             self.end_headers()
 
         def do_GET(self):
+            # Check host header for security (DNS rebinding prevention)
+            if not self._is_host_allowed(self.headers.get("Host")):
+                return self._err(403, "forbidden host")
             if not self._transport_allowed():
                 return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
@@ -456,6 +532,9 @@ def _make_handler(srv: ApiServer):
                 self._static(p)
 
         def do_POST(self):
+            # Check host header for security (DNS rebinding prevention)
+            if not self._is_host_allowed(self.headers.get("Host")):
+                return self._err(403, "forbidden host")
             if not self._transport_allowed():
                 return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
@@ -471,6 +550,9 @@ def _make_handler(srv: ApiServer):
                 self._err(500, str(e))
 
         def do_DELETE(self):
+            # Check host header for security (DNS rebinding prevention)
+            if not self._is_host_allowed(self.headers.get("Host")):
+                return self._err(403, "forbidden host")
             if not self._transport_allowed():
                 return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
@@ -484,6 +566,9 @@ def _make_handler(srv: ApiServer):
                 self._err(500, str(e))
 
         def do_PUT(self):
+            # Check host header for security (DNS rebinding prevention)
+            if not self._is_host_allowed(self.headers.get("Host")):
+                return self._err(403, "forbidden host")
             if not self._transport_allowed():
                 return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
@@ -839,8 +924,14 @@ def _make_handler(srv: ApiServer):
                 })
             if p == "/api/settings":
                 d = mgr.settings.model_dump()
-                d["api_token"] = srv.token
                 d["download_dir"] = str(Path(mgr.settings.download_dir))
+                # Only return api_token for same-origin requests (same host as Origin or no Origin)
+                origin_header = self.headers.get("Origin")
+                host_header = self.headers.get("Host")
+                if origin_header and not ((origin_header == "http://" + host_header) or (origin_header == "https://" + host_header)):
+                    d.pop("api_token", None)  # Remove api_token for cross-origin requests
+                else:
+                    d["api_token"] = srv.token  # Add the token for same-origin requests
                 return self._json(d)
             if p == "/api/diagnostics":
                 links = mgr.all_links()
@@ -1031,6 +1122,8 @@ def _make_handler(srv: ApiServer):
                     mgr.settings.save()
                 except Exception:
                     pass
+                # For the response, we don't want to include the token (as it might have been modified)
+                # This endpoint doesn't return api_token anyway according to requirements
                 return self._json({"ok": True})
             if p == "/api/plugins/scan":
                 return self._json({"scanned": mgr.registry.scan(force=True)})
@@ -1084,7 +1177,7 @@ def _make_handler(srv: ApiServer):
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Connection", "keep-alive")
-                self._cors()
+                
                 self.end_headers()
                 self.wfile.write(b"event: hello\ndata: {}\n\n")
                 self.wfile.flush()
