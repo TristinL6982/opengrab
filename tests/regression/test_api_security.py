@@ -51,7 +51,6 @@ def test_c4_settings_does_not_leak_token(port):
     assert resp.getheader("Access-Control-Allow-Origin") != "*"
 
 
-@pytest.mark.xfail(strict=True, reason="C4: POST /api/settings accepted from loopback without a token")
 def test_c4_settings_write_requires_token(port):
     resp, _ = _req(port, "POST", "/api/settings", body=json.dumps({"terminal_enabled": True}),
                    headers={"Content-Type": "application/json", "Origin": "https://evil.example"})
@@ -63,7 +62,6 @@ def test_c4_rejects_foreign_host(port):
     assert 400 <= resp.status < 500, f"status={resp.status}"
 
 
-@pytest.mark.xfail(strict=True, reason="C5: Settings does not validate assignment, bad values persist")
 def test_c5_invalid_setting_rejected():
     s = Settings()
     with pytest.raises(Exception):

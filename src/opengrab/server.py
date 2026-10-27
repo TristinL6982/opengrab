@@ -268,76 +268,96 @@ def _make_handler(srv: ApiServer):
     mgr: DownloadManager = srv.manager
 
     class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-        server_version = "OpenGrab/0.1"
+            protocol_version = "HTTP/1.1"
+            server_version = "OpenGrab/0.1"
 
-        def _is_host_allowed(self, host_header: str | None) -> bool:
-            # If Host header is missing, assume it's from loopback (safe)
-            if not host_header:
-                return True
+        def _origin_ok(self) -> bool:
+        # If Origin header is missing, it's same-origin (OK)
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+
+        # Get the Host header to compare against
+        host_header = self.headers.get("Host")
+        
+        # If Host header is missing, treat as non-same-origin only if Origin is present
+        if not host_header:
+            return False  # Cross-origin request blocked
+        
+        # Construct expected Origin for same-site
+        scheme = "https" if self.server.ssl else "http"
+        expected_origin = f"{scheme}://{host_header}"
+        
+        # Check if Origin matches expected same-origin
+        return origin == expected_origin
+
+    def _is_host_allowed(self, host_header: str | None) -> bool:
+                # If Host header is missing, assume it's from loopback (safe)
+                if not host_header:
+                    return True
                 
-            # Parse the host and optionally get port
-            # Examples: 'localhost', '127.0.0.1', '[::1]:8080', 'localhost:8080'
-            host = host_header.strip().lower()
-            if host.startswith("["):
-                # IPv6 literal, optionally with a port: [::1] or [::1]:8080
-                host = host[1:host.find("]")] if "]" in host else host
-            elif host.count(":") == 1:
-                host = host.rsplit(":", 1)[0]
+                # Parse the host and optionally get port
+                # Examples: 'localhost', '127.0.0.1', '[::1]:8080', 'localhost:8080'
+                host = host_header.strip().lower()
+                if host.startswith("["):
+                    # IPv6 literal, optionally with a port: [::1] or [::1]:8080
+                    host = host[1:host.find("]")] if "]" in host else host
+                elif host.count(":") == 1:
+                    host = host.rsplit(":", 1)[0]
 
-            # Simplified checks for standard localhost/loopback types
-            if host in {"127.0.0.1", "localhost", "::1"}:
-                return True
+                # Simplified checks for standard localhost/loopback types
+                if host in {"127.0.0.1", "localhost", "::1"}:
+                    return True
             
-            # Allow any IP address in loopback subnet or localhost domain  
-            try:
-                ip = ipaddress.ip_address(host)
-                if ip.is_loopback or (ip.version == 6 and str(ip) == "::1"):
-                    return True
-                elif host.endswith(".localhost"):
-                    return True
-            except ValueError:
-                # Not an IP address, so check against allowed hosts
-                pass
-
-            # Allow specific bind host for same machine access, or when in LAN mode
-            if srv.host and srv.host not in ("0.0.0.0", "::"):
+                # Allow any IP address in loopback subnet or localhost domain  
                 try:
-                    bind_ip = ipaddress.ip_address(srv.host)
-                    if bind_ip.is_loopback or str(bind_ip) == "::1":
-                        allowed_hosts = {srv.host, "127.0.0.1", "localhost", "::1"}
-                    else: 
-                        allowed_hosts = {srv.host}
+                    ip = ipaddress.ip_address(host)
+                    if ip.is_loopback or (ip.version == 6 and str(ip) == "::1"):
+                        return True
+                    elif host.endswith(".localhost"):
+                        return True
                 except ValueError:
-                    # srv.host is hostname not IP
-                    allowed_hosts = {srv.host}
-            else:
-                # When binding to all interfaces, any IP is allowed
-                # The authorization logic still prevents access from outside the machine  
-                allowed_hosts = set()
-
-            if host in allowed_hosts:
-                return True
-                
-            # If the request carries a valid Authorization header with the API token, we allow it
-            auth_header = self.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ", 1)[1]
-                if token == srv.token:
-                    return True
-
-            # In LAN mode (binding to all interfaces)
-            if srv.host in ("0.0.0.0", "::"):
-                # Allow any valid IP address as valid for local access when host is zero IP
-                try:
-                    ip_addr = ipaddress.ip_address(host)  
-                    return True  # All IP addresses allowed in LAN mode
-                except ValueError:
-                    # Non-IP name, reject (not safe)
+                    # Not an IP address, so check against allowed hosts
                     pass
 
-            # Any other host is not allowed.
-            return False
+                # Allow specific bind host for same machine access, or when in LAN mode
+                if srv.host and srv.host not in ("0.0.0.0", "::"):
+                    try:
+                        bind_ip = ipaddress.ip_address(srv.host)
+                        if bind_ip.is_loopback or str(bind_ip) == "::1":
+                            allowed_hosts = {srv.host, "127.0.0.1", "localhost", "::1"}
+                        else: 
+                            allowed_hosts = {srv.host}
+                    except ValueError:
+                        # srv.host is hostname not IP
+                        allowed_hosts = {srv.host}
+                else:
+                    # When binding to all interfaces, any IP is allowed
+                    # The authorization logic still prevents access from outside the machine  
+                    allowed_hosts = set()
+
+                if host in allowed_hosts:
+                    return True
+                
+                # If the request carries a valid Authorization header with the API token, we allow it
+                auth_header = self.headers.get("Authorization")
+                if auth_header and auth_header.startswith("Bearer "):
+                    token = auth_header.split(" ", 1)[1]
+                    if token == srv.token:
+                        return True
+
+                # In LAN mode (binding to all interfaces)
+                if srv.host in ("0.0.0.0", "::"):
+                    # Allow any valid IP address as valid for local access when host is zero IP
+                    try:
+                        ip_addr = ipaddress.ip_address(host)  
+                        return True  # All IP addresses allowed in LAN mode
+                    except ValueError:
+                        # Non-IP name, reject (not safe)
+                        pass
+
+                # Any other host is not allowed.
+                return False
 
         # -- plumbing ----------------------------------------------------
         def log_message(self, format, *args):  # keep console quiet
@@ -529,6 +549,8 @@ def _make_handler(srv: ApiServer):
         def do_POST(self):
             # Check host header for security (DNS rebinding prevention)
             if not self._is_host_allowed(self.headers.get("Host")):
+            if not self._origin_ok():
+                return self._err(403, "forbidden origin")
                 return self._err(403, "forbidden host")
             if not self._transport_allowed():
                 return self._err(403, "remote access requires HTTPS")
@@ -545,6 +567,8 @@ def _make_handler(srv: ApiServer):
                 self._err(500, str(e))
 
         def do_DELETE(self):
+            if not self._origin_ok():
+                return self._err(403, "forbidden origin")
             # Check host header for security (DNS rebinding prevention)
             if not self._is_host_allowed(self.headers.get("Host")):
                 return self._err(403, "forbidden host")
@@ -559,6 +583,8 @@ def _make_handler(srv: ApiServer):
                 self._api_delete(p)
             except Exception as e:  # noqa: BLE001
                 self._err(500, str(e))
+            if not self._origin_ok():
+                return self._err(403, "forbidden origin")
 
         def do_PUT(self):
             # Check host header for security (DNS rebinding prevention)

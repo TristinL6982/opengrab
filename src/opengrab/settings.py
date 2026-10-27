@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 
 from . import APP_ID, APP_NAME
 
@@ -38,6 +38,8 @@ def user_plugins_dir() -> Path:
 
 
 class Settings(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+    
     # downloads
     download_dir: str = str(Path.home() / "Downloads")
     max_parallel: int = 3              # concurrent links
