@@ -1,4 +1,6 @@
-# OpenGrab — build state
+# OpenGrab - build state
+
+> Milestones renumbered 2026-10-27: see PROJECT_SPEC.md section 5 (M2-M14). Old milestone labels below are obsolete.
 
 ## Latest verified update — 2026-10-25
 
@@ -81,7 +83,12 @@ queue persistence and shutdown. Saves now serialize before replacing the state
 file; the 16-check download/resume/persistence suite and smoke check pass with
 no persistence warnings.
 
-> Milestones renumbered 2026-10-27: see PROJECT_SPEC.md section 5 (M2-M14). Old milestone labels below are obsolete.
+> **Status note:** This file is an older handoff and its DONE/NOT YET WRITTEN
+> lists are stale. The engine, API server, and UI files now exist in the
+> repository, but their existence does not mean they have been fully verified.
+> Inspect the current tree and Git status before relying on this snapshot.
+> `PROJECT_SPEC.md` is the authoritative product requirements document;
+> `AGENTS.md` contains instructions for coding agents.
 
 **Date paused:** 2026-10-25. **Location:** `C:\Users\trist\opengrab`
 Git repo initialized at this pause point — check `git log` for the commit.
@@ -164,7 +171,7 @@ Do not interpret their presence as proof that each requirement is complete.
    file manager (list/mkdir/delete/rename/download/upload), terminal (exec+poll),
    clipboard get/set, audio streaming (Range), web auth (pbkdf2 hash + token
    cookie), optional HTTPS (self-signed or user cert), reverse-proxy headers
-   (X-Forwarded-For/Proto), base_path support, PWA files (manifest, sw.js, icons).
+   (X-Forwarded-For/Proto), base_path support, PWA files (manifest, sw.js, icons). **NOT DONE (see docs/plan/REVIEW.md §4)**
 5. `src/opengrab/app.py` — bootstrap: settings→accounts→filters→registry→
    solver chain→manager→server; GUI mode: pywebview window (WebView2) +
    pystray tray (needs `pip install pystray` — NOT yet in requirements!) with
@@ -217,7 +224,7 @@ panel ✓ (UI), host clipboard sync ✓ (exe: pywebview+ctypes; docker: clip/pb)
 web audio ✓, web file manager ✓, web notifications ✓, web terminal ✓,
 PWA ✓, GPU accel (n/a, document), MyJDownloader remote access ✓ (web auth
 + token from any device), direct connection ✓ (same), Click'n'Load ✓
-(tray+clipboard watcher), troubleshooting ✓ (+ --smoke-test).
+(tray+clipboard watcher), troubleshooting ✓ (+ --smoke-test). **NOT DONE (see docs/plan/REVIEW.md §4)**
 
 ## Gotchas / decisions
 - Use `python3` (3.12) everywhere; venv Scripts python for all commands.

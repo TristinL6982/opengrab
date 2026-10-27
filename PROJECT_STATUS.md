@@ -114,10 +114,10 @@ login + paywall handling, filters, accounts. Ship as platform builds
   HTTPS; direct TLS termination is not implemented. Multi-user auth is
   intentionally OUT for v1 per decision #2.
 - **UI gaps:** no notifications, file manager, clipboard, audio, or terminal
-  panels; no PWA PNG icons (svg only). **NOT DONE (see docs/plan/REVIEW.md §4)**
+  panels; no PWA PNG icons (svg only).
 - **Packaging:** no PyInstaller spec/build script → no `OpenGrab.exe`;
   no `Dockerfile`/`docker-compose.yml`/`.env.example` (and unbuildable here —
-  no docker CLI); no `README.md`. **NOT DONE (see docs/plan/REVIEW.md §4)**
+  no docker CLI); no `README.md`.
 - **Tests:** `tests/e2e_api.py` (16/16) and `tests/e2e_api_m3.py` (19/19);
   focused unit tests for downloader math and other modules remain absent.
 - **Default port** is now 5678 in settings and server defaults. An existing
