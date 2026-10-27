@@ -1,81 +1,72 @@
-import pytest
-import tempfile
+"""C4/C5 regression tests: local API security and settings validation.
+
+Each test is xfail(strict=True) until M4 fixes the bug; when a fix lands the
+test starts passing and strict xfail forces the marker to be removed.
+"""
 import http.client
+import json
+import os
+import tempfile
 from pathlib import Path
 
-# Add src to path so we can import opengrab modules
-import sys
-sys.path.insert(0, 'src')
+import pytest
 
-import opengrab
-from opengrab.settings import Settings
-from opengrab.download import DownloadManager
-from opengrab.api import server
+_TMP = Path(tempfile.mkdtemp(prefix="og-sec-"))
+os.environ["OPENGRAB_DATA_DIR"] = str(_TMP / "data")
+os.environ["APPDATA"] = str(_TMP / "appdata")
+(_TMP / "appdata").mkdir(exist_ok=True)
+
+from opengrab import server  # noqa: E402
+from opengrab.engine.manager import DownloadManager  # noqa: E402
+from opengrab.settings import Settings  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def api_server():
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        data_dir = Path(tmp_dir) / "data"
-        appdata_dir = Path(tmp_dir) / "appdata"
-        
-        # Set directories for the session
-        env = {
-            'OPENGRAB_DATA_DIR': str(data_dir),
-            'APPDATA': str(appdata_dir)
-        }
-        
-        # Import after setting environment variables
-        import opengrab.settings
-        import opengrab.download
-        import opengrab.api.server
-
-        # Create settings with temp download directory
-        settings = Settings(download_dir=Path(tmp_dir) / "downloads")
-        mgr = DownloadManager(settings)
-        port = server.ApiServer(settings, mgr, host="127.0.0.1", port=0).start()
-
-        yield port, mgr, settings
-
-        mgr.stop()
+def port():
+    dl = _TMP / "downloads"
+    dl.mkdir(exist_ok=True)
+    settings = Settings(download_dir=str(dl))
+    mgr = DownloadManager(settings)
+    mgr.start()
+    srv = server.ApiServer(settings, mgr, host="127.0.0.1", port=0)
+    p = srv.start()
+    yield p
+    srv.stop()
+    mgr.shutdown()
 
 
-@pytest.mark.xfail(strict=True, reason="C4: settings does not leak token")
-def test_c4_settings_does_not_leak_token(api_server):
-    port, mgr, settings = api_server
-    conn = http.client.HTTPConnection("localhost", port)
-    conn.request("GET", "/api/settings", headers={"Origin": "https://evil.example"})
-    response = conn.getresponse()
-    data = response.read().decode()
-    # Simple check for token leakage
-    assert "api_token" not in data or '"api_token": ""' in data
-    assert response.getheader("Access-Control-Allow-Origin") != "*"
+def _req(port, method, path, body=None, headers=None):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request(method, path, body=body, headers=headers or {})
+    resp = conn.getresponse()
+    data = resp.read().decode("utf-8", "replace")
     conn.close()
+    return resp, data
 
 
-@pytest.mark.xfail(strict=True, reason="C4: settings write requires token")
-def test_c4_settings_write_requires_token(api_server):
-    port, mgr, settings = api_server
-    conn = http.client.HTTPConnection("localhost", port)
-    conn.request("POST", "/api/settings", body='{"terminal_enabled": true}', headers={"Content-Type": "application/json"})
-    response = conn.getresponse()
-    assert response.status in [401, 403]
-    conn.close()
+@pytest.mark.xfail(strict=True, reason="C4: GET /api/settings leaks api_token cross-origin with ACAO *")
+def test_c4_settings_does_not_leak_token(port):
+    resp, data = _req(port, "GET", "/api/settings", headers={"Origin": "https://evil.example"})
+    token = json.loads(data).get("api_token") if resp.status == 200 else None
+    assert not token, f"token leaked: status={resp.status}"
+    assert resp.getheader("Access-Control-Allow-Origin") != "*"
 
 
-@pytest.mark.xfail(strict=True, reason="C4: rejects foreign host")
-def test_c4_rejects_foreign_host(api_server):
-    port, mgr, settings = api_server
-    conn = http.client.HTTPConnection("localhost", port)
-    conn.request("GET", "/api/ping", headers={"Host": "attacker.example"})
-    response = conn.getresponse()
-    assert str(response.status).startswith("4")
-    conn.close()
+@pytest.mark.xfail(strict=True, reason="C4: POST /api/settings accepted from loopback without a token")
+def test_c4_settings_write_requires_token(port):
+    resp, _ = _req(port, "POST", "/api/settings", body=json.dumps({"terminal_enabled": True}),
+                   headers={"Content-Type": "application/json", "Origin": "https://evil.example"})
+    assert resp.status in (401, 403), f"status={resp.status}"
 
 
-@pytest.mark.xfail(strict=True, reason="C5: invalid setting rejected")
+@pytest.mark.xfail(strict=True, reason="C4: no Host header check (DNS rebinding)")
+def test_c4_rejects_foreign_host(port):
+    resp, _ = _req(port, "GET", "/api/ping", headers={"Host": "attacker.example"})
+    assert 400 <= resp.status < 500, f"status={resp.status}"
+
+
+@pytest.mark.xfail(strict=True, reason="C5: Settings does not validate assignment, bad values persist")
 def test_c5_invalid_setting_rejected():
-    from opengrab.settings import Settings
     s = Settings()
     with pytest.raises(Exception):
         s.max_parallel = "lots"
