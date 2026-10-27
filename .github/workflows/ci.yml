@@ -1,0 +1,19 @@
+name: ci
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m pip install -e .
+      - run: python -m pytest -q -rxX
+      - name: Build exe
+        working-directory: build
+        run: python -m PyInstaller --clean --noconfirm --distpath release OpenGrab.spec
+      - run: build/release/OpenGrab/OpenGrab.exe --version
+      - run: build/release/OpenGrab/OpenGrab.exe --smoke-test

@@ -9,3 +9,4 @@ build/release/
 build/OpenGrab/dist/
 *.spec.bak
 .venv.bak
+build/build/
