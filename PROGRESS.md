@@ -1,4 +1,4 @@
-# OpenGrab - build state
+# OpenGrab — build state
 
 > Milestones renumbered 2026-10-27: see PROJECT_SPEC.md section 5 (M2-M14). Old milestone labels below are obsolete.
 
@@ -166,7 +166,7 @@ Do not interpret their presence as proof that each requirement is complete.
    retry/backoff, provide_captcha/provide_login re-resolve, speed/eta smoothing,
    state persistence (state.json) for restart, notifications list. **NOT DONE (see docs/plan/REVIEW.md §4)**
 4. `src/opengrab/server.py` — ThreadingHTTPServer: static UI + JSON API
-   (state, urls, start/pause/resume, remove, move, reorder, captcha, login,
+   (state, urls, start/pause/resume, remove, move, reorder, captcha, login, **NOT DONE (see docs/plan/REVIEW.md §4)**
    paywall, settings, filters, accounts, plugins, health, captcha-test),
    file manager (list/mkdir/delete/rename/download/upload), terminal (exec+poll),
    clipboard get/set, audio streaming (Range), web auth (pbkdf2 hash + token
@@ -183,7 +183,7 @@ Do not interpret their presence as proof that each requirement is complete.
    UGID/PUID/PGID for docker, TZ).
 7. `src/opengrab/smoke.py` — headless self-test: settings tmp dir, registry
    scan, filters, captcha chain status, add mdurl whl URL (above), start,
-   poll until FINISHED, verify size 9979 + sha256, ranged resume check,
+   poll until FINISHED, verify size 9979 + sha256, ranged resume check, **NOT DONE (see docs/plan/REVIEW.md §4)**
    API round-trip via urllib to 127.0.0.1:port. Exit 0/1.
 8. `src/opengrab/ui/` — index.html, style.css (dark, modern), app.js (tabs:
    Queue/Active/Finished, Captcha modal w/ image+input, Login modal, Accounts,
@@ -204,7 +204,7 @@ Do not interpret their presence as proof that each requirement is complete.
     reverse proxy (hostname + URL path), web control panel, clipboard sync,
     web audio, file manager, web notifications, web terminal, PWA, GPU
     accel (n/a — no transcoding; document), remote access (web auth +
-    tailscale note = MyJDownloader parity), direct connection, Click'n'Load,
+    tailscale note = MyJDownloader parity), direct connection, Click'n'Load, **NOT DONE (see docs/plan/REVIEW.md §4)**
     troubleshooting (won't start: WebView2 runtime, port, firewall, smoke
     test), support.
 
