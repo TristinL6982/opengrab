@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import threading
 import time
@@ -86,8 +87,9 @@ class DownloadManager:
         except Exception:
             log.warning("plugin scan failed", exc_info=True)
         n = self.settings.max_parallel or 3
-        for i in range(n):
-            t = threading.Thread(target=self._worker, name=f"worker-{i}",
+        MAX_WORKERS = 16
+        for i in range(MAX_WORKERS):
+            t = threading.Thread(target=self._worker, args=(i,), name=f"worker-{i}",
                                  daemon=True)
             t.start()
             self._workers.append(t)
@@ -97,7 +99,7 @@ class DownloadManager:
     def shutdown(self) -> None:
         for dl in list(self._active.values()):
             try:
-                dl.pause()
+                dl.stop_event.set()
             except Exception:
                 pass
         with self._lock:
@@ -106,6 +108,12 @@ class DownloadManager:
                     l.status = LinkStatus.PAUSED
                     l.extra["note"] = "was downloading when app closed"
         self._save_now()
+        # Wait up to 3 seconds for downloads to finish
+        start = time.time()
+        while time.time() - start < 3.0:
+            if not self._active:
+                break
+            time.sleep(0.1)
         self._started = False
         log.info("engine stopped")
 
@@ -365,8 +373,9 @@ class DownloadManager:
         if not link:
             return
         if dl:
-            dl.pause()
             link.status = LinkStatus.PAUSED
+            link.extra["note"] = "paused by user"
+            dl.stop_event.set()
         elif link.status in (LinkStatus.WAITING, LinkStatus.DOWNLOADING):
             link.status = LinkStatus.PAUSED
         self._persist()
@@ -384,7 +393,11 @@ class DownloadManager:
         else:
             # app restarted mid-download: .part file resumes from disk
             link.status = LinkStatus.WAITING
-            self._ready_put(link_id)
+            link.extra.pop("note", None)
+            if link_id in self._active:
+                link.extra["requeue_on_stop"] = True
+            else:
+                self._ready_put(link_id)
         self._persist()
         self._broadcast("resumed", link)
 
@@ -522,8 +535,11 @@ class DownloadManager:
         self._spawn(retry)
 
     # ---------------------------------------------------------------- worker
-    def _worker(self) -> None:
+    def _worker(self, index=0) -> None:
         while True:
+            if index >= max(1, int(self.settings.max_parallel or 1)):
+                time.sleep(0.5)
+                continue
             try:
                 _, _, link_id = self._ready.get(timeout=1.0)
             except queue.Empty:
@@ -630,19 +646,24 @@ class DownloadManager:
         except DownloadError as e:
             msg = str(e)
             if "cancel" in msg.lower():
-                link.status = LinkStatus.PAUSED
-                link.extra["note"] = "stopped by user"
+                if link.status == LinkStatus.WAITING:
+                    # User resumed while it was stopping — leave it WAITING
+                    pass
+                else:
+                    link.status = LinkStatus.PAUSED
+                    if "paused by user" not in link.extra.get("note", ""):
+                        link.extra["note"] = "stopped by user"
                 self._persist()
                 self._broadcast("stopped", link)
             else:
                 self._fail(link, msg, e.transient)
-        except Exception as e:
-            log.exception("download crashed: %s", link.url)
-            self._fail(link, str(e), False)
         finally:
             if reservation:
                 with self._lock:
                     self._reserved_downloads.discard(reservation)
+            # AFTER the reservation is discarded
+            if link.extra.pop("requeue_on_stop", False) and link.status == LinkStatus.WAITING:
+                self._ready_put(link.id)
             self._persist()
 
     def _fail(self, link: Link, msg: str, transient: bool) -> None:
@@ -676,6 +697,7 @@ class DownloadManager:
                 link.eta = (total - done) / speed
         link.speed = speed
         self._broadcast("progress", link)
+        self._persist()
 
     # -------------------------------------------------------------- persist
     def _persist(self) -> None:
@@ -703,10 +725,12 @@ class DownloadManager:
             try:
                 with self._lock:
                     data = [json.loads(l.model_dump_json())
-                            for l in self._links.values()
-                            if l.status != LinkStatus.DOWNLOADING]
+                            for l in self._links.values()]
                 tmp = self.links_file.with_suffix(".tmp")
-                tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(data, indent=1))
+                    f.flush()
+                    os.fsync(f.fileno())
                 tmp.replace(self.links_file)
             except Exception:
                 log.warning("persist failed", exc_info=True)
