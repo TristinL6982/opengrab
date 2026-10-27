@@ -5,12 +5,7 @@ import sys
 repo_src = os.path.join(os.path.dirname(__file__), '..', 'src')
 sys.path.insert(0, repo_src)
 
-class MockLink:
-    def __init__(self):
-        self.id = 12345
-        self.href = "http://example.com/file.zip"
-        self.filename = "original.zip"
-        self.status = "idle"
+from opengrab.engine.downloader import _cd_filename, LinkDownload
 
 def test_content_disposition_parsing():
     # Test 1: Simple filename with quotes
@@ -32,13 +27,7 @@ def test_content_disposition_parsing():
 def test_integration():
     # Import the actual downloader module and check how it works
     
-    from opengrab.engine.downloader import Downloader
-    
     # This should not throw an error even if the function is missing
     # The full integration would require a more complex test setup
-    pass
+    assert LinkDownload is not None
 
-if __name__ == "__main__":
-    test_content_disposition_parsing()
-    test_integration()
-    print("All tests passed!")

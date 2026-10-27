@@ -20,6 +20,7 @@ import os
 import re
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Optional
 
@@ -131,8 +132,30 @@ def _is_transient(e: Exception) -> bool:
 def _sanitize(name: str) -> str:
     name = (name or "").strip().replace("\\", "/")
     name = name.split("/")[-1] or "download"
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    name = re.sub(r'[<>:"/\\|?*\\x00-\\x1f]', "_", name)
     return name[:200] or "download"
+
+
+def _cd_filename(header: str) -> Optional[str]:
+    if not header:
+        return None
+    
+    # Prefer RFC 5987 filename*=UTF-8''<percent-encoded>
+    m = re.search(r'filename\*=(?:UTF-8\'\'|utf-8\'\')(.+?)(?:[;\\s]|$)', header, re.IGNORECASE)
+    if m:
+        try:
+            return _sanitize(urllib.parse.unquote(m.group(1), encoding='utf-8'))
+        except Exception:
+            return None
+    
+    # Else look for filename="..." or filename=token
+    m = re.search(r'filename\\*?=\"?([^\";]+)\"?', header)
+    if m:
+        name = m.group(1).strip()
+        # Take just the basename and sanitize it
+        return _sanitize(os.path.basename(name))
+    
+    return None
 
 
 def _cancelled():
@@ -326,14 +349,12 @@ class LinkDownload:
         self.url = probe.final_url
         # server-side name wins over plugin guess
         cd = probe.headers.get("content-disposition", "")
-        if cd and not self.link.filename:
-            m = re.search(r'filename\*?="?([^";]+)"?', cd)
-            if m:
-                self.link.filename = m.group(1).strip()
-                self.dest = self.dest_dir / _sanitize(self.link.filename)
-                self.part = self.dest_dir / (self.link.filename + ".part")
-                # Update meta path when part file changes
-                self.meta = str(self.part) + ".json"
+        name = _cd_filename(cd)
+        if name and not self.link.filename:
+            self.link.filename = name
+            self.dest = self.dest_dir / name
+            self.part = self.dest_dir / (name + ".part")
+            self.meta = str(self.part) + ".json"
 
         # speed limit: settings value is KB/s (JD2-style)
         limit = (getattr(self.settings, "speed_limit_kbps", 0) or 0) * 1024
