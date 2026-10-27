@@ -2,9 +2,8 @@ import json
 import pytest
 import http.client
 from pathlib import Path
-from src.opengrab.settings import Settings
-from src.opengrab.server import ApiServer, DownloadManager
-from tests.regression.test_api_security import port
+from tests.regression.test_api_security import port  # noqa: F401  (fixture, sets up sys.path)
+from opengrab.settings import Settings
 
 def test_settings_write_whitelist(port):
     """Test that settings writes are validated and filtered"""
@@ -43,7 +42,10 @@ def test_settings_write_ignore_unknown_keys(port):
     assert "ignored" in result
     assert "no_such_key" in result["ignored"]
 
-def test_load_settings_with_corrupt_file(monkeypatch, tmp_path):
+def test_load_settings_with_corrupt_file(monkeypatch):
+    import tempfile
+    tmp_path = Path(tempfile.mkdtemp(prefix="og-m4c-"))
+    monkeypatch.delenv("OPENGRAB_DATA_DIR", raising=False)
     """Test load_settings backs up corrupt settings.json"""
     
     # Create corrupted settings file
@@ -51,10 +53,10 @@ def test_load_settings_with_corrupt_file(monkeypatch, tmp_path):
     corrupted.write_text("{not json")
     
     # Patch app_data_dir to return temp path
-    monkeypatch.setattr("src.opengrab.settings.app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("opengrab.settings.app_data_dir", lambda: tmp_path)
     
     # Call load_settings (should backup corrupt file and return defaults)
-    from src.opengrab.settings import load_settings
+    from opengrab.settings import load_settings
     
     settings = load_settings()
     

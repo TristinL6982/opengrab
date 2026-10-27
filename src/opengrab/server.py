@@ -941,26 +941,383 @@ def _make_handler(srv: ApiServer):
                     "providers": mgr.captcha_chain.status(),
                 })
             if p == "/api/settings":
-                # Build whitelist of settings that can be changed
-                API_FORBIDDEN_SETTINGS = {"api_token", "api_host", "api_port", "base_path", "terminal_enabled"}
-                ignored = []
-                allowed = {}
-                for k, v in body.items():
-                    if k in Settings.model_fields and k not in API_FORBIDDEN_SETTINGS:
-                        allowed[k] = v
-                    else:
-                        ignored.append(k)
-                        continue
-                # Validate all allowed changes at once before applying them
+                d = mgr.settings.model_dump()
+                d["download_dir"] = str(Path(mgr.settings.download_dir))
+                # Only return api_token for same-origin requests (same host as Origin or no Origin)
+                origin_header = self.headers.get("Origin")
+                host_header = self.headers.get("Host")
+                if origin_header and not ((origin_header == "http://" + host_header) or (origin_header == "https://" + host_header)):
+                    d.pop("api_token", None)  # Remove api_token for cross-origin requests
+                else:
+                    d["api_token"] = srv.token  # Add the token for same-origin requests
+                return self._json(d)
+            if p == "/api/diagnostics":
+                links = mgr.all_links()
+                counts: dict[str, int] = {}
+                for link in links:
+                    key = link.status.value
+                    counts[key] = counts.get(key, 0) + 1
+                plugins = mgr.registry.snapshot()
+                errors = mgr.registry.errors_snapshot()
+                from . import __version__
+                return self._json({
+                    "generated_at": time.time(),
+                    "app_version": __version__,
+                    "python_version": sys.version.split()[0],
+                    "platform": sys.platform,
+                    "queue_counts": counts,
+                    "plugin_ids": sorted(str(p.get("id", "")) for p in plugins),
+                    "plugin_error_count": len(errors),
+                    "settings": {
+                        "api_host": mgr.settings.api_host,
+                        "api_port": mgr.settings.api_port,
+                        "base_path_configured": bool(mgr.settings.base_path),
+                        "max_parallel": mgr.settings.max_parallel,
+                        "per_link_chunks": mgr.settings.per_link_chunks,
+                        "terminal_enabled": mgr.settings.terminal_enabled,
+                        "clipboard_monitor_enabled": mgr.settings.clipboard_monitor_enabled,
+                    },
+                })
+            if p == "/api/plugins":
+                return self._json({"plugins": mgr.registry.snapshot(),
+                                   "errors": mgr.registry.errors_snapshot()})
+            if p == "/api/accounts":
+                return self._json(mgr.accounts.snapshot())
+            if p == "/api/filters":
+                return self._json(mgr.filters.snapshot())
+            if p == "/api/packagizer":
+                return self._json(mgr.settings.packagizer_rules)
+            if p == "/api/plugins/scan":
+                n = mgr.registry.scan(force=True)
+                return self._json({"scanned": n})
+            if p == "/api/events":
+                return self._sse()
+            self._err(404, "unknown endpoint")
+
+        def _api_post(self, p: str, body: dict):
+            import re
+            if p == "/api/terminal":
+                return self._terminal_start(body)
+            if p == "/api/packagizer/preview":
+                from .engine.packagizer import plan_packagizer
                 try:
-                    candidate = {**mgr.settings.model_dump(), **allowed}
-                    Settings.model_validate(candidate)
-                except Exception as e:
-                    return self._err(400, "invalid setting: " + str(e))
-                # Apply changes if validation passes
-                for k, v in allowed.items():
-                    setattr(mgr.settings, k, v)
+                    return self._json(plan_packagizer(
+                        mgr.settings.packagizer_rules,
+                        str(body.get("url", "")),
+                        str(body.get("filename", "")),
+                        mgr.settings.download_dir,
+                    ))
+                except Exception as exc:
+                    return self._err(400, str(exc))
+            if p == "/api/packagizer":
+                from .engine.packagizer import PackagizerRule
+                if len(mgr.settings.packagizer_rules) >= 100:
+                    return self._err(400, "at most 100 Packagizer rules are supported")
+                try:
+                    rule = PackagizerRule.model_validate(body)
+                except Exception as exc:
+                    return self._err(400, str(exc))
+                mgr.settings.packagizer_rules.append(rule.model_dump())
                 mgr.settings.save()
-                # For the response, we don't want to include the token (as it might have been modified)
-                # This endpoint doesn't return api_token anyway according to requirements
-                return self._json({"ok": True, "ignored": ignored})
+                return self._json(rule.model_dump(), 201)
+            terminal_stop = re.fullmatch(r"/api/terminal/([a-f0-9]+)/stop", p)
+            if terminal_stop:
+                return self._terminal_stop(terminal_stop.group(1))
+            m = re.fullmatch(r"/api/links/([^/]+)(/(\w+))?", p)
+            if m:
+                lid, action = m.group(1), (m.group(3) or "")
+                l = self._link(lid)
+                if l is None:
+                    return
+                if action in ("start", "retry"):
+                    mgr.start_download(lid)
+                elif action == "pause":
+                    mgr.pause_download(lid)
+                elif action == "resume":
+                    mgr.resume_download(lid)
+                elif action == "stop":
+                    mgr.stop_download(lid)
+                elif action == "remove":
+                    mgr.remove_link(lid)
+                elif action == "queue-child":
+                    c = mgr.queue_child(lid, int(body.get("index", 0)))
+                    return self._json(c.to_public() if c else {"error": "no such child"})
+                elif action == "queue-children":
+                    cs = mgr.queue_all_children(lid)
+                    return self._json([c.to_public() for c in cs])
+                elif action == "captcha":
+                    mgr.submit_captcha(lid, str(body.get("code", "")))
+                elif action == "login":
+                    mgr.add_login(lid, str(body.get("username", "")),
+                                  str(body.get("password", "")))
+                elif action == "paywall-accept":
+                    mgr.accept_paywall(lid)
+                else:
+                    return self._err(404, "unknown action")
+                return self._json({"ok": True})
+            if p == "/api/urls":
+                urls = body.get("urls") or []
+                if isinstance(urls, str):
+                    urls = [x.strip() for x in urls.splitlines() if x.strip()]
+                out = []
+                for u_ in urls[:200]:
+                    try:
+                        out.append(mgr.add_url(
+                            u_,
+                            priority=int(body.get("priority", 0)),
+                            auto_download=bool(body.get("auto_download", True)),
+                            title=str(body.get("title", "")),
+                            filename=str(body.get("filename", "")),
+                        ).to_public())
+                    except Exception as e:  # noqa: BLE001
+                        out.append({"url": u_, "error": str(e)})
+                return self._json(out)
+            if p == "/api/clear-finished":
+                return self._json({"cleared": mgr.clear_finished()})
+            if p == "/api/notifications/clear":
+                with srv._notifications_lock:
+                    cleared = len(srv._notifications)
+                    srv._notifications.clear()
+                return self._json({"cleared": cleared})
+            if p == "/api/files":
+                try:
+                    return self._files_post(body)
+                except FileNotFoundError as e:
+                    return self._err(404, str(e))
+                except (ValueError, FileExistsError, OSError) as e:
+                    return self._err(400, str(e))
+            if p == "/api/clipboard":
+                text = body.get("text", "")
+                if not isinstance(text, str):
+                    return self._err(400, "text must be a string")
+                if len(text) > 1_000_000:
+                    return self._err(413, "clipboard text exceeds 1 MB")
+                self._clipboard(text)
+                return self._json({"ok": True})
+            if p == "/api/audio-ticket":
+                relative = str(body.get("path", ""))
+                file_path = self._safe_file(relative, must_exist=True)
+                if not file_path.is_file():
+                    return self._err(400, "audio path must name a file")
+                ticket = uuid.uuid4().hex + uuid.uuid4().hex
+                with srv._audio_tickets_lock:
+                    now = time.time()
+                    for key, value in list(srv._audio_tickets.items()):
+                        if value["expires"] < now:
+                            del srv._audio_tickets[key]
+                    srv._audio_tickets[ticket] = {
+                        "path": file_path.relative_to(self._download_root()).as_posix(),
+                        "expires": now + 3600,
+                    }
+                return self._json({"url": f"{srv.base_path}/api/audio?ticket={ticket}",
+                                   "expires_in": 3600})
+            if p == "/api/linkgrabber/clear":
+                with srv._clipboard_candidates_lock:
+                    cleared = len(srv._clipboard_candidates)
+                    srv._clipboard_candidates.clear()
+                return self._json({"cleared": cleared})
+            candidate_action = re.fullmatch(
+                r"/api/linkgrabber/([a-f0-9]+)/(add|dismiss)", p
+            )
+            if candidate_action:
+                candidate_id, action = candidate_action.groups()
+                with srv._clipboard_candidates_lock:
+                    candidate = srv._clipboard_candidates.pop(candidate_id, None)
+                if candidate is None:
+                    return self._err(404, "clipboard candidate not found")
+                if action == "dismiss":
+                    return self._json({"ok": True, "dismissed": True})
+                link = mgr.add_url(candidate["url"])
+                return self._json({"ok": True, "link": link.to_public()}, 201)
+            if p == "/api/settings":
+                if not isinstance(body, dict):
+                    return self._json({"error": "settings body must be a JSON object"}, 400)
+                forbidden = {"api_token", "terminal_enabled"}
+                known = set(type(mgr.settings).model_fields)
+                allowed = {k: v for k, v in body.items() if k in known and k not in forbidden}
+                ignored = sorted(k for k in body if k not in allowed)
+                try:
+                    candidate = type(mgr.settings).model_validate(
+                        {**mgr.settings.model_dump(), **allowed})
+                except Exception as e:
+                    return self._json({"error": "invalid settings", "detail": str(e)[:500]}, 400)
+                for k in allowed:
+                    setattr(mgr.settings, k, getattr(candidate, k))
+                try:
+                    mgr.settings.save()
+                except Exception:
+                    pass
+                return self._json({"ok": True, "applied": sorted(allowed), "ignored": ignored})
+            if p == "/api/plugins/scan":
+                return self._json({"scanned": mgr.registry.scan(force=True)})
+            if p == "/api/accounts":
+                a = mgr.accounts.add(str(body.get("site", "")),
+                                     str(body.get("username", "")),
+                                     str(body.get("password", "")))
+                return self._json(a)
+            if p == "/api/filters":
+                f = mgr.filters.add(str(body.get("pattern", "")),
+                                    str(body.get("kind", "exclude")),
+                                    bool(body.get("use_glob", False)))
+                return self._json(f)
+            self._err(404, "unknown endpoint")
+
+        def _api_delete(self, p: str):
+            import re
+            m = re.fullmatch(r"/api/links/([^/]+)", p)
+            if m:
+                mgr.remove_link(m.group(1))
+                return self._json({"ok": True})
+            m = re.fullmatch(r"/api/accounts/([^/]+)", p)
+            if m:
+                mgr.accounts.remove(m.group(1))
+                return self._json({"ok": True})
+            m = re.fullmatch(r"/api/filters/([^/]+)", p)
+            if m:
+                mgr.filters.remove(m.group(1))
+                return self._json({"ok": True})
+            m = re.fullmatch(r"/api/packagizer/([^/]+)", p)
+            if m:
+                before = len(mgr.settings.packagizer_rules)
+                mgr.settings.packagizer_rules = [
+                    item for item in mgr.settings.packagizer_rules
+                    if str(item.get("id", "")) != m.group(1)
+                ]
+                if before == len(mgr.settings.packagizer_rules):
+                    return self._err(404, "Packagizer rule not found")
+                mgr.settings.save()
+                return self._json({"ok": True})
+            self._err(404, "unknown endpoint")
+
+        # -- SSE -----------------------------------------------------------
+        def _sse(self):
+            import queue as _queue
+            q = _queue.Queue(maxsize=256)
+            with srv._clients_lock:
+                srv._clients.append(q)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Connection", "keep-alive")
+                
+                self.end_headers()
+                self.wfile.write(b"event: hello\ndata: {}\n\n")
+                self.wfile.flush()
+                while True:
+                    try:
+                        msg = q.get(timeout=15)
+                        self.wfile.write(f"data: {msg}\n\n".encode("utf-8"))
+                    except _queue.Empty:
+                        self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                with srv._clients_lock:
+                    try:
+                        srv._clients.remove(q)
+                    except ValueError:
+                        pass
+
+        # -- static ----------------------------------------------------------
+        def _static(self, p: str):
+            root = static_dir().resolve()
+            if p in ("/", ""):
+                p = "/index.html"
+            safe = (root / p.lstrip("/")).resolve()
+            try:
+                safe.relative_to(root)
+            except ValueError:
+                return self._err(403, "forbidden path")
+            if not safe.is_file():
+                # SPA fallback
+                safe = root / "index.html"
+            if not safe.is_file():
+                return self._err(404, "no UI assets found (ui/static missing)")
+            ctype = MIME.get(safe.suffix.lower(), "application/octet-stream")
+            data = safe.read_bytes()
+            if safe.name == "index.html" and srv.base_path:
+                page = data.decode("utf-8")
+                bootstrap = ("<script>window.OPENGRAB_BASE_PATH="
+                             + json.dumps(srv.base_path) + ";</script>")
+                data = page.replace("</head>", bootstrap + "</head>", 1).encode("utf-8")
+            elif safe.name == "manifest.webmanifest" and srv.base_path:
+                manifest = json.loads(data)
+                manifest["start_url"] = srv.base_path + "/"
+                data = json.dumps(manifest).encode("utf-8")
+            self._send(200, data, ctype,
+                       extra={"Cache-Control": "max-age=60"})
+
+    return Handler
+
+
+# ------------------------------------------------------------------ main
+def run(settings: Settings, host: str = "127.0.0.1", port: int = 5678,
+        block: bool = False) -> tuple[ApiServer, DownloadManager, int]:
+    """Convenience: build manager + server, start both.  Returns (srv, mgr, port)."""
+    from .settings import user_plugins_dir
+    mgr = DownloadManager(settings)
+    mgr.start()
+    srv = ApiServer(settings, mgr, host=host, port=port)
+    bound = srv.start()
+    settings.api_host = host
+    settings.api_port = bound
+    if not block:
+        return srv, mgr, bound
+    try:
+        srv.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.stop()
+        mgr.shutdown()
+    return srv, mgr, bound
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(prog="opengrab-server")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=5678)
+    ap.add_argument("--token", default="")
+    ap.add_argument("--auto-port", action="store_true",
+                    help="pick a free port starting at --port")
+    args = ap.parse_args(argv)
+
+    logging_cfg = __import__("logging")
+    logging_cfg.basicConfig(level=logging_cfg.INFO,
+                            format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
+    from .settings import load_settings
+    settings = load_settings()
+    port = args.port
+    if args.auto_port:
+        port = find_free_port(args.host, port)
+    srv = ApiServer(settings, DownloadManager(settings),
+                    host=args.host, port=port,
+                    token=args.token or None)
+    try:
+        mgr = srv.manager
+        mgr.start()
+        bound = srv.start()
+    except OSError as e:
+        print(f"could not bind {args.host}:{port}: {e}")
+        return 1
+    print(f"OpenGrab API  ->  http://{srv.host}:{bound}")
+    if srv.host == "127.0.0.1":
+        print("LAN access:  http://<your-ip>:%d/#token=%s" % (bound, srv.token))
+    else:
+        print("auth token:  %s" % srv.token)
+    try:
+        srv.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.manager.shutdown()
+        srv.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
