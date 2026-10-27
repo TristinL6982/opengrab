@@ -36,8 +36,8 @@ def test_account_encryption():
         
         # Parse the JSON
         data = json.loads(raw_content)
-        assert len(data['accounts']) == 1
-        password_field = data['accounts'][0]['password']
+        assert len(data) == 1
+        password_field = data[0]['password']
         
         # On Windows, should start with "dp:", otherwise "ob:"
         if sys.platform == "win32":
@@ -68,12 +68,12 @@ def test_account_decryption():
         mgr2.load()
         
         # Verify we can get the decrypted password
-        assert mgr2.decrypted_password(acc) == "s3cret"
+        assert mgr2.decrypted_password(mgr2.accounts[0]) == "s3cret"
         
         # Test that loading twice doesn't double-encode (no regression)
         mgr3 = AccountManager()
         mgr3.load()
-        assert mgr3.decrypted_password(acc) == "s3cret"
+        assert mgr3.decrypted_password(mgr3.accounts[0]) == "s3cret"
     finally:
         # Cleanup
         if os.path.exists(tmp_dir):
@@ -88,8 +88,7 @@ def test_double_encoded_file():
     
     try:
         # Create a mock entry with double-encoded password
-        raw_data = {
-            'accounts': [{
+        raw_data = [{
                 'id': 'A12345678901',
                 'site': 'example.com',
                 'username': 'user', 
@@ -98,7 +97,6 @@ def test_double_encoded_file():
                 'data': {},
                 'added': 1234567890.0
             }]
-        }
         
         mgr = AccountManager()
         mgr.load()  # Load any existing accounts (should be empty)

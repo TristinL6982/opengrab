@@ -60,81 +60,38 @@ class AccountManager:
             os.replace(tmp_path, self._path)
 
     @staticmethod
-    def _dpapi_protect(data: bytes) -> bytes:
-        """Protect data using Windows DPAPI"""
+    def _dpapi_call(data: bytes, protect: bool) -> bytes:
+        """CryptProtectData / CryptUnprotectData via ctypes (Windows only)."""
         if sys.platform != "win32":
             raise OSError("DPAPI only available on Windows")
-        
-        from ctypes import Structure, c_uint, c_char_p, POINTER, windll, byref
-        from ctypes.wintypes import DWORD
-        
-        class DATA_BLOB(Structure):
-            _fields_ = [("cbData", DWORD), ("pbData", POINTER(c_char))]
-        
-        blob_in = DATA_BLOB()
-        blob_in.cbData = len(data)
-        blob_in.pbData = c_char_p(data)
-        
+        import ctypes
+        from ctypes import wintypes
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD),
+                        ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+        buf = ctypes.create_string_buffer(data, len(data))
+        blob_in = DATA_BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
         blob_out = DATA_BLOB()
-        
-        # CRYPTPROTECT_UI_FORBIDDEN = 0x1
-        success = windll.crypt32.CryptProtectData(
-            byref(blob_in),
-            None,  # szDataDescr (optional description)
-            None,  # hReserved (must be NULL)
-            None,  # pvReserved (must be NULL)
-            None,  # pPromptStruct (must be NULL for CRYPTPROTECT_UI_FORBIDDEN)
-            0x1,   # dwFlags (CRYPTPROTECT_UI_FORBIDDEN)
-            byref(blob_out)
-        )
-        
-        if not success:
-            raise OSError("Failed to protect data with DPAPI")
-            
+        fn = (ctypes.windll.crypt32.CryptProtectData if protect
+              else ctypes.windll.crypt32.CryptUnprotectData)
+        ok = fn(ctypes.byref(blob_in), None, None, None, None, 0x1,
+                ctypes.byref(blob_out))
+        if not ok:
+            raise OSError("DPAPI call failed")
         try:
-            protected_data = bytes(blob_out.pbData[:blob_out.cbData])
-            return protected_data
+            return ctypes.string_at(blob_out.pbData, blob_out.cbData)
         finally:
-            # Free the memory allocated by CryptProtectData
-            windll.kernel32.LocalFree(blob_out.pbData)
+            ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+
+    @staticmethod
+    def _dpapi_protect(data: bytes) -> bytes:
+        return AccountManager._dpapi_call(data, True)
 
     @staticmethod
     def _dpapi_unprotect(data: bytes) -> bytes:
-        """Unprotect data using Windows DPAPI"""
-        if sys.platform != "win32":
-            raise OSError("DPAPI only available on Windows")
-        
-        from ctypes import Structure, c_uint, c_char_p, POINTER, windll, byref
-        from ctypes.wintypes import DWORD
-        
-        class DATA_BLOB(Structure):
-            _fields_ = [("cbData", DWORD), ("pbData", POINTER(c_char))]
-        
-        blob_in = DATA_BLOB()
-        blob_in.cbData = len(data)
-        blob_in.pbData = c_char_p(data)
-        
-        blob_out = DATA_BLOB()
-        
-        success = windll.crypt32.CryptUnprotectData(
-            byref(blob_in),
-            None,  # pwszDataDescr (optional description)
-            None,  # hReserved (must be NULL)
-            None,  # pvReserved (must be NULL)
-            None,  # pPromptStruct (must be NULL)
-            0x1,   # dwFlags (CRYPTPROTECT_UI_FORBIDDEN)
-            byref(blob_out)
-        )
-        
-        if not success:
-            raise OSError("Failed to unprotect data with DPAPI")
-            
-        try:
-            unprotected_data = bytes(blob_out.pbData[:blob_out.cbData])
-            return unprotected_data
-        finally:
-            # Free the memory allocated by CryptUnprotectData
-            windll.kernel32.LocalFree(blob_out.pbData)
+        return AccountManager._dpapi_call(data, False)
 
     @staticmethod
     def _enc(s: str) -> str:
