@@ -416,6 +416,7 @@ class DownloadManager:
         with self._lock:
             link = self._links.pop(link_id, None)
         if link:
+            # C6: removing a link never deletes the finished file, only partial leftovers.
             dest = Path(self.settings.download_dir)
             candidates = []
             if link.filename:
@@ -423,7 +424,8 @@ class DownloadManager:
             if link.path:
                 p = Path(link.path)
                 candidates.append(dest / (p.name + ".part"))
-                candidates.append(p)
+                candidates.append(Path(str(p) + ".part"))
+                candidates.append(Path(str(p) + ".part.json"))
             for cand in candidates:
                 try:
                     if cand and cand.exists():

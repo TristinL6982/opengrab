@@ -1132,7 +1132,7 @@ def _make_handler(srv: ApiServer):
             if p == "/api/settings":
                 if not isinstance(body, dict):
                     return self._json({"error": "settings body must be a JSON object"}, 400)
-                forbidden = {"api_token", "terminal_enabled"}
+                forbidden = {"api_token", "api_host", "api_port", "base_path", "terminal_enabled"}
                 known = set(type(mgr.settings).model_fields)
                 allowed = {k: v for k, v in body.items() if k in known and k not in forbidden}
                 ignored = sorted(k for k in body if k not in allowed)

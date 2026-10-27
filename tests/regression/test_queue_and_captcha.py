@@ -4,7 +4,6 @@ from tests.regression.conftest import run_repro
 # Run misc.py once and reuse its output
 misc_output = run_repro("misc.py").stdout
 
-@pytest.mark.xfail(strict=True, reason="C6: Remove link deletes the downloaded file")
 def test_c6_remove_link_keeps_file():
     for line in misc_output.splitlines():
         if line.startswith("A. after 'Remove this link?':"):
