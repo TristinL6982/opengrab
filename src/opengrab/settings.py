@@ -115,7 +115,14 @@ def load_settings() -> Settings:
                 settings.download_dir = os.environ["OPENGRAB_DOWNLOAD_DIR"]
             return settings
         except Exception:
-            pass
+            # Backup the corrupt file before falling back to defaults
+            from datetime import datetime
+            backup_name = p.with_name(f"settings.json.bad-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+            try:
+                shutil.copy2(p, backup_name)
+                print(f"Warning: corrupt settings.json backed up as {backup_name.name}", file=sys.stderr)
+            except Exception:
+                pass  # Silently ignore if backup fails
     s = Settings(download_dir=os.environ.get(
         "OPENGRAB_DOWNLOAD_DIR", str(Path.home() / "Downloads")))
     s.save()
