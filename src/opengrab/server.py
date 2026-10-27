@@ -278,18 +278,13 @@ def _make_handler(srv: ApiServer):
                 
             # Parse the host and optionally get port
             # Examples: 'localhost', '127.0.0.1', '[::1]:8080', 'localhost:8080'
-            import re
-            match = re.match(r'^\[[^]]+\]:(\d+)$|^(.+):(\d+)$', host_header)
-            if match:
-                # Extract the non-null group (either 3rd or 2nd group since first is IPv6 with port handling)
-                groups = match.groups()
-                if groups[0]:  # For IPv6 case
-                    host = groups[0]
-                else:  # For IPv4 case  
-                    host = groups[1] if groups[1] else groups[2]
-            else:
-                host = host_header
-                
+            host = host_header.strip().lower()
+            if host.startswith("["):
+                # IPv6 literal, optionally with a port: [::1] or [::1]:8080
+                host = host[1:host.find("]")] if "]" in host else host
+            elif host.count(":") == 1:
+                host = host.rsplit(":", 1)[0]
+
             # Simplified checks for standard localhost/loopback types
             if host in {"127.0.0.1", "localhost", "::1"}:
                 return True
