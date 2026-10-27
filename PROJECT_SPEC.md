@@ -1,219 +1,62 @@
 # OpenGrab Product Specification
+## 1. Vision
+free open-source download manager that matches and exceeds JDownloader 2; native desktop app launched from OpenGrab.exe, Windows first; web UI/remote API is secondary; clean modern UI; best captcha and Cloudflare handling
 
-## Purpose and authority
+## 2. HARD CONSTRAINT: runs on about 99% of machines
+- **Baseline machine:** 2014-era laptop: dual-core x64 CPU, 4 GB RAM, no usable GPU, Windows 10 x64. The app must install, launch and download normally on it.
+- **Base app is light:** modest idle RAM (target under 150 MB for the app process, excluding WebView2), and the installer and exe contain **no ML dependencies** (no torch, tensorflow, onnxruntime, CUDA or bundled models).
+- **Local AI captcha solving is optional and OFF by default.** Enabled only by an explicit user opt-in in settings.
+- **Tiny CPU-only models:** ONNX run with `onnxruntime` CPU, ideally under 30 MB of models in total; `onnxruntime` and the models are downloaded only on opt-in, never shipped in the installer.
+- **No GPU or CUDA dependency** anywhere in the app. GPU acceleration may never be required.
+- **Bounded resources:** local AI peak RAM under about 300 MB; models load lazily on the first captcha and unload when idle; inference runs off the UI thread with a timeout.
+- **Weak-hardware fallback:** the app detects weak hardware (low RAM, few cores, slow test inference) and skips local AI, falling back to the real-browser solver, then configured solver services, then the manual captcha inbox.
+- **Real-browser solver uses the system browser:** drive the installed Edge or Chrome through CDP (Edge ships with Windows 10/11) instead of bundling Chromium where possible; bundled or downloaded Chromium is an optional last resort.
+- **Acceptance:** each milestone that touches captcha, browser or packaging must state its RAM, disk and dependency impact, and the default install must pass `--smoke-test` without any ML package present.
 
-This document records the intended product requirements for OpenGrab. It is the
-source of truth for product scope. `AGENTS.md` directs coding agents to read
-this document and `PROGRESS.md` before making changes. `PROGRESS.md` tracks
-implementation status; a feature is not complete merely because it is listed
-here or has a partial implementation.
+## 3. Architecture
+Python core src/opengrab; pywebview native window loading the bundled local UI plus tray; PyInstaller one-folder dist/OpenGrab/OpenGrab.exe; local API 127.0.0.1:5678 with a token on EVERY request, no CORS, Host/Origin checks
 
-When requirements are ambiguous, keep them visible in **Open decisions** and
-ask the user rather than silently narrowing or changing them.
+## 4. Critical bugs to fix first
+- C1. Stopping a multi-chunk download marks it FINISHED with a corrupt file  
+- C2. Resuming a multi-chunk download after app exit "finishes" instantly with a corrupt file  
+- C3. A crash or kill during a download deletes the link from the queue  
+- C4. Any website the user visits can get remote code execution through the local API  
+- C5. One invalid setting silently wipes all settings on next start  
+- C6. "Remove this link?" deletes the downloaded file from disk  
+- C7. Desktop launch can show another app, and the port silently drifts  
+- C8. Pausing a download blocks the queue  
+- B18 run_opengrab.bat wrong Python  
+- B19 build.bat uses py -3.12  
+- B20 pytest collects 0 tests  
 
-## Product goal
+## 5. Milestones M2-M14
+| Milestone | Name | Scope | Parity rows | New features |
+|---|---|---|---|---|
+| M2 | Build and test hygiene | Pytest-collectable tests, failing regression tests from `repro/`, fix `build.bat`/`run_opengrab.bat`, Windows CI that builds the exe and runs `--smoke-test`. | 3 | 0 |
+| M3 | Download integrity | Chunk-map sidecar, no finalise on cancel, crash-safe queue, pause frees the slot, bounded retries, safe filenames, live `max_parallel`. | 8 | 2 |
+| M4 | Local API security and settings safety | Token on every request, no CORS, Host/Origin checks, no token in settings, validated settings, remove keeps files, account delete, DPAPI. | 6 | 0 |
+| M5 | Reliable desktop launch | Single instance, exclusive port bind, nonce check, no console, icon, logs, WebView2 check, tray, smaller bundle. | 4 | 1 |
+| M6 | Cloudflare and captcha | Challenge detection, real-browser solver, cf_clearance handoff, widget harvest, captcha inbox, fixed solver chain. | 11 | 3 |
+| M7 | Plugin system | Declarative templates, first-wave hosts and crawlers, offline registry, plugin updates, health dashboard, SDK. | 7 | 3 |
+| M8 | LinkGrabber v2 | Packages, online check, smart paste, deep crawl fixes, Click'n'Load, containers, dedupe. | 9 | 3 |
+| M9 | Media | yt-dlp with ffmpeg merge, presets, HLS/DASH, gallery-dl. | 2 | 2 |
+| M10 | Accounts, premium and debrid | Premium plugin paths, debrid services, usage rules, cookie login. | 5 | 1 |
+| M11 | Queue, scheduler and network | Scheduler, per-host limits, proxies, reconnect, hash verify, extraction extras, notifications, torrent engine. | 16 | 6 |
+| M12 | Remote and browser | Pairing, secure remote/mobile UI, browser extension, Docker. | 6 | 2 |
+| M13 | Automation | Event hooks, Folder Watch, Anti-Standby, shutdown, CLI, webhooks. | 4 | 2 |
+| M14 | Polish and distribution | Updates, onboarding, i18n, themes, accessibility, advanced settings, JD2 import, other platforms. | 12 | 5 |
 
-Build a fully fledged, unpaywalled internet download manager inspired by
-JDownloader 2. It should capture and analyze links, resolve supported hosts and
-media, manage reliable concurrent downloads, automate supported host workflows,
-and provide a usable local and remote control interface. The product is
-intended to exceed a basic downloader with useful automation, diagnostics,
-recovery, and safety features.
+These replace all older milestone labels in PROGRESS.md. REVIEW.md section 5 calls M2-M5 'M1-M4'.
+For M2: Convert `tests/*.py` into pytest tests, keeping the scripts runnable. Add `pyproject.toml` with `[tool.pytest.ini_options] testpaths=["tests"]`. Rewrite `build/build.bat` to use `..\.venv\Scripts\python.exe -m PyInstaller`. Delete `run_opengrab.bat`, or rewrite it to call `.venv\Scripts\OpenGrab` or the built exe. Add a GitHub Actions workflow on `windows-latest` that runs pytest, builds the exe, and runs `OpenGrab.exe --smoke-test`.
+For M3: Persist per-chunk progress in a sidecar (`<file>.part.json` holding chunk ranges and bytes written, fsync'd periodically). On resume, read it and resume each chunk. Never finalize unless every chunk is complete and the size matches. When a chunk is cancelled, raise cancel out of `_parallel`, never finalize. Persist DOWNLOADING links (as PAUSED on load) and keep the `_load_links` recovery path. Pause must release the worker and the connection (stop the stream, keep the sidecar, requeue on resume). Bound `_stream` retries by `retry_max`. Cancel sibling chunks on fatal error. Sanitize the Content-Disposition name and honor RFC 5987 `filename*`. Apply `max_parallel` live.
+For M4: Remove `Access-Control-Allow-Origin: *`; send no CORS by default. Require the token on **every** `/api/*` request, including loopback. Hand the token to the pywebview window through `js_api` or an HttpOnly SameSite=Strict cookie set on first load with a per-launch nonce. Validate `Host` against `127.0.0.1` / `localhost` / configured names. Reject requests whose `Origin` is not same-origin. Stop returning `api_token` from `GET /api/settings`. Turn on `validate_assignment=True` in Settings and whitelist which keys `POST /api/settings` may change. On a bad `settings.json`, back it up and **do not** overwrite it. `terminal_enabled` may only be changed from the desktop UI (or remove the terminal). Remove-link must not delete files unless the user explicitly chooses "Remove and delete file". Fix account delete to use the id. Store credentials with Windows DPAPI or `keyring`.
+For M5: Single-instance lock: a named mutex on Windows; a second launch focuses the existing window or sends it `--grab` URLs. On Windows, bind with `SO_EXCLUSIVEADDRUSE` (override `server_bind`) and do not set SO_REUSEADDR. If 5678 is taken, show a clear dialog, or pick a free port **without persisting it**. Never write `api_port` from a CLI `--port` override (remove `settings.save()` at `app.py:42-43`). Before `create_window`, GET `/api/ping` and require a per-launch nonce to match. Otherwise abort with an error. `console=False` plus an `.ico`; write a log file under `%APPDATA%\OpenGrab\logs`. Detect a missing WebView2 runtime and show a message. Lazy or optional ddddocr to shrink the bundle.
 
-The current repository describes a Python 3.12 backend, web UI, a Windows
-desktop build, and a Docker deployment. The full platform requirement below is
-broader than that current implementation plan and must be resolved before
-claiming cross-platform support.
+## 6. Feature parity
+The full JD2 comparison is in docs/plan/FEATURES.md, plugin inventory docs/plan/JD2_PLUGIN_INVENTORY.md
 
-## Core requirements
+## 7. Licensing
+reimplement from public site behaviour; never port JD2 GPL plugin code; no AppWork Utilities; yt-dlp is Unlicense
 
-These requirements come from the user's requested core feature list. They are
-product requirements, not claims that the current code already implements them.
-
-### 1. Platform independence
-
-- Run on Windows, Linux, and macOS, as well as the user's stated
-  "Java-compatible systems" target.
-- Provide a consistent core feature set across supported platforms.
-- Document platform-specific limitations, installation, updates, and required
-  system dependencies.
-
-### 2. LinkGrabber and clipboard capture
-
-- Monitor copied links and identify downloadable files, archives, and media
-  streams.
-- Allow users to review, filter, and add detected links to the download queue.
-- Support batch capture and avoid silently adding unwanted or duplicate links.
-
-### 3. Concurrent and segmented downloads
-
-- Download multiple files concurrently.
-- Split eligible downloads into parallel chunks to use available bandwidth.
-- Resume interrupted downloads and fall back safely when a server does not
-  support byte ranges or parallel connections.
-- Allow users to control concurrency and pause/resume individual items and
-  queues.
-
-### 4. Automatic archive extraction
-
-- Automatically extract supported archives, including RAR, ZIP, and 7z.
-- For password-protected archives, support user-authorized password lookup or
-  search when configured.
-- Report extraction failures and preserve the original archive unless the user
-  has configured otherwise.
-
-### 5. Host and decrypt plugins
-
-- Provide an extensible plugin system for file hosters and link decryptors.
-- Target support for more than 110 file hosters and more than 300 decrypt
-  plugins, as requested by the user.
-- Show which plugin handled a link, its compatibility/status, and useful failure
-  details.
-
-### 6. YouTube and media
-
-- Support batch media downloads, including full YouTube playlists and channels.
-- Make format and quality selection understandable and configurable.
-- Clearly distinguish a single media item from a playlist/channel batch before
-  starting a large download.
-
-### 7. Bandwidth and queue control
-
-- Provide configurable bandwidth limits.
-- Support pausing/resuming transfers and queues at any time.
-- Support concurrent-download and per-download connection limits.
-
-### 8. CAPTCHA and host wait automation
-
-- Include OCR-assisted CAPTCHA solving and a manual fallback.
-- Handle host-imposed countdowns/wait times where supported by the relevant
-  plugin.
-- Surface the current state, wait time, and required user action in the UI.
-
-### 9. Reconnect support
-
-- Support user-configured router reconnect scripts to obtain a new IP where
-  the router and network permit it.
-- Target the user's requested breadth of more than 1,400 router models, with
-  the supported method and compatibility documented per device.
-- Make reconnect behavior explicit and user-controlled; do not promise that a
-  reconnect bypasses a host's terms or network restrictions.
-
-### 10. Packagizer rules
-
-- Let users define rules to rename, sort, and move downloads based on attributes
-  such as file type and source.
-- Preview or explain which rules match a link and what actions will be applied.
-- Avoid overwriting existing files without an explicit policy.
-
-### 11. Web interface and remote control
-
-- Provide a web UI to manage links, packages, queues, settings, and supported
-  automation features.
-- Support remote control through an integrated web interface and/or a defined
-  remote service/API equivalent to the user's MyJDownloader requirement.
-- Require authentication for remote access and document secure deployment.
-
-## Quality and safety requirements
-
-These additions improve reliability and make the core features safer to use.
-
-### Reliability and recovery — must have
-
-- Persist queue state and recover it after application or system restart.
-- Verify downloads with available checksums and report when integrity cannot be
-  verified.
-- Record retry history and give actionable failure reasons.
-- Resume safely after network interruption; use a single connection when range
-  requests are unsupported or unreliable.
-- Provide an exportable diagnostics report that redacts credentials, cookies,
-  tokens, and other secrets.
-
-### Archive and plugin safety — must have
-
-- Protect extraction from path traversal, excessive expanded size, excessive
-  file counts, and other archive bombs.
-- Make password-list searching opt-in and configurable; disclose its source and
-  limits.
-- Document plugin permissions and compatibility. Make plugin failures visible
-  and allow users to disable or remove a plugin.
-- Do not execute downloaded or extracted content automatically.
-
-### Remote access safety — must have
-
-- Keep remote access authenticated and provide HTTPS/reverse-proxy guidance.
-- Bind to localhost by default unless the user explicitly configures remote
-  access.
-- Keep powerful administrative features, especially a remote terminal,
-  disabled unless explicitly enabled and authenticated.
-- Explain which interfaces are exposed and how to revoke remote access.
-
-## Additional enhancements roadmap
-
-These were suggested as improvements beyond the stated core requirements. They
-are desirable product enhancements and should be prioritized after the core
-requirements unless the user changes priority.
-
-### Next priority
-
-- Browser extensions or a local browser-capture helper for sending links and
-  selected media to OpenGrab.
-- Duplicate detection and automatic grouping of related links into packages.
-- Schedules, bandwidth profiles, per-host limits, and automatic pause/resume
-  rules.
-- Queue priorities and package dependency/order controls.
-- A diagnostics view showing selected plugin, server range support, retries,
-  and recent errors.
-- Storage-space and configuration checks before starting large downloads.
-
-### Later enhancements
-
-- Connection testing and estimates for whether parallel chunks are likely to
-  help a particular source.
-- Notification controls and configurable completion actions.
-- A versioned plugin compatibility catalog and plugin update workflow.
-- Import/export for settings, rules, and queue lists.
-
-## Acceptance criteria and evidence
-
-Each requirement must have a testable acceptance criterion and recorded
-verification before it can be marked complete in `PROGRESS.md`. At minimum:
-
-- Platform claims must be verified by installing and launching on each claimed
-  operating system and documenting any unavailable features.
-- Download engine behavior must be checked for parallel-capable and
-  non-parallel servers, interruption/resume, pause/resume, and integrity checks.
-- Each plugin family must have maintained compatibility evidence; plugin
-  counts alone do not establish that plugins work.
-- Playlist/channel downloads must be checked for batch enumeration, user
-  selection, and correct queue behavior.
-- Archive handling must be checked for supported formats, password prompts,
-  safety limits, and malicious path entries.
-- Remote access must be checked for authentication, secure configuration, and
-  disabled-by-default administrative capabilities.
-- Packagizer rules must be checked for deterministic matching, preview, and
-  collision handling.
-
-Do not claim a numerical compatibility target (hosters, decryptors, routers)
-unless the project has a reproducible inventory and a maintenance approach.
-
-## Open decisions
-
-The agent must keep these unresolved until the user answers or project evidence
-supports a clear interpretation:
-
-1. What does "Java-compatible systems" mean for this Python project: any OS
-   capable of running Java, a Java-based integration, or a requirement to
-   implement/package a Java application?
-2. Does platform independence require native desktop builds on Windows, Linux,
-   and macOS, or is a browser UI plus Docker sufficient on some platforms?
-3. Are the targets of 110+ hosters, 300+ decrypt plugins, and 1,400+ routers
-   strict launch requirements, long-term targets, or compatibility goals met
-   through third-party/plugin ecosystems?
-4. Which archive password sources and search limits are acceptable, and what
-   licensing/source constraints apply to them?
-5. Which browser extension platforms and remote-control service/API are
-   required for launch?
-6. What functionality is included in the user's "and more" request beyond the
-   explicit requirements and the enhancement roadmap above?
-
+## 8. Decisions kept
+cross-platform Python core, owner token, visible tray/clipboard capture, Docker unverified, local-only by default with HTTPS for remote, port 5678

@@ -81,12 +81,7 @@ queue persistence and shutdown. Saves now serialize before replacing the state
 file; the 16-check download/resume/persistence suite and smoke check pass with
 no persistence warnings.
 
-> **Status note:** This file is an older handoff and its DONE/NOT YET WRITTEN
-> lists are stale. The engine, API server, and UI files now exist in the
-> repository, but their existence does not mean they have been fully verified.
-> Inspect the current tree and Git status before relying on this snapshot.
-> `PROJECT_SPEC.md` is the authoritative product requirements document;
-> `AGENTS.md` contains instructions for coding agents.
+> Milestones renumbered 2026-10-27: see PROJECT_SPEC.md section 5 (M2-M14). Old milestone labels below are obsolete.
 
 **Date paused:** 2026-10-25. **Location:** `C:\Users\trist\opengrab`
 Git repo initialized at this pause point — check `git log` for the commit.
@@ -162,7 +157,7 @@ Do not interpret their presence as proof that each requirement is complete.
    (WAITING→RESOLVING→[CAPTCHA/LOGIN/PAYWALL]→DOWNLOADING→FINISHED/ERROR),
    add_urls (parse/filter/grab/children), worker thread (max_parallel),
    retry/backoff, provide_captcha/provide_login re-resolve, speed/eta smoothing,
-   state persistence (state.json) for restart, notifications list.
+   state persistence (state.json) for restart, notifications list. **NOT DONE (see docs/plan/REVIEW.md §4)**
 4. `src/opengrab/server.py` — ThreadingHTTPServer: static UI + JSON API
    (state, urls, start/pause/resume, remove, move, reorder, captcha, login,
    paywall, settings, filters, accounts, plugins, health, captcha-test),
@@ -190,7 +185,7 @@ Do not interpret their presence as proof that each requirement is complete.
    sw.js, icons (generate PNGs with Pillow).
 9. Build: `build/OpenGrab.spec` (datas: ui/*, ddddocr onnx models, certifi;
    hiddenimports: yt_dlp, ddddocr, curl_cffi; console=False for GUI; add
-   pystray), `build/build.bat`, one-click. Also `build/build_docker.bat` optional.
+   pystray), `build/build.bat`, one-click. Also `build/build_docker.bat` optional. **NOT DONE (see docs/plan/REVIEW.md §4)**
 10. Docker: `Dockerfile` (python:3.12-slim, UGID handling, EXPOSE 5678,
     VOLUME /config, HEALTHCHECK /api/health), `docker-compose.yml`,
     `.env.example` (all OPENGRAB_* + UGID + TZ), version tag scheme (0.1.0

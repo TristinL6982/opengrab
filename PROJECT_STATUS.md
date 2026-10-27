@@ -67,16 +67,16 @@ login + paywall handling, filters, accounts. Ship as platform builds
 
 - **Engine** (`engine/manager.py`, `engine/downloader.py`): chunked
   parallel downloads with `Range` resume, `.part` files, pause/stop/resume,
-  state persistence (`links.json`). Verified end-to-end below.
+  state persistence (`links.json`). Verified end-to-end below. **NOT DONE (see docs/plan/REVIEW.md §4)**
 - **Server** (`server.py`): ThreadingHTTPServer, HTTP/1.1, JSON API
   (`/api/ping|stats|links|urls|filters|accounts|plugins|settings|events|
   clear-finished|links/{id}/*`), SSE event stream, Bearer-token auth
-  (local always allowed; non-local requires `Authorization: Bearer <token>`),
+  (local always allowed; non-local requires `Authorization: Bearer ***
   static UI serving with path-traversal guard.
 - **UI** (`ui/static/`): index.html + app.js + style.css + manifest + sw.js +
   svg icon; tabs (queue/active/finished, accounts, filters, plugins,
   settings, captcha modal), drag & drop URL add, service-worker registration,
-  Bearer-token handling. All JS API calls match server routes (audited).
+  Bearer-token handling. All JS API calls match server routes (audited). **NOT DONE (see docs/plan/REVIEW.md §4)**
 - **Supporting modules** (written earlier, exercised via e2e): models,
   settings (pydantic, `%APPDATA%/OpenGrab`), anti-bot `http_client`
   (curl_cffi impersonation), filters, accounts, captcha base+chain,
@@ -107,17 +107,17 @@ login + paywall handling, filters, accounts. Ship as platform builds
   local API ping, and a checksum-verified download; it does not cover resume.
 - **GUI:** `app.py` now serves the UI in pywebview, but native window startup
   has not been verified. Tray and visible, user-toggleable clipboard
-  Click'n'Load capture remain unimplemented.
+  Click'n'Load capture remain unimplemented. **NOT DONE (see docs/plan/REVIEW.md §4)**
 - **API remaining:** native Windows clipboard calls need validation without
   reading or changing the live desktop clipboard. The server rejects direct
   non-local HTTP and accepts proxied access only when the loopback proxy marks
   HTTPS; direct TLS termination is not implemented. Multi-user auth is
   intentionally OUT for v1 per decision #2.
 - **UI gaps:** no notifications, file manager, clipboard, audio, or terminal
-  panels; no PWA PNG icons (svg only).
+  panels; no PWA PNG icons (svg only). **NOT DONE (see docs/plan/REVIEW.md §4)**
 - **Packaging:** no PyInstaller spec/build script → no `OpenGrab.exe`;
   no `Dockerfile`/`docker-compose.yml`/`.env.example` (and unbuildable here —
-  no docker CLI); no `README.md`.
+  no docker CLI); no `README.md`. **NOT DONE (see docs/plan/REVIEW.md §4)**
 - **Tests:** `tests/e2e_api.py` (16/16) and `tests/e2e_api_m3.py` (19/19);
   focused unit tests for downloader math and other modules remain absent.
 - **Default port** is now 5678 in settings and server defaults. An existing
