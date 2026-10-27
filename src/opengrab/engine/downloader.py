@@ -132,7 +132,7 @@ def _is_transient(e: Exception) -> bool:
 def _sanitize(name: str) -> str:
     name = (name or "").strip().replace("\\", "/")
     name = name.split("/")[-1] or "download"
-    name = re.sub(r'[<>:"/\\|?*\\x00-\\x1f]', "_", name)
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
     return name[:200] or "download"
 
 
@@ -141,7 +141,7 @@ def _cd_filename(header: str) -> Optional[str]:
         return None
     
     # Prefer RFC 5987 filename*=UTF-8''<percent-encoded>
-    m = re.search(r'filename\*=(?:UTF-8\'\'|utf-8\'\')(.+?)(?:[;\\s]|$)', header, re.IGNORECASE)
+    m = re.search(r'filename\*=(?:UTF-8\'\'|utf-8\'\')([^;\s]+)', header, re.IGNORECASE)
     if m:
         try:
             return _sanitize(urllib.parse.unquote(m.group(1), encoding='utf-8'))
@@ -149,7 +149,7 @@ def _cd_filename(header: str) -> Optional[str]:
             return None
     
     # Else look for filename="..." or filename=token
-    m = re.search(r'filename\\*?=\"?([^\";]+)\"?', header)
+    m = re.search(r'filename="?([^";]+)"?', header, re.IGNORECASE)
     if m:
         name = m.group(1).strip()
         # Take just the basename and sanitize it
