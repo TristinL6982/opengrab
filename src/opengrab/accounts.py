@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import threading
+import sys
 
 from .models import Account
 
@@ -28,32 +30,145 @@ class AccountManager:
         if p.exists():
             try:
                 raw = json.loads(p.read_text("utf-8"))
-                self.accounts = [Account(**a) for a in raw]
+                self.accounts = []
+                for a in raw:
+                    acc = Account(**a)
+                    # Unwrap repeatedly while the result still starts with "ob:" or "dp:"
+                    password = acc.password
+                    for _ in range(5):  # max 5 times to handle old double-encoded files
+                        new_password = self._dec(password)
+                        if new_password == password:
+                            break
+                        password = new_password
+                    acc.password = password
+                    self.accounts.append(acc)
             except Exception:
                 self.accounts = []
 
     def save(self) -> None:
         with self._lock:
+            # Write to temporary file first for atomicity
+            tmp_path = self._path.with_suffix(".tmp")
             payload = []
             for a in self.accounts:
                 d = a.model_dump()
                 if d.get("password"):
                     d["password"] = self._enc(d["password"])
                 payload.append(d)
-            self._path.write_text(json.dumps(payload, indent=2), "utf-8")
+            tmp_path.write_text(json.dumps(payload, indent=2), "utf-8")
+            # Atomic replace
+            os.replace(tmp_path, self._path)
+
+    @staticmethod
+    def _dpapi_protect(data: bytes) -> bytes:
+        """Protect data using Windows DPAPI"""
+        if sys.platform != "win32":
+            raise OSError("DPAPI only available on Windows")
+        
+        from ctypes import Structure, c_uint, c_char_p, POINTER, windll, byref
+        from ctypes.wintypes import DWORD
+        
+        class DATA_BLOB(Structure):
+            _fields_ = [("cbData", DWORD), ("pbData", POINTER(c_char))]
+        
+        blob_in = DATA_BLOB()
+        blob_in.cbData = len(data)
+        blob_in.pbData = c_char_p(data)
+        
+        blob_out = DATA_BLOB()
+        
+        # CRYPTPROTECT_UI_FORBIDDEN = 0x1
+        success = windll.crypt32.CryptProtectData(
+            byref(blob_in),
+            None,  # szDataDescr (optional description)
+            None,  # hReserved (must be NULL)
+            None,  # pvReserved (must be NULL)
+            None,  # pPromptStruct (must be NULL for CRYPTPROTECT_UI_FORBIDDEN)
+            0x1,   # dwFlags (CRYPTPROTECT_UI_FORBIDDEN)
+            byref(blob_out)
+        )
+        
+        if not success:
+            raise OSError("Failed to protect data with DPAPI")
+            
+        try:
+            protected_data = bytes(blob_out.pbData[:blob_out.cbData])
+            return protected_data
+        finally:
+            # Free the memory allocated by CryptProtectData
+            windll.kernel32.LocalFree(blob_out.pbData)
+
+    @staticmethod
+    def _dpapi_unprotect(data: bytes) -> bytes:
+        """Unprotect data using Windows DPAPI"""
+        if sys.platform != "win32":
+            raise OSError("DPAPI only available on Windows")
+        
+        from ctypes import Structure, c_uint, c_char_p, POINTER, windll, byref
+        from ctypes.wintypes import DWORD
+        
+        class DATA_BLOB(Structure):
+            _fields_ = [("cbData", DWORD), ("pbData", POINTER(c_char))]
+        
+        blob_in = DATA_BLOB()
+        blob_in.cbData = len(data)
+        blob_in.pbData = c_char_p(data)
+        
+        blob_out = DATA_BLOB()
+        
+        success = windll.crypt32.CryptUnprotectData(
+            byref(blob_in),
+            None,  # pwszDataDescr (optional description)
+            None,  # hReserved (must be NULL)
+            None,  # pvReserved (must be NULL)
+            None,  # pPromptStruct (must be NULL)
+            0x1,   # dwFlags (CRYPTPROTECT_UI_FORBIDDEN)
+            byref(blob_out)
+        )
+        
+        if not success:
+            raise OSError("Failed to unprotect data with DPAPI")
+            
+        try:
+            unprotected_data = bytes(blob_out.pbData[:blob_out.cbData])
+            return unprotected_data
+        finally:
+            # Free the memory allocated by CryptUnprotectData
+            windll.kernel32.LocalFree(blob_out.pbData)
 
     @staticmethod
     def _enc(s: str) -> str:
-        return "ob:" + base64.b64encode(s.encode()).decode()
+        """Encode password using DPAPI on Windows or old obfuscation otherwise"""
+        if not s:
+            return ""
+        try:
+            if sys.platform == "win32":
+                return "dp:" + base64.b64encode(AccountManager._dpapi_protect(s.encode("utf-8"))).decode()
+            else:
+                return "ob:" + base64.b64encode(s.encode()).decode()
+        except Exception:
+            # If DPAPI fails on Windows, fall back to old method
+            if sys.platform == "win32":
+                return "ob:" + base64.b64encode(s.encode()).decode()
+            else:
+                raise
 
     @staticmethod
     def _dec(s: str) -> str:
-        if s.startswith("ob:"):
+        """Decode password using DPAPI or old obfuscation"""
+        if s.startswith("dp:"):
+            try:
+                data = base64.b64decode(s[3:].encode())
+                return AccountManager._dpapi_unprotect(data).decode("utf-8")
+            except Exception:
+                return ""
+        elif s.startswith("ob:"):
             try:
                 return base64.b64decode(s[3:].encode()).decode()
             except Exception:
-                return s
-        return s
+                return ""
+        else:
+            return s
 
     # -- ops -----------------------------------------------------------------
     def add(self, site: str, username: str, password: str = "",
@@ -105,10 +220,17 @@ class AccountManager:
         return None
 
     def snapshot(self) -> list[dict]:
-        return [a.to_public() for a in self.accounts]
+        result = []
+        for a in self.accounts:
+            d = a.to_public()
+            # Replace password with empty string and add has_password flag
+            d["password"] = ""
+            d["has_password"] = bool(a.password)
+            result.append(d)
+        return result
 
     def clear_password_cache(self) -> None:
         pass
 
     def decrypted_password(self, acc: Account) -> str:
-        return self._dec(acc.password)
+        return acc.password
