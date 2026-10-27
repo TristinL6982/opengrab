@@ -60,3 +60,6 @@ reimplement from public site behaviour; never port JD2 GPL plugin code; no AppWo
 
 ## 8. Decisions kept
 cross-platform Python core, owner token, visible tray/clipboard capture, Docker unverified, local-only by default with HTTPS for remote, port 5678
+
+For M14 (installer): ship a downloadable setup .exe with an installer wizard (Inno Setup or similar). It offers the install location (default C:\Program Files\OpenGrab), an opt-in download of the small local OCR/captcha model plus a toggle to enable it by default, Start menu/desktop shortcuts, autostart, and link/protocol handling. Installed layout is organized (app\, plugins\, models\), user data lives in %APPDATA%\OpenGrab, and a proper uninstaller is registered.
+
