@@ -2,3 +2,4 @@
 testpaths = ["tests"]
 python_files = ["test_*.py", "e2e_*.py"]
 addopts = "-ra"
+markers = ["slow: long-running end-to-end tests"]
