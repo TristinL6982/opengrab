@@ -20,3 +20,7 @@ def test_normalize_url():
 def test_dedupe():
     assert dedupe(["https://a.com/1", "https://A.com/1", "https://a.com/2"], existing=["https://a.com/2#x"]) == ["https://a.com/1"]
 
+
+
+def test_extract_urls_hxxp_case_insensitive():
+    assert extract_urls("HXXP://f.com/a and HxxPs://g.com/b") == ["http://f.com/a", "https://g.com/b"]

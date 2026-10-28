@@ -11,8 +11,7 @@ URL_RE = re.compile(r"(?:https?|ftp)://[^\s<>\"'\)\]]+|magnet:\?[^\s<>\"']+", re
 
 def extract_urls(text: str) -> list:
     # Replace hxxp and hxxps with http and https
-    text = text.replace("hxxp://", "http://")
-    text = text.replace("hxxps://", "https://")
+    text = re.sub(r"hxxp(s?)://", r"http\1://", text, flags=re.IGNORECASE)
 
     matches = URL_RE.findall(text)
     urls = []
@@ -37,12 +36,7 @@ def extract_urls(text: str) -> list:
 def normalize_url(url: str) -> str:
     # Magnet links - process with special care for leading whitespace
     if url.lower().lstrip().startswith("magnet:"):
-        clean_url = url.strip()
-        # Check for malformed "magnet:/?xt=..." (should be "magnet:?xt=...")
-        if len(clean_url) >= 8 and clean_url[:8] == "magnet:/?":
-            # Fix the malformed URL by correcting the scheme separator
-            return "magnet:?" + clean_url[8:]
-        return clean_url
+        return url.strip()
 
     parsed = urlsplit(url)
     scheme = parsed.scheme.lower()
