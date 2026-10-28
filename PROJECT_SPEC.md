@@ -64,6 +64,20 @@ The full JD2 comparison is in docs/plan/FEATURES.md, plugin inventory docs/plan/
 - **Antivirus scan on completion (M11):** optional, off by default. Use Windows Defender via MpCmdRun.exe -Scan -ScanType 3 -File <path> when it's present, or a user-configured scanner command line (e.g. Avast, ESET). Show the result in the UI, quarantine or flag files that fail, and never block the queue.
 All of these must respect the hard constraint in section 2 (weak 2014 laptops, no GPU, low RAM).
 
+### 6b. Also required in the final release (Tristin, 2026-10-27 8:12 PM)
+- **Browser integration module (M12):** the OpenGrab extension (see 6a) ships prebuilt in the installer and store listings, and can also be built locally from `extension/` (unpacked/dev mode). Supports all popular browsers: Chrome, Edge, Firefox, Opera, Brave, Vivaldi. Advanced integration: per-site enable/disable, file-type and minimum-size rules, a key to bypass, catching downloads started by page scripts, and passing cookies, referrer and user agent.
+- **Download All (M12):** extension action and LinkGrabber command to grab every link or media file on the current page, filtered by type and pattern, into the LinkGrabber for review.
+- **Website spider and grabber (M8):** crawl a site from a start URL with depth limit, same-domain or include/exclude patterns, file-type filters, robots.txt respect, and a request-rate limit; results go to the LinkGrabber.
+- **Dark theme and customizable interface (M14, dark exists):** dark, light and follow-system themes plus accent colour; configurable columns, sort, toolbar buttons, and a compact or comfortable layout, all saved per user.
+- **Drag and drop (works; keep):** drop links, text, .txt/.dlc/.crawljob files onto the window and the tray icon; drag to reorder the queue.
+- **Download categories (M11, see 6a).**
+- **Multilingual (M14):** all UI strings in translation files, language picker, follow the OS language; ship at least English plus community translations.
+- **Quick update (M14):** one-click in-app update check and install from signed GitHub Releases (small delta updates when possible), with rollback; plugins update separately.
+- **Download limits (M11):** global and per-download speed limits (exists), scheduled speed windows, and data caps (stop or slow after N GB per day/month).
+- **Proxy servers (M11):** HTTP, HTTPS, SOCKS4/4a, SOCKS5 (with remote DNS), system proxy, PAC/WPAD auto-config, proxy lists with per-host rules and failover.
+- **Authentication protocols (M11):** Basic, Digest, Negotiate, NTLM and Kerberos for servers and proxies (via libcurl/curl_cffi auth options with Windows SSPI for integrated login), with saved per-site credentials stored with DPAPI.
+- **Automatic antivirus checking (M11, see 6a)** and **simple installation wizard (M14, see section 5 M14 installer requirements).**
+
 ## 7. Licensing
 reimplement from public site behaviour; never port JD2 GPL plugin code; no AppWork Utilities; yt-dlp is Unlicense
 
