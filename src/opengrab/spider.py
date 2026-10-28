@@ -3,10 +3,12 @@ Website spider: crawl from a start URL with a depth limit and collect file links
 """
 
 import posixpath
+import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Callable
 from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.robotparser import RobotFileParser
 import re
 
 
@@ -52,6 +54,9 @@ class SpiderOptions:
     include: tuple = ()
     exclude: tuple = ()
     max_pages: int = 100
+    respect_robots: bool = True
+    user_agent: str = "OpenGrab"
+    delay: float = 0.0
 
 
 FetchFn = Callable[[str], tuple]
@@ -61,7 +66,26 @@ def _extension(url: str) -> str:
     return posixpath.splitext(urlparse(url).path)[1].lower()
 
 
-def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict:
+def _robots_for(url: str, fetch, cache: dict):
+    # Extract scheme and netloc to form the key
+    parsed_url = urlparse(url)
+    key = f"{parsed_url.scheme}://{parsed_url.netloc}"
+    
+    if key not in cache:
+        robots_url = key + "/robots.txt"
+        try:
+            content_type, body = fetch(robots_url)
+            rp = RobotFileParser()
+            rp.parse(body.splitlines())
+            cache[key] = rp
+        except Exception:
+            # If fetching robots.txt fails, cache None (meaning allow everything)
+            cache[key] = None
+    
+    return cache[key]
+
+
+def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None, sleep=time.sleep) -> dict:
     if options is None:
         options = SpiderOptions()
     
@@ -72,6 +96,9 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
     errors = []
     visited = set()
     queue = [(start_url, 0)]
+    robots_cache = {}
+    fetched = 0
+    blocked = []
     
     while queue:
         url, depth = queue.pop(0)
@@ -84,6 +111,17 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
         if len(pages) >= options.max_pages:
             break
             
+        # Check robots.txt before fetching if respect_robots is True
+        if options.respect_robots:
+            rp = _robots_for(url, fetch, robots_cache)
+            if rp is not None and not rp.can_fetch(options.user_agent, url):
+                blocked.append(url)
+                continue
+        
+        # Apply delay if set and we've fetched at least one page
+        if options.delay > 0 and fetched > 0:
+            sleep(options.delay)
+        
         try:
             content_type, body = fetch(url)
         except Exception:
@@ -95,6 +133,8 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
         
         # Only add to pages if fetch was successful 
         pages.append(url)
+        
+        fetched += 1
         
         # If not HTML, don't parse links
         if not content_type.lower().startswith("text/html"):
@@ -129,4 +169,4 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
                 if depth + 1 <= options.max_depth and link not in visited:
                     queue.append((link, depth + 1))
     
-    return {"pages": pages, "files": files, "errors": errors}
+    return {"pages": pages, "files": files, "errors": errors, "blocked": blocked}
