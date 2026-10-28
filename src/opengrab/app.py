@@ -8,6 +8,7 @@ from typing import Optional
 import json
 import threading
 import urllib.request
+import secrets
 
 from .settings import load_settings, Settings
 from .engine.manager import DownloadManager
@@ -28,6 +29,46 @@ def bootstrap_app(settings: Optional[Settings] = None) -> tuple:
             manager.captcha_chain, manager)
 
 
+def verify_own_server(port: int, nonce: str, base_path: str) -> bool:
+    """Verify that the server running on port is the own one by checking its nonce.
+    
+    Args:
+        port: Port number to check
+        nonce: Expected nonce value from this server instance
+        base_path: Base path prefix if needed
+    
+    Returns:
+        True if the server response matches the expected nonce
+        
+    Raises:
+        RuntimeError if a different server responds (on the same port)
+    """
+    import http.client
+    import json
+    
+    # Build endpoint URL with base_path if needed
+    path = "/api/ping"
+    if base_path:
+        path = f"{base_path}{path}"
+        
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        data = resp.read().decode("utf-8", "replace")
+        if resp.status == 200:
+            parsed = json.loads(data)
+            actual_nonce = parsed.get("nonce")
+            if actual_nonce != nonce:
+                raise RuntimeError(f"OpenGrab: port {port} is answered by another process")
+            return True
+        else:
+            # Non-200 response, likely not our server running there
+            raise RuntimeError(f"OpenGrab: port {port} is answered by another process")
+    finally:
+        conn.close()
+
+
 def start_server(settings: Optional[Settings] = None,
                  host: Optional[str] = None, port: Optional[int] = None):
     """Start the download engine and local API, returning their handles."""
@@ -39,8 +80,11 @@ def start_server(settings: Optional[Settings] = None,
     try:
         manager.start()
         bound_port = server.start()
-        settings.api_host, settings.api_port = host, bound_port
-        settings.save()
+        # ONLY save settings when both host and port are from defaults (None)
+        # When CLI args are provided, don't persist them to settings
+        if host == settings.api_host and port == settings.api_port:
+            settings.api_host, settings.api_port = host, bound_port
+            settings.save()
         return settings, manager, server, bound_port
     except Exception:
         server.stop()
@@ -62,6 +106,10 @@ def run_gui_mode(settings: Optional[Settings] = None,
     from PIL import Image, ImageDraw
 
     settings, manager, server, bound_port = start_server(settings, host, port)
+    
+    # Before creating the window, verify it's our own server instance
+    verify_own_server(bound_port, server.nonce, settings.base_path)
+    
     for url in urls:
         manager.add_url(url)
     stop_watcher = threading.Event()

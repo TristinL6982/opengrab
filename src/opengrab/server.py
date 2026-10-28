@@ -51,6 +51,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import parse_qs, quote, urlparse
+import secrets
 
 from .engine.manager import DownloadManager
 from .settings import Settings, app_data_dir
@@ -120,6 +121,8 @@ class ApiServer:
                 settings.save()
             except Exception:
                 pass
+        # -- nonce ------------------------------------------------------------
+        self.nonce = secrets.token_hex(16)
         # -- SSE fanout ----------------------------------------------------
         self._clients: list["queue.Queue"] = []
         self._clients_lock = threading.Lock()
@@ -206,6 +209,17 @@ class ApiServer:
         """Non-blocking start; returns the bound port."""
         handler = _make_handler(self)
         self.httpd = ThreadingHTTPServer((self.host, self.port), handler)
+        # Exclusive bind: set allow_reuse_address to False and on Windows force SO_EXCLUSIVEADDRUSE
+        self.httpd.allow_reuse_address = False
+        if os.name == "nt":  # Windows
+            class ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+                def server_bind(self):
+                    # Set exclusive address use flag before binding
+                    super().server_bind()
+                    sock = self.socket
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    
+            self.httpd = ExclusiveThreadingHTTPServer((self.host, self.port), handler)
         self.httpd.daemon_threads = True
         # port 0 -> OS-picked ephemeral; record the real bound port
         self.port = self.httpd.server_address[1]
@@ -873,7 +887,7 @@ def _make_handler(srv: ApiServer):
         def _api_get(self, u, p: str, q: dict):
             if p in ("/api/ping", "/api/health"):
                 return self._json({"ok": True, "app": "OpenGrab",
-                                   "version": "0.1.0"})
+                                   "version": "0.1.0", "nonce": srv.nonce})
             if p == "/api/terminal":
                 if not self._terminal_authorized():
                     return
