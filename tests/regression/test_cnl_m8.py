@@ -24,9 +24,9 @@ def test_key_from_jk():
     with pytest.raises(CnlError):
         key_from_jk("function f() { return 123; }")
     
-    # Test wrong length (5 bytes each = 10 bytes)
+    # Test wrong length (5 bytes)
     with pytest.raises(CnlError):
-        key_from_jk("function f(){ return '3132333435363738393031323334';}")
+        key_from_jk("function f(){ return '3132333435';}")
 
 
 def test_decrypt_crypted():
@@ -34,7 +34,7 @@ def test_decrypt_crypted():
     key = b"1234567890123456"
     
     # Test valid decryption
-    plaintext = "https://a.com/1\r\nhttps://a.com/2"
+    plaintext = "https://a.com/1\r\nhttps://a.com/2\n"
     # Pad plaintext to multiple of 16 bytes
     padded_plaintext = plaintext.encode('utf-8') + b"\x00" * (16 - len(plaintext) % 16)
     
@@ -43,7 +43,11 @@ def test_decrypt_crypted():
     encoded_crypted = base64.b64encode(encrypted_data).decode('utf-8')
     
     result = decrypt_crypted(encoded_crypted, key)
-    assert result == plaintext
+    assert result == "https://a.com/1\r\nhttps://a.com/2"
+
+    # Whitespace and line breaks inside the base64 are ignored
+    wrapped = encoded_crypted[:10] + "\n " + encoded_crypted[10:]
+    assert decrypt_crypted(wrapped, key) == "https://a.com/1\r\nhttps://a.com/2"
     
     # Test invalid base64
     with pytest.raises(CnlError):
@@ -107,3 +111,9 @@ def test_decode_addcrypted2():
     # Test missing required fields
     with pytest.raises(CnlError):
         decode_addcrypted2({"jk": "..."})
+
+def test_decrypt_crypted_rejects_empty_and_bad_key():
+    with pytest.raises(CnlError):
+        decrypt_crypted("", b"1234567890123456")
+    with pytest.raises(CnlError):
+        decrypt_crypted(base64.b64encode(b"\x00" * 16).decode("ascii"), b"short")

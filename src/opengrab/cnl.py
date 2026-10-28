@@ -25,32 +25,25 @@ def key_from_jk(jk: str) -> bytes:
     return key
 
 def decrypt_crypted(crypted: str, key: bytes) -> str:
-    # Strip whitespace from crypted
-    crypted = crypted.strip()
-    
+    # Remove all whitespace (CNL payloads may contain line breaks), then strict base64
+    data = re.sub(r"\s+", "", crypted)
     try:
-        # Base64 decode
-        encrypted_data = base64.b64decode(crypted)
-    except Exception:
+        encrypted_data = base64.b64decode(data, validate=True)
+    except (ValueError, TypeError):
         raise CnlError("Invalid base64 data")
-    
-    # AES-CBC decrypt with key as IV
-    cipher = AES.new(key, AES.MODE_CBC, iv=key)
+    if not encrypted_data or len(encrypted_data) % 16:
+        raise CnlError("Crypted data length must be a non-zero multiple of 16")
     try:
-        decrypted = cipher.decrypt(encrypted_data)
+        cipher = AES.new(key, AES.MODE_CBC, iv=key)
     except ValueError as e:
-        if "Data must be padded to 16 byte boundary in CBC mode" in str(e):
-            raise CnlError("Crypted data length must be multiple of 16")
-        raise
-    
-    # Decode as utf-8 with error replacement and strip trailing \x00 characters and whitespace
-    result = decrypted.decode('utf-8', errors='replace').rstrip('\x00 \t\n\r')
-    
-    return result
+        raise CnlError(f"Invalid AES key: {e}")
+    decrypted = cipher.decrypt(encrypted_data)
+    # Decode as utf-8, strip trailing NUL padding and whitespace
+    return decrypted.decode("utf-8", errors="replace").rstrip("\x00 \t\n\r")
+
 
 def parse_links(text: str) -> list[str]:
     # Split on \r\n, \n and \r, strip each line, keep non-empty lines, drop duplicates keeping first order
-    import re
     lines = re.split(r'\r\n|\n|\r', text)
     stripped_lines = [line.strip() for line in lines]
     unique_lines = []
