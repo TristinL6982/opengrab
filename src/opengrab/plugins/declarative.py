@@ -101,8 +101,9 @@ class DeclarativePlugin(SitePlugin):
         
         if r.status_code == 404:
             raise PluginError("offline: " + url)
-
+        
         if self.offline_markers:
+            # Check for each marker in text, case-insensitive
             lower_text = r.text.lower()
             if any(marker.lower() in lower_text for marker in self.offline_markers):
                 raise PluginError("offline: " + url)
