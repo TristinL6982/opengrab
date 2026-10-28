@@ -2,15 +2,19 @@
 #   py -3.12 -m PyInstaller --clean OpenGrab.spec
 from pathlib import Path
 import os
-from PyInstaller.utils.hooks import collect_all
+import sys
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 UI = SRC / "opengrab" / "ui" / "static"
 
-datas = [(str(UI), "ui/static"), (os.path.join(SPECPATH, "..", "src", "opengrab", "assets"), "opengrab/assets"), (os.path.join(SPECPATH, "opengrab.ico"), "opengrab.ico")]
+datas = [(str(UI), "ui/static"), (os.path.join(SPECPATH, "..", "src", "opengrab", "assets"), "opengrab/assets"), (os.path.join(SPECPATH, "opengrab.ico"), "opengrab.ico"), (str(SRC / "opengrab" / "plugins" / "templates"), "opengrab/plugins/templates")]
 binaries = []
 hiddenimports = ["webview", "pystray", "PIL", "curl_cffi", "yt_dlp", "ddddocr", "py7zr", "rarfile", "opengrab.smoke", "opengrab.engine.archives", "opengrab.engine.packagizer"]
+# builtin plugins are discovered with pkgutil at runtime, so PyInstaller cannot see them statically
+sys.path.insert(0, str(SRC))
+hiddenimports += collect_submodules("opengrab.plugins")
 for package in ("yt_dlp", "ddddocr", "curl_cffi", "webview", "pystray", "py7zr"):
     pkg_datas, pkg_bins, pkg_hidden = collect_all(package)
     datas += pkg_datas
