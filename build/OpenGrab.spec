@@ -8,7 +8,7 @@ ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 UI = SRC / "opengrab" / "ui" / "static"
 
-datas = [(str(UI), "ui/static"), (os.path.join(SPECPATH, "..", "src", "opengrab", "assets"), "opengrab/assets")]
+datas = [(str(UI), "ui/static"), (os.path.join(SPECPATH, "..", "src", "opengrab", "assets"), "opengrab/assets"), (os.path.join(SPECPATH, "opengrab.ico"), "opengrab.ico")]
 binaries = []
 hiddenimports = ["webview", "pystray", "PIL", "curl_cffi", "yt_dlp", "ddddocr", "py7zr", "rarfile", "opengrab.smoke", "opengrab.engine.archives", "opengrab.engine.packagizer"]
 for package in ("yt_dlp", "ddddocr", "curl_cffi", "webview", "pystray", "py7zr"):
