@@ -137,6 +137,12 @@ def run_gui_mode(settings: Optional[Settings] = None,
         return
     
     try:
+        # Check WebView2 before starting the server
+        from .webview2 import ensure_webview2
+        if not ensure_webview2():
+            release(lock_handle)
+            return
+            
         settings, manager, server, bound_port = start_server(settings, host, port)
         
         # Before creating the window, verify it's our own server instance

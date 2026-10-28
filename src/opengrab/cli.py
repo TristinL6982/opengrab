@@ -7,6 +7,7 @@ import sys
 
 from . import __version__
 from .settings import load_settings
+from .logs import setup_logging
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -54,6 +55,13 @@ def main(argv=None) -> int:
     if not 1 <= port <= 65535:
         print("Error: --port must be between 1 and 65535", file=sys.stderr)
         return 2
+
+    # Setup logging
+    try:
+        if not args.smoke_test and not args.help:
+            setup_logging()
+    except Exception:
+        pass  # Continue even if logging fails
 
     try:
         if args.smoke_test:
