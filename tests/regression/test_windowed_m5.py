@@ -18,7 +18,7 @@ def test_windowed_exe_build():
     assert "console=False" in spec_content, "Build spec should have console=False"
     
     # Check that icon is set
-    assert "opengrab_32.png" in spec_content, "Build spec should reference opengrab_32.png icon"
+    assert "opengrab.ico" in spec_content, "Build spec should reference opengrab.ico icon"
     
     # Check that assets are included in datas
     assert "opengrab/assets" in spec_content, "Build spec should include assets in datas"

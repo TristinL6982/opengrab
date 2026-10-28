@@ -30,6 +30,6 @@ exe = EXE(
     pyz, a.scripts, [], exclude_binaries=True, name="OpenGrab",
     debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
     console=False,
-    icon=os.path.join(SPECPATH, "opengrab_32.png"),
+    icon=os.path.join(SPECPATH, "opengrab.ico"),
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="OpenGrab")
