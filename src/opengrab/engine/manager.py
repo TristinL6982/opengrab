@@ -747,22 +747,17 @@ class DownloadManager:
             data = self._session().load()
             # Get links from "queue" package if it exists  
             queue_package = next((pkg for pkg in data if pkg["id"] == "queue"), None)
+            migrating = False
             if queue_package is not None:
                 links_data = queue_package["links"]
+            elif not data and self.links_file.exists():
+                # Migration from the legacy links.json file
+                legacy = json.loads(self.links_file.read_text(encoding="utf-8"))
+                links_data = [{"id": d.get("id"), "data": d} for d in legacy
+                              if isinstance(d, dict)]
+                migrating = True
             else:
-                # If no queue package, fallback to links.json (migration)
-                if self.links_file.exists():
-                    try:
-                        data = json.loads(self.links_file.read_text(encoding="utf-8"))
-                        links_data = [{"id": d["id"], "data": d} for d in data]
-                        # Migration: save the loaded data and rename links.json
-                        self._save_now()
-                        self.links_file.rename(self.links_file.with_suffix(".migrated"))
-                    except Exception:
-                        log.warning("failed to load legacy links.json", exc_info=True)
-                        links_data = []
-                else:
-                    links_data = []
+                links_data = []
 
             for d in links_data:
                 try:
@@ -778,6 +773,11 @@ class DownloadManager:
                     l.error = "was resolving when app closed — remove and re-add the URL"
                 with self._lock:
                     self._links[l.id] = l
+            if migrating:
+                self._save_now()
+                self.links_file.replace(
+                    self.links_file.with_name(self.links_file.name + ".migrated"))
+                log.info("migrated links.json to session.db")
             log.info("loaded %d links from disk", len(self._links))
         except Exception:
             log.warning("failed to load links", exc_info=True)

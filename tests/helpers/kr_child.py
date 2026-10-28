@@ -52,9 +52,10 @@ def resume_download(datadir, dldir):
     m.start()
     
     # Resume each link in the data file
-    links_json_path = os.path.join(datadir, "links.json")
-    with open(links_json_path) as f:
-        links = json.load(f)
+    from opengrab.sessiondb import SessionDB
+    _db = SessionDB(os.path.join(datadir, "session.db"))
+    links = [l["data"] for p in _db.load() if p["id"] == "queue" for l in p["links"]]
+    _db.close()
     
     for link_info in links:
         link_id = link_info["id"]

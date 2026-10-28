@@ -86,14 +86,17 @@ def test_kill_resume():
             proc.wait()
             raise e
 
-        # Assert links.json exists and has exactly one link
-        links_json_path = os.path.join(datadir, "links.json")
-        assert os.path.exists(links_json_path)
-        
-        with open(links_json_path) as f:
-            import json
-            links = json.load(f)
-            assert len(links) == 1
+        # Assert session.db exists and its queue holds exactly one link
+        session_path = os.path.join(datadir, "session.db")
+        assert os.path.exists(session_path)
+        assert not os.path.exists(os.path.join(datadir, "links.json"))
+        from opengrab.sessiondb import SessionDB
+        _db = SessionDB(session_path)
+        try:
+            links = [l for p in _db.load() if p["id"] == "queue" for l in p["links"]]
+        finally:
+            _db.close()
+        assert len(links) == 1
 
         # Now spawn child 2 (resume)
         result = subprocess.run([

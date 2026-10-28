@@ -34,7 +34,7 @@ if mode in ("crash", "graceful"):
     while (m.get(link.id).progress or 0) < 0.35: time.sleep(0.05)
     if mode == "graceful": m.shutdown()
     else: time.sleep(1.2)  # let debounced persist run
-    saved = json.loads((tmp/"data"/"links.json").read_text())
+    from opengrab.sessiondb import SessionDB; _db = SessionDB(str(tmp/"data"/"session.db")); saved = [l["data"] for p in _db.load() if p["id"] == "queue" for l in p["links"]]; _db.close()
     print(f"[{mode}] links.json entries after exit at ~35%:", [(d["status"]) for d in saved])
     os._exit(0)
 else:
