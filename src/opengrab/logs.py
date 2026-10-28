@@ -7,6 +7,9 @@ from pathlib import Path
 
 from .settings import app_data_dir
 
+# Import handlers explicitly to avoid AttributeError
+import logging.handlers
+
 
 def logs_dir() -> Path:
     """Get the logs directory, creating it if it doesn't exist."""
@@ -25,8 +28,19 @@ def setup_logging(level: int = logging.INFO) -> Path:
     # Check if handler is already added
     root_logger = logging.getLogger()
     for handler in root_logger.handlers:
-        if isinstance(handler, logging.handlers.RotatingFileHandler) and handler.baseFilename == str(log_file):
-            return log_file
+        # Skip any handlers that don't have baseFilename attribute (like NullHandler)
+        if not hasattr(handler, 'baseFilename'):
+            continue
+            
+        # Only check RotatingFileHandlers that might be the same as ours
+        if isinstance(handler, logging.handlers.RotatingFileHandler):
+            try:
+                # If the handler has baseFilename and it matches, return early
+                if handler.baseFilename == str(log_file):
+                    return log_file
+            except (AttributeError, TypeError):
+                # Skip this handler if we can't check its properties properly
+                continue
     
     # Create rotating file handler
     handler = logging.handlers.RotatingFileHandler(

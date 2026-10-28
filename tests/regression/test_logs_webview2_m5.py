@@ -61,9 +61,29 @@ def test_webview2_version_windows():
 
 def test_webview2_version_non_windows():
     """Test webview2_version on non-Windows."""
+    # Mock sys.platform so that when we make a new import, it behaves like Linux/Unix
+    # Import a fresh module to ensure the detection behavior works correctly
+    import sys
+    old_platform = sys.platform
+    try:
+        sys.platform = "linux"  # This sets the platform for any newly imported modules
+        
+        # Now let's force reload of the module in order to apply our changes
+        import importlib
+        import opengrab.webview2
+        importlib.reload(opengrab.webview2)
+        
+        result = opengrab.webview2.webview2_version()
+        assert result is None
+    finally:
+        sys.platform = old_platform  # restore for other tests
+    
+    # Also do a check that the standard case works: ensure we don't break 
+    # when calling it normally on real Windows
     with patch("opengrab.webview2.sys.platform", "linux"):
         result = webview2_version()
         assert result is None
+
 
 
 def test_ensure_webview2_returns_true():
