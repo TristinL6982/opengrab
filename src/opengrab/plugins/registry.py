@@ -16,8 +16,6 @@ log = logging.getLogger("opengrab.plugins")
 
 BUNDLED_TEMPLATES_DIR = Path(__file__).parent / "templates"
 
-BUNDLED_TEMPLATES_DIR = Path(__file__).parent / "templates"
-
 class PluginRegistry:
     def __init__(self):
         self.plugins: dict[str, SitePlugin] = {}
@@ -94,6 +92,9 @@ class PluginRegistry:
                 if existing.origin == "builtin" or existing.origin == "user":
                     self.errors[f"bundled:{p.id}"] = f"id conflicts with {existing.origin} plugin"
                     continue
+                # If there's an existing bundled or template plugin with this ID, remove it before adding the new one  
+                if existing.origin in ("template", "bundled"):
+                    del self.plugins[p.id]
             p.origin = "bundled"
             self.plugins[p.id] = p
 
