@@ -70,7 +70,8 @@ class SessionDB:
             updated = time.time()
             json_data = json.dumps(data, sort_keys=True)
             self._conn.execute(
-                "INSERT OR REPLACE INTO packages (id, data, position, updated) VALUES (?, ?, ?, ?)",
+                "INSERT INTO packages (id, data, position, updated) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET data=excluded.data, position=excluded.position, updated=excluded.updated",
                 (pkg_id, json_data, position, updated)
             )
             self._conn.commit()
@@ -81,7 +82,8 @@ class SessionDB:
             updated = time.time()
             json_data = json.dumps(data, sort_keys=True)
             self._conn.execute(
-                "INSERT OR REPLACE INTO links (id, package_id, data, position, updated) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO links (id, package_id, data, position, updated) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET package_id=excluded.package_id, data=excluded.data, position=excluded.position, updated=excluded.updated",
                 (link_id, package_id, json_data, position, updated)
             )
             self._conn.commit()

@@ -326,3 +326,21 @@ def test_concurrent_access():
         
     finally:
         os.unlink(db_path)
+
+def test_upsert_package_keeps_its_links():
+    import os
+    import tempfile
+    from opengrab.sessiondb import SessionDB
+    d = tempfile.mkdtemp()
+    db = SessionDB(os.path.join(d, "keep.db"))
+    try:
+        db.upsert_package("p", {"a": 1}, 0)
+        db.upsert_link("l1", "p", {"u": "x"}, 0)
+        db.upsert_link("l2", "p", {"u": "y"}, 1)
+        db.upsert_package("p", {"a": 2}, 3)
+        db.upsert_link("l1", "p", {"u": "z"}, 0)
+        loaded = db.load()
+        assert loaded == [{"id": "p", "data": {"a": 2}, "links": [
+            {"id": "l1", "data": {"u": "z"}}, {"id": "l2", "data": {"u": "y"}}]}]
+    finally:
+        db.close()
