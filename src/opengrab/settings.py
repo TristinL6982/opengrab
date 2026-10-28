@@ -70,6 +70,9 @@ class Settings(BaseModel):
     captcha_nopecha_key: str = ""
     captcha_tesseract_enabled: bool = False   # opt-in second local OCR
     captcha_tesseract_path: str = ""          # empty = auto-detect
+    captcha_audio_enabled: bool = False      # opt-in offline audio captcha solver
+    captcha_vosk_model_path: str = ""         # folder of an unpacked Vosk model
+    captcha_ffmpeg_path: str = ""             # empty = ffmpeg on PATH
     captcha_manual_timeout_s: int = 120
     captcha_auto_failover: bool = True # try cheaper/faster solvers first, escalate
 

@@ -474,3 +474,36 @@ class TesseractSolver(BaseSolver):
             return CaptchaResult(ok=False, provider=self.id, error="OCR returned empty")
         else:
             return CaptchaResult(ok=True, text=text, provider=self.id)
+
+
+class AudioCaptchaSolver(BaseSolver):
+    id = "audio"
+    name = "Offline audio (Vosk)"
+    kinds = ("audio",)
+    priority = 22
+    needs_key = False
+
+    def enabled(self) -> bool:
+        return bool(self.settings.captcha_audio_enabled) and bool(self.settings.captcha_vosk_model_path)
+
+    def solve(self, req, timeout_s=90.0, client=None):
+        from . import audio as _audio
+        
+        b64 = (req.extra or {}).get("audio_b64", "")
+        if not b64:
+            return CaptchaResult(ok=False, provider=self.id, error="no audio")
+            
+        try:
+            data = base64.b64decode(b64)
+        except Exception:
+            return CaptchaResult(ok=False, provider=self.id, error="bad audio data")
+            
+        try:
+            text = _audio.transcribe(data, self.settings.captcha_vosk_model_path, self.settings.captcha_ffmpeg_path)
+        except _audio.AudioUnavailable as e:
+            return CaptchaResult(ok=False, provider=self.id, error=str(e))
+            
+        if not text:
+            return CaptchaResult(ok=False, provider=self.id, error="no speech recognised")
+        else:
+            return CaptchaResult(ok=True, text=text, provider=self.id)

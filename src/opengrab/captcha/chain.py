@@ -14,7 +14,7 @@ from .base import (
     BaseSolver, CaptchaRequest, CaptchaResult,
     ManualSolver, DdddOCRSolver, TwoCaptchaSolver,
     CapMonsterSolver, CapSolverSolver, NopeCHASolver,
-    TesseractSolver,
+    TesseractSolver, AudioCaptchaSolver,
 )
 from ..settings import Settings
 
@@ -28,6 +28,7 @@ class SolverChain:
         self.solvers: list[BaseSolver] = [
             DdddOCRSolver(settings),
             TesseractSolver(settings),
+            AudioCaptchaSolver(settings),
             ManualSolver(settings),
             TwoCaptchaSolver(settings),
             CapMonsterSolver(settings),
