@@ -55,6 +55,15 @@ For M5: Single-instance lock: a named mutex on Windows; a second launch focuses 
 ## 6. Feature parity
 The full JD2 comparison is in docs/plan/FEATURES.md, plugin inventory docs/plan/JD2_PLUGIN_INVENTORY.md
 
+### 6a. Required in the final release (IDM-class features, requested by Tristin 2026-10-27)
+- **Speed acceleration (M6/M11):** dynamic segmentation (split the remaining range of the slowest segment when a connection frees up, IDM-style), up to 8-16 connections per file when the server allows ranges, HTTP keep-alive and connection reuse per host, and a fallback to one connection when ranges aren't supported. Target: close to line speed on range-capable servers (IDM advertises 5-8x; measure against single-connection curl in a benchmark test).
+- **Resume and recovery (M3, done, plus M11):** resume after network loss, app crash, PC shutdown or power cut from the chunk-map sidecar. Auto-retry with backoff when the network returns, re-validate with ETag/Last-Modified, refresh expired links through the hoster plugin, and repair (re-download only bad chunks) when a hash check fails.
+- **Browser integration (M12):** a Manifest V3 extension for Chrome, Edge, Opera and Brave, plus a Firefox build. It intercepts downloads (by file type and size rules, with a hold-Alt bypass), adds a right-click "Download with OpenGrab" entry, and passes cookies and referrer. It talks to the app over the token-authenticated local API or native messaging.
+- **Video grabbing (M9 + M12):** the extension detects media and HLS/DASH streams on the current page and shows a "Download this video" button. The app grabs them with yt-dlp/ffmpeg with quality selection.
+- **Scheduling and queuing (M11):** a scheduler (start/stop times, days, speed limit windows, shut down/sleep when done), multiple named queues with their own concurrency, and categories (Video, Music, Documents, Archives, Programs) with per-category folders and file-type rules.
+- **Antivirus scan on completion (M11):** optional, off by default. Use Windows Defender via MpCmdRun.exe -Scan -ScanType 3 -File <path> when it's present, or a user-configured scanner command line (e.g. Avast, ESET). Show the result in the UI, quarantine or flag files that fail, and never block the queue.
+All of these must respect the hard constraint in section 2 (weak 2014 laptops, no GPU, low RAM).
+
 ## 7. Licensing
 reimplement from public site behaviour; never port JD2 GPL plugin code; no AppWork Utilities; yt-dlp is Unlicense
 
