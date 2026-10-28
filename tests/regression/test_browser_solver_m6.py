@@ -125,3 +125,28 @@ def test_module_imports():
     # Check exception exists
     assert hasattr(opengrab.browser_solver, 'BrowserSolverUnavailable')
     assert issubclass(BrowserSolverUnavailable, Exception)
+
+def test_fake_driver_repeats_last_cookie_list():
+    """FakeDriver repeats the last schedule entry once exhausted (no cycling)."""
+    a = [{"name": "a", "value": "1", "domain": ".example.com", "expires": -1}]
+    b = [{"name": "b", "value": "2", "domain": ".example.com", "expires": -1}]
+    driver = FakeDriver([a, b])
+    assert driver.cookies() == a
+    assert driver.cookies() == b
+    assert driver.cookies() == b
+    assert driver.cookies() == b
+
+
+def test_playwright_driver_missing_raises_unavailable():
+    """Without playwright, PlaywrightDriver raises BrowserSolverUnavailable."""
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith("playwright"):
+            raise ImportError("no playwright")
+        return real_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=fake_import):
+        with pytest.raises(BrowserSolverUnavailable):
+            PlaywrightDriver()
