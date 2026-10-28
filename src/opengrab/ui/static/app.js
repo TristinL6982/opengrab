@@ -703,6 +703,7 @@ $("#btn-set-reload-plugins").addEventListener("click", async () => {
   try {
     const r = await api("/api/plugins/scan", "POST");
     toast("Plugin scan: " + (r?.scanned ?? 0) + " plugin(s)", "ok");
+    loadPluginHealth();
   } catch (e) { toast("Scan failed: " + e.message, "err"); }
 });
 
@@ -838,8 +839,15 @@ $("#auth-save").addEventListener("click", () => {
   connectSSE();
 });
 
-/* ============================================================ boot */
-(function boot() {
+async function loadPluginHealth() {
+  try {
+    const r = await api("/api/plugins");
+    const h = r?.health || {};
+    $("#plugin-health-body").innerHTML = Object.keys(h).sort().map(id =>
+      `<tr><td>${esc(id)}</td><td>${h[id].ok}</td><td>${h[id].fail}</td><td>${esc(h[id].last_error || "")}</td></tr>`).join("");
+  } catch (e) { toast("Plugin health failed: " + e.message, "err"); }
+}
+loadPluginHealth();
   getToken();
   updatePills();
   renderGraph();
