@@ -1,9 +1,15 @@
-from Cryptodome.Cipher import AES
+"""Container files (DLC, RSDF, CCF): type detection and RSDF decoding."""
 import base64
+import binascii
+import os
 import re
+
+from Cryptodome.Cipher import AES
 
 RSDF_KEY = bytes.fromhex("8C35192D964DC3182C6F84F3252239EB4A320D2500000000")
 RSDF_IV = b"\xff" * 16
+
+_CONTAINER_TYPES = ("dlc", "rsdf", "ccf")
 
 
 class ContainerError(ValueError):
@@ -11,62 +17,43 @@ class ContainerError(ValueError):
 
 
 def detect_container(filename: str) -> str | None:
-    ext = filename.lower().split(".")[-1]
-    if ext in ("dlc", "rsdf", "ccf"):
-        return ext
-    return None
+    ext = os.path.splitext(filename)[1].lower().lstrip(".")
+    return ext if ext in _CONTAINER_TYPES else None
+
+
+def _new_cipher():
+    return AES.new(RSDF_KEY, AES.MODE_CFB, iv=RSDF_IV, segment_size=8)
 
 
 def decode_rsdf(data: bytes) -> list[str]:
-    # Remove all ASCII whitespace from data first  
-    no_whitespace = re.sub(r"\s+", "", data.decode("ascii"))
-    
     try:
-        hex_bytes = bytes.fromhex(no_whitespace)
-    except Exception:
-        raise ContainerError()
-        
-    if len(hex_bytes) == 0:
-        raise ContainerError()
-        
-    cipher = AES.new(RSDF_KEY, AES.MODE_CFB, iv=RSDF_IV, segment_size=8)
-    
-    lines = hex_bytes.split(b"\n")
-    results = []
-    seen = set()
-    
-    for line in lines:
+        raw = bytes.fromhex(re.sub(rb"\s+", b"", data).decode("ascii"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ContainerError("RSDF data is not valid hex") from exc
+    if not raw:
+        raise ContainerError("RSDF data is empty")
+
+    cipher = _new_cipher()
+    results: list[str] = []
+    seen: set[str] = set()
+    for line in raw.split(b"\n"):
         line = line.strip(b"\r")
         if not line:
             continue
-            
         try:
-            decoded = base64.b64decode(line)
-        except Exception:
-            raise ContainerError()
-            
-        decrypted = cipher.decrypt(decoded)
-        try:
-            link = decrypted.decode("utf-8", errors="replace").strip()
-        except Exception:
-            raise ContainerError()
-            
+            encrypted = base64.b64decode(line, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ContainerError("RSDF line is not valid base64") from exc
+        link = cipher.decrypt(encrypted).decode("utf-8", errors="replace").strip()
         if link.startswith("CCF: "):
-            link = link[5:].strip()
-            
+            link = link[len("CCF: "):].strip()
         if link and link not in seen:
-            results.append(link)
             seen.add(link)
-    
+            results.append(link)
     return results
 
 
 def encode_rsdf(links: list[str]) -> bytes:
-    cipher = AES.new(RSDF_KEY, AES.MODE_CFB, iv=RSDF_IV, segment_size=8)
-    encoded_lines = []
-    for link in links:
-        encrypted = cipher.encrypt(link.encode("utf-8"))
-        encoded_line = base64.b64encode(encrypted).decode("ascii")
-        encoded_lines.append(encoded_line)
-        
-    return "\n".join(encoded_lines).encode("ascii").hex().upper().encode("ascii")
+    cipher = _new_cipher()
+    lines = [base64.b64encode(cipher.encrypt(link.encode("utf-8"))) for link in links]
+    return b"\n".join(lines).hex().upper().encode("ascii")
