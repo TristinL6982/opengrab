@@ -9,6 +9,9 @@ import json
 import threading
 import urllib.request
 import secrets
+import logging
+
+_log = logging.getLogger("opengrab.app")
 
 from .settings import load_settings, Settings
 from .engine.manager import DownloadManager
@@ -76,13 +79,24 @@ def start_server(settings: Optional[Settings] = None,
     settings = settings or load_settings()
     manager = DownloadManager(settings)
     server = ApiServer(settings, manager, host=host or settings.api_host, port=port if port is not None else settings.api_port)
+    fell_back = False
     try:
         manager.start()
-        bound_port = server.start()
-        # ONLY save settings when both host and port are from defaults (None)
-        # When CLI args are provided, don't persist them to settings
-        # We check the actual values passed using direct parameter checking
-        if host is None and port is None:
+        try:
+            bound_port = server.start()
+        except OSError:
+            # An explicitly requested CLI port must fail loudly.
+            if port is not None or not settings.api_port:
+                raise
+            busy = settings.api_port
+            server.stop()
+            server = ApiServer(settings, manager, host=host or settings.api_host, port=0)
+            bound_port = server.start()
+            fell_back = True
+            _log.warning("Configured port %s is busy; using port %s for this session (not saved)",
+                         busy, bound_port)
+        # Persist only when host and port came from settings and no fallback happened.
+        if host is None and port is None and not fell_back:
             settings.api_host, settings.api_port = server.host, bound_port
             settings.save()
         return settings, manager, server, bound_port

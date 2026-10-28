@@ -90,61 +90,61 @@ def test_forward_to_running_wrong_token():
         mgr.shutdown()
 
 
-def test_start_server_fallback():
-    """Test that start_server() falls back to a different port when the configured one is busy."""
-    # Bind a socket to a port first to make it busy 
-    busy_port = 5681
+def _busy_socket():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
-    sock.bind(("127.0.0.1", busy_port))
+    sock.bind(("127.0.0.1", 0))
     sock.listen(1)
-    
+    return sock, sock.getsockname()[1]
+
+
+def test_start_server_fallback(caplog, monkeypatch):
+    """start_server() falls back to a free port when the configured port is busy, without saving it."""
+    import logging
+    from opengrab.app import start_server
+    import opengrab.settings as og_settings
+    tmp_path = Path(tempfile.mkdtemp(prefix="og-m5b-settings-"))
+    monkeypatch.setattr(og_settings, "app_data_dir", lambda: tmp_path)
+    sock, busy_port = _busy_socket()
+    dl = _TMP / "downloads"
+    dl.mkdir(exist_ok=True)
+    settings = Settings(download_dir=str(dl))
+    settings.api_host = "127.0.0.1"
+    settings.api_port = busy_port
+    settings.save()
+    settings_file = tmp_path / "settings.json"
+    saved_before = json.loads(settings_file.read_text(encoding="utf-8")).get("api_port")
+    srv = mgr = None
     try:
-        # Try to start the OpenGrab server on that port - it should fall back
-        dl = _TMP / "downloads"
-        dl.mkdir(exist_ok=True)
-        settings = Settings(download_dir=str(dl))
-        mgr = DownloadManager(settings)
-        mgr.start()
-        srv = server.ApiServer(settings, mgr, host="127.0.0.1", port=busy_port)
-        
-        # This call should work even though we've bound the port ourselves
-        with pytest.warns():  # Warning expected 
-            port = srv.start()
-            
-        # The server should have picked a different port  
-        assert port != busy_port
-        assert port > 0
-        
+        with caplog.at_level(logging.WARNING, logger="opengrab.app"):
+            _, mgr, srv, port = start_server(settings)
+        assert port != busy_port and port > 0
+        assert settings.api_port == busy_port
+        saved_after = json.loads(settings_file.read_text(encoding="utf-8")).get("api_port")
+        assert saved_after == saved_before == busy_port
+        assert any(str(busy_port) in r.getMessage() and str(port) in r.getMessage()
+                   for r in caplog.records)
+        resp, _ = _req(port, "GET", "/api/ping")
+        assert resp.status == 200
     finally:
+        if srv:
+            srv.stop()
+        if mgr:
+            mgr.shutdown()
         sock.close()
-        mgr.shutdown()
 
 
 def test_start_server_raises_on_cli_port():
-    """Test that start_server() still raises OSError on explicitly set CLI ports."""
-    # Bind a socket to a port first to make it busy 
-    busy_port = 5682
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
-    sock.bind(("127.0.0.1", busy_port))
-    sock.listen(1)
-    
+    """start_server(port=<busy>) raises OSError: no silent fallback for an explicit CLI port."""
+    from opengrab.app import start_server
+    sock, busy_port = _busy_socket()
+    dl = _TMP / "downloads"
+    dl.mkdir(exist_ok=True)
+    settings = Settings(download_dir=str(dl))
     try:
-        # Try to start the OpenGrab server on that port with explicit CLI args - should raise
-        dl = _TMP / "downloads" 
-        dl.mkdir(exist_ok=True)
-        settings = Settings(download_dir=str(dl))
-        mgr = DownloadManager(settings)
-        mgr.start()
-        srv = server.ApiServer(settings, mgr, host="127.0.0.1", port=busy_port)
-        
         with pytest.raises(OSError):
-            srv.start()
-            
+            start_server(settings, host="127.0.0.1", port=busy_port)
     finally:
         sock.close()
-        mgr.shutdown()
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 Single instance lock and URL forwarding for OpenGrab.
 """
 
+import json
 import os
 import tempfile
 import urllib.request
@@ -40,14 +41,15 @@ def acquire(name: str = "OpenGrab-SingleInstance") -> Optional[object]:
             kernel32.CloseHandle(handle)
             return None
         return handle
-    else:  # Unix-like systems  
+    else:  # Unix-like systems
         lock_path = os.path.join(tempfile.gettempdir(), f"{name}.lock")
+        fh = open(lock_path, "a+")
         try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL)
-            os.close(fd)
-            return open(lock_path, "w")
-        except (FileExistsError, OSError):
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            fh.close()
             return None
+        return fh
 
 
 def release(handle: Optional[object]) -> None:
@@ -64,7 +66,10 @@ def release(handle: Optional[object]) -> None:
         kernel32.CloseHandle(handle)
     else:  # Unix-like systems
         try:
-            os.unlink(handle.name)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except (OSError, AttributeError, ValueError):
+            pass
+        try:
             handle.close()
         except (OSError, AttributeError):
             pass
@@ -102,7 +107,7 @@ def forward_to_running(urls: list[str], host: str, port: int, token: str, base_p
         req = urllib.request.Request(api_url)
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", f"Bearer {token}")
-        req.data = str(data).encode("utf-8")
+        req.data = json.dumps(data).encode("utf-8")
         
         response = urllib.request.urlopen(req, timeout=3)
         return response.getcode() // 100 == 2  # Check if it's a 2xx response
