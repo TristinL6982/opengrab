@@ -112,3 +112,10 @@ Optional, free, CPU-only fallbacks inserted in the auto solver chain after ddddo
 - Both opt-in, models downloaded on demand, no GPU required, must run on 2014-era laptops.
 - hCaptcha/Turnstile: no OSS solver; fallback remains the real-browser (Edge) solver + saved clearance cookie, then manual.
 Scheduled as M8 sub-tasks.
+
+### 6e. Stealth browser solvers (added Oct 28, 2026)
+- Replace Playwright in the Edge browser solver with direct Chrome DevTools Protocol (CDP) control (smaller exe, fewer automation fingerprints). Visible window by default; headless not used for Cloudflare.
+- Optional Camoufox (hardened Firefox) as a stealthier browser solver, downloaded on demand (~300 MB, opt-in).
+- NopeCHA added as a hosted solver option alongside the paid solvers (needs user key).
+- Final auto order: ddddocr -> second OCR / Buster-style audio reCAPTCHA -> Edge (CDP) or Camoufox browser solver -> paid solvers (incl. NopeCHA) by priority -> manual last.
+Scheduled as M8 sub-tasks with 6d.
