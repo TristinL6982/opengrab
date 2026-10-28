@@ -320,27 +320,24 @@ def test_from_browser_cookies_with_no_clearance():
 
 
 def test_from_browser_cookies_with_cf_cookies():
+    # Only Cloudflare cookies are kept; without cf_clearance there is no clearance.
     cookies = [
-        {
-            "name": "__cfduid",
-            "value": "xyz789",
-            "domain": ".example.com"
-        },
-        {
-            "name": "__cf_bm",
-            "value": "bm123",
-            "domain": ".example.com"
-        }
+        {"name": "__cfduid", "value": "xyz789", "domain": ".example.com"},
+        {"name": "__cf_bm", "value": "bm123", "domain": ".example.com"},
     ]
-    
-    clearance = from_browser_cookies("example.com", cookies, "test-agent")
+    assert from_browser_cookies("example.com", cookies, "test-agent") is None
+
+    cookies.append({"name": "cf_clearance", "value": "abc", "domain": ".example.com", "expires": 5000})
+    cookies.append({"name": "session", "value": "s1", "domain": ".example.com"})
+    clearance = from_browser_cookies("example.com", cookies, "test-agent", now=1000.0)
     assert clearance is not None
-    assert "cf_clearance" in clearance.cookies  # Should be auto-added even without cf_clearance originally
-    assert "__cfduid" in clearance.cookies
-    assert "__cf_bm" in clearance.cookies
+    assert clearance.cookies == {"__cfduid": "xyz789", "__cf_bm": "bm123", "cf_clearance": "abc"}
+    assert clearance.expires_at == 5000.0
 
 
-@pytest.mark.xfail(reason="B1 - test to demonstrate the XFAIL requirement")
-def test_xfail_demo():
-    # This test is expected to fail for B1
-    assert False
+def test_from_browser_cookies_expires_minus_one_uses_default():
+    cookies = [{"name": "cf_clearance", "value": "v", "domain": "example.com", "expires": -1}]
+    clearance = from_browser_cookies("example.com", cookies, "ua", now=100.0)
+    assert clearance is not None
+    assert clearance.expires_at == 1900.0
+    assert clearance.user_agent == "ua"

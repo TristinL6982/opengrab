@@ -169,47 +169,22 @@ class ClearanceStore:
 
 
 def from_browser_cookies(host: str, cookies: List[Dict], user_agent: str, now: Optional[float] = None) -> Optional[Clearance]:
+    """Build a Clearance from browser cookies; None unless a cf_clearance cookie is present."""
     if now is None:
         now = time.time()
-        
-    cf_clearance_cookie = None
-    cf_cookies = {}
-    
+    kept: Dict[str, str] = {}
+    clearance_cookie = None
     for cookie in cookies:
         name = cookie.get("name", "")
-        value = cookie.get("value", "")
-        domain = cookie.get("domain", "")
-        expires = cookie.get("expires", -1)
-        
-        # Check if this is a Cloudflare cookie we care about
-        if name == "cf_clearance":
-            cf_clearance_cookie = cookie
-        elif name.startswith("__cf") or name == "__cfduid":
-            # Consider these as part of Cloudflare clearance
-            cf_cookies[name] = value
-            
-    # If there are any CF cookies, even without cf_clearance, return a Clearance object
-    if not cf_cookies:
+        if name == "cf_clearance" or name.startswith("__cf") or name == "__cfduid":
+            kept[name] = cookie.get("value", "")
+            if name == "cf_clearance":
+                clearance_cookie = cookie
+    if clearance_cookie is None:
         return None
-        
-    # Determine expiration time based on cf_clearance cookie if available, else default to 30 minutes  
-    if cf_clearance_cookie:
-        expires_at = cf_clearance_cookie.get("expires", -1)
-        if expires_at <= 0:
-            expires_at = now + 1800  # Default to 30 minutes from now
-        else:
-            expires_at = float(expires_at)
-    else:
-        # No cf_clearance cookie but we have other CF cookies, use default exp time
-        expires_at = now + 1800 
-
-    # Add the cf_clearance to cookies dict so it's always in the resulting Clearance
-    if "cf_clearance" not in cf_cookies and cf_clearance_cookie:
-        cf_cookies["cf_clearance"] = cf_clearance_cookie.get("value", "")
-        
-    return Clearance(
-        host=host,
-        cookies=cf_cookies,
-        user_agent=user_agent,
-        expires_at=expires_at
-    )
+    try:
+        expires = float(clearance_cookie.get("expires", -1))
+    except (TypeError, ValueError):
+        expires = -1.0
+    expires_at = expires if expires > 0 else now + 1800
+    return Clearance(host=host, cookies=kept, user_agent=user_agent, expires_at=expires_at)
