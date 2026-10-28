@@ -20,6 +20,7 @@ class PluginRegistry:
         self.errors: dict[str, str] = {}
         self._user_dir: Path | None = None
         self._scan_time = 0.0
+        self.health = {}
 
     # -- discovery -----------------------------------------------------------
     def set_user_dir(self, d: Path) -> None:
@@ -140,8 +141,37 @@ class PluginRegistry:
                 "id": p.id, "name": p.name, "site": p.site,
                 "origin": p.origin, "supports_captcha": p.supports_captcha,
                 "supports_login": p.supports_login, "description": p.description,
+                "health": self.health_for(p.id)
             })
         return out
 
-    def errors_snapshot(self) -> list[dict]:
-        return [{"where": k, "error": v} for k, v in self.errors.items()]
+    def record_result(self, plugin_id: str, ok: bool, error: str | None = None) -> None:
+        """Record a plugin execution result.
+        
+        Args:
+            plugin_id: The ID of the plugin to record
+            ok: True if the execution succeeded, False otherwise
+            error: Optional error message if execution failed
+        """
+        if plugin_id not in self.health:
+            self.health[plugin_id] = {"ok": 0, "fail": 0, "last_error": None, "last_used": None}
+        
+        plugin_health = self.health[plugin_id]
+        if ok:
+            plugin_health["ok"] += 1
+        else:
+            plugin_health["fail"] += 1
+            plugin_health["last_error"] = (error or "unknown error")[:500]
+        plugin_health["last_used"] = time.time()
+
+    def health_for(self, plugin_id: str) -> dict:
+        """Get the health counters for a plugin.
+        
+        Returns a copy of the health data so modifications don't affect internal state.
+        """
+        if plugin_id in self.health:
+            # Return a copy to prevent external mutation
+            return self.health[plugin_id].copy()
+        else:
+            # Return default empty stats
+            return {"ok": 0, "fail": 0, "last_error": None, "last_used": None}
