@@ -14,6 +14,10 @@ from .base import SitePlugin
 log = logging.getLogger("opengrab.plugins")
 
 
+BUNDLED_TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+BUNDLED_TEMPLATES_DIR = Path(__file__).parent / "templates"
+
 class PluginRegistry:
     def __init__(self):
         self.plugins: dict[str, SitePlugin] = {}
@@ -33,6 +37,19 @@ class PluginRegistry:
             return len(self.plugins)
         self._scan_time = now
         self._scan_builtin_package()
+        
+        # Scan bundled templates before user templates
+        # Remove stale bundled entries before scanning
+        for plugin_id in list(self.plugins.keys()):
+            if self.plugins[plugin_id].origin == "bundled":
+                del self.plugins[plugin_id]
+        
+        for key in list(self.errors.keys()):
+            if key.startswith("bundled:"):
+                del self.errors[key]
+                
+        self._scan_bundled_templates()
+        
         if self._user_dir:
             # Remove stale template entries before scanning
             for plugin_id in list(self.plugins.keys()):
@@ -59,6 +76,26 @@ class PluginRegistry:
             except Exception as e:
                 self.errors[f"builtin:{m.name}"] = str(e)
                 log.exception("failed to load builtin plugin %s", m.name)
+
+    def _scan_bundled_templates(self) -> None:
+        if not BUNDLED_TEMPLATES_DIR.exists():
+            return
+        
+        from .declarative import load_templates_dir
+        plugins, errors = load_templates_dir(str(BUNDLED_TEMPLATES_DIR))
+        
+        for filename, message in errors.items():
+            self.errors[f"bundled:{filename}"] = message
+            
+        # Check for conflicts with existing plugins
+        for p in plugins:
+            if p.id in self.plugins:
+                existing = self.plugins[p.id]
+                if existing.origin == "builtin" or existing.origin == "user":
+                    self.errors[f"bundled:{p.id}"] = f"id conflicts with {existing.origin} plugin"
+                    continue
+            p.origin = "bundled"
+            self.plugins[p.id] = p
 
     def _scan_user_dir(self) -> None:
         if not self._user_dir or not self._user_dir.exists():
@@ -92,9 +129,13 @@ class PluginRegistry:
         for p in plugins:
             if p.id in self.plugins:
                 existing = self.plugins[p.id]
-                if existing.origin != "template":
+                if existing.origin not in ("template", "bundled"):
                     self.errors[f"template:{p.id}"] = f"id conflicts with {existing.origin} plugin"
                     continue
+                # If there's a bundled plugin, it should be replaced
+                if existing.origin == "bundled":
+                    # Remove the bundled entry first and add the new template
+                    del self.plugins[p.id]
             self.plugins[p.id] = p
 
     def _collect(self, mod, origin: str) -> None:

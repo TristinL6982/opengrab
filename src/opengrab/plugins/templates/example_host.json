@@ -1,0 +1,1 @@
+{"id": "example-host", "name": "Example Host", "site": "example-host.invalid", "description": "Bundled sample template", "url_pattern": "^https?://(www\\.)?example-host\\.invalid/f/", "direct_url_regex": "href=\"(https?://dl\\.example-host\\.invalid/[^\"]+)\"", "filename_regex": "<h1>([^<]+)</h1>", "offline_markers": ["File not found"]}
