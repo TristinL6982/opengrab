@@ -86,14 +86,14 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
         if len(pages) >= options.max_pages:
             break
             
-        # Mark as visited immediately - we consider this a crawl attempt
-        visited.add(url)
-        
         try:
             content_type, body = fetch(url)
         except Exception:
             errors.append(url)
             continue
+        
+        # Mark as visited after successful fetch
+        visited.add(url)
         
         # Only add to pages if fetch was successful 
         pages.append(url)
@@ -126,7 +126,7 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
                 if any(re.search(pattern, link) for pattern in options.exclude):
                     continue
                 
-                # Enqueue only if depth limit not exceeded
+                # Only add to queue if we haven't exceeded max_depth
                 if depth + 1 <= options.max_depth:
                     queue.append((link, depth + 1))
     
