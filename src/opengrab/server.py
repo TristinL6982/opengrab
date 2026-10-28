@@ -2,6 +2,8 @@
 
 Endpoints (JSON unless noted):
   GET    /api/ping                     liveness (no auth)
+  POST   /api/linkgrab/analyze         {text:str} -> {count, packages}
+  POST   /api/linkgrab/container       {filename:str, data:base64} -> {count, packages}
   GET    /api/links                    all links (public dicts)
   POST   /api/urls                     {urls:[...], priority?:int, auto_download?:bool}
   GET    /api/stats                    counts + aggregate speed
@@ -1081,6 +1083,23 @@ def _make_handler(srv: ApiServer):
                     except Exception as e:  # noqa: BLE001
                         out.append({"url": u_, "error": str(e)})
                 return self._json(out)
+            if p == "/api/linkgrab/analyze":
+                from . import grabber
+                existing = [l.url for l in mgr.all_links()]
+                return self._json(grabber.analyze_text(str(body.get("text") or ""), existing))
+            if p == "/api/linkgrab/container":
+                import base64, binascii
+                from . import grabber
+                from .containers import ContainerError
+                existing = [l.url for l in mgr.all_links()]
+                try:
+                    data = base64.b64decode(str(body.get("data") or ""), validate=True)
+                except (binascii.Error, ValueError):
+                    return self._err(400, "data must be base64")
+                try:
+                    return self._json(grabber.analyze_container(str(body.get("filename") or ""), data, existing))
+                except ContainerError as e:
+                    return self._err(400, str(e))
             if p == "/api/clear-finished":
                 return self._json({"cleared": mgr.clear_finished()})
             if p == "/api/notifications/clear":
