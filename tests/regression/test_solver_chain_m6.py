@@ -1,8 +1,8 @@
-import tempfile
+﻿import tempfile
 from unittest.mock import Mock
 
-from src.opengrab.captcha.chain import SolverChain
-from src.opengrab.settings import Settings
+from opengrab.captcha.chain import SolverChain
+from opengrab.settings import Settings
 
 
 def test_solver_chain_ordered():
