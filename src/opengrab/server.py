@@ -209,40 +209,19 @@ class ApiServer:
         """Non-blocking start; returns the bound port."""
         import socket
         handler = _make_handler(self)
-        # Exclusive bind: set allow_reuse_address to False for all OS
-        self.httpd = ThreadingHTTPServer((self.host, self.port), handler)
-        # Ensure the server will not share address, even on Windows
-        self.httpd.allow_reuse_address = False
-        
-        if os.name == "nt":  # Windows - ensure exclusive binding using direct socket setting
-            # Replace with custom method that sets appropriate socket flags for exclusive binding
-            original_server_bind = self.httpd.server_bind
-            
-            def custom_server_bind():
-                try:
-                    # Create a new socket explicitly for exclusive binding
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    # Disable SO_REUSEADDR to prevent reuse of address
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-                    # Set exclusive address use flag for Windows
-                    if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
-                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-                        
-                    # Bind the socket directly  
-                    sock.bind((self.host, self.port))
-                    # Replace the server's socket with our exclusive one
-                    self.httpd.socket = sock
-                except OSError:
-                    # If we fail to bind exclusively, clean up and re-raise OSError
-                    try:
-                        sock.close()
-                    except:
-                        pass  # Nothing we can do at this point
-                    raise
-                    
-            # Override with our exclusive binding function  
-            self.httpd.server_bind = custom_server_bind
-            
+        class _ExclusiveHTTPServer(ThreadingHTTPServer):
+            # Exclusive bind: never SO_REUSEADDR; on Windows set
+            # SO_EXCLUSIVEADDRUSE *before* bind so a second server on the
+            # same port fails with OSError instead of silently sharing it.
+            allow_reuse_address = False
+
+            def server_bind(self_inner):
+                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    self_inner.socket.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                super().server_bind()
+
+        self.httpd = _ExclusiveHTTPServer((self.host, self.port), handler)
         self.httpd.daemon_threads = True
 
         # port 0 -> OS-picked ephemeral; record the real bound port
