@@ -122,6 +122,7 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None, sleep=t
         if options.delay > 0 and fetched > 0:
             sleep(options.delay)
         
+        fetched += 1
         try:
             content_type, body = fetch(url)
         except Exception:
@@ -133,8 +134,6 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None, sleep=t
         
         # Only add to pages if fetch was successful 
         pages.append(url)
-        
-        fetched += 1
         
         # If not HTML, don't parse links
         if not content_type.lower().startswith("text/html"):
