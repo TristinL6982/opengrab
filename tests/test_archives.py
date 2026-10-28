@@ -17,7 +17,7 @@ from opengrab.settings import Settings
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="opengrab-archive-") as td:
+    with tempfile.TemporaryDirectory(prefix="opengrab-archive-", ignore_cleanup_errors=True) as td:
         root = Path(td)
         good = root / "good.zip"
         with zipfile.ZipFile(good, "w") as archive:
