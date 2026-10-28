@@ -33,17 +33,14 @@ def build_harvest_page(kind: str, sitekey: str, request_id: str, submit_path: st
     <title>Captcha Harvest</title>
 </head>
 <body>
-    <script src="{script_url}" async defer></script>
-    <div class="{widget_class}" data-sitekey="{escaped_sitekey}" data-callback="ogSolved"></div>
+    <script src="{html.escape(script_url, quote=True)}" async defer></script>
+    <div class="{html.escape(widget_class, quote=True)}" data-sitekey="{escaped_sitekey}" data-callback="ogSolved"></div>
     <script>
         function ogSolved(token) {{
             fetch("{escaped_submit_path}", {{
                 method: "POST",
                 headers: {{"Content-Type": "application/json"}},
-                body: JSON.stringify({{}}
-                    id: "{escaped_request_id}",
-                    answer: token
-                {{}})
+                body: JSON.stringify({{id: "{escaped_request_id}", answer: token}})
             }});
         }}
     </script>
