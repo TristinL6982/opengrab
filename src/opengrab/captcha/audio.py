@@ -32,6 +32,9 @@ def to_pcm16k(data: bytes, ffmpeg: str = "", timeout: float = 30.0) -> bytes:
     """
     exe = ffmpeg or shutil.which("ffmpeg") or ""
     
+    if not exe:
+        raise AudioUnavailable("ffmpeg not found")
+        
     try:
         p = subprocess.run(
             [exe, "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"],
@@ -42,14 +45,13 @@ def to_pcm16k(data: bytes, ffmpeg: str = "", timeout: float = 30.0) -> bytes:
     except subprocess.TimeoutExpired:
         raise AudioUnavailable("ffmpeg timeout")
     except OSError as e:
-        # If we can't even execute the command, it means ffmpeg was not found
-        if not exe:
-            raise AudioUnavailable("ffmpeg not found")
-        else:
-            raise AudioUnavailable(str(e))
+        # If we can't even execute the command, it means ffmpeg was not found or has an OS error
+        raise AudioUnavailable(str(e))
     
-    if p.returncode != 0 or not p.stdout:
+    if p.returncode != 0:
         raise AudioUnavailable("ffmpeg failed: " + p.stderr.decode("utf-8", "replace")[:200])
+    if not p.stdout:
+        raise AudioUnavailable("ffmpeg failed: no output")
         
     return p.stdout
 
