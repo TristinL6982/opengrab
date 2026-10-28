@@ -33,7 +33,17 @@ class PluginRegistry:
         self._scan_time = now
         self._scan_builtin_package()
         if self._user_dir:
+            # Remove stale template entries before scanning
+            for plugin_id in list(self.plugins.keys()):
+                if self.plugins[plugin_id].origin == "template":
+                    del self.plugins[plugin_id]
+            
+            for key in list(self.errors.keys()):
+                if key.startswith("template:"):
+                    del self.errors[key]
+                    
             self._scan_user_dir()
+            self._scan_templates()
         log.info("plugin scan complete: %d plugins", len(self.plugins))
         return len(self.plugins)
 
@@ -68,6 +78,23 @@ class PluginRegistry:
             except Exception as e:
                 self.errors[f"user:{name}"] = str(e)
                 log.exception("failed to load user plugin %s", f.name)
+
+    def _scan_templates(self) -> None:
+        if not self._user_dir or not self._user_dir.exists():
+            return
+        from .declarative import load_templates_dir
+        plugins, errors = load_templates_dir(str(self._user_dir))
+        for filename, message in errors.items():
+            self.errors[f"template:{filename}"] = message
+
+        # Check for conflicts with existing plugins
+        for p in plugins:
+            if p.id in self.plugins:
+                existing = self.plugins[p.id]
+                if existing.origin != "template":
+                    self.errors[f"template:{p.id}"] = f"id conflicts with {existing.origin} plugin"
+                    continue
+            self.plugins[p.id] = p
 
     def _collect(self, mod, origin: str) -> None:
         for attr in vars(mod).values():
