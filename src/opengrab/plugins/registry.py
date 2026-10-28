@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from .base import SitePlugin
+from .builtin import direct
 
 log = logging.getLogger("opengrab.plugins")
 
@@ -50,6 +51,13 @@ class PluginRegistry:
 
     def _scan_builtin_package(self) -> None:
         from . import builtin
+        # Scan builtin package, with specific fallback for direct plugin
+        try:
+            mod = importlib.import_module(f".builtin.direct", "opengrab.plugins")
+            self._collect(mod, origin="builtin")
+        except Exception:
+            pass  # Skip if no direct plugin
+
         for m in pkgutil.iter_modules(builtin.__path__):
             if m.name.startswith("_"):
                 continue
