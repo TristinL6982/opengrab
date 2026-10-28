@@ -58,7 +58,7 @@ def main(argv=None) -> int:
 
     # Setup logging
     try:
-        if not args.smoke_test and not args.help:
+        if not getattr(args, "smoke_test", False):
             setup_logging()
     except Exception:
         pass  # Continue even if logging fails

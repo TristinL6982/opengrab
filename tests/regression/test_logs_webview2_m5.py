@@ -1,107 +1,73 @@
-"""Tests for logging and WebView2 modules."""
+﻿"""M5c: rotating log file and WebView2 runtime check."""
 
+import logging
 import os
+import shutil
 import tempfile
-from unittest.mock import patch
+from pathlib import Path
 
-import pytest
-
-from opengrab.logs import setup_logging
-from opengrab.webview2 import webview2_version, ensure_webview2
+import opengrab.logs as logs_mod
+import opengrab.webview2 as wv
 
 
-def test_setup_logging():
-    """Test setup_logging function."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Monkeypatch app_data_dir to use the temp dir
-        with patch("opengrab.logs.app_data_dir") as mock_app_data_dir:
-            mock_app_data_dir.return_value = tmpdir
-            log_file = setup_logging()
-            
-            # Check that log file was created
-            assert os.path.exists(log_file)
-            
-            # Write a test message
-            import logging
-            logger = logging.getLogger("opengrab.test")
-            logger.warning("hello-m5c")
-            
-            # Flush handlers
-            for handler in logging.getLogger().handlers:
-                if handler.baseFilename == str(log_file):
-                    handler.flush()
-            
-            # Read the log file
-            with open(log_file, "r") as f:
-                content = f.read()
-                assert "hello-m5c" in content
-            
-            # Test that calling setup_logging twice doesn't add a second handler
-            old_handlers = len(logging.getLogger().handlers)
-            setup_logging()
-            new_handlers = len(logging.getLogger().handlers)
-            assert old_handlers == new_handlers
-        
-        # Clean up handlers
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers[:]:
-            if handler.baseFilename == str(log_file):
-                root_logger.removeHandler(handler)
+def _file_handlers(path):
+    target = str(Path(path).resolve())
+    return [h for h in logging.getLogger().handlers
+            if getattr(h, "baseFilename", None) and str(Path(h.baseFilename).resolve()) == target]
 
 
-def test_webview2_version_windows():
-    """Test webview2_version on Windows."""
-    with patch("opengrab.webview2.sys.platform", "win32"):
-        # Test when winreg raises OSError
-        with patch("opengrab.webview2.winreg.OpenKey") as mock_openkey:
-            mock_openkey.side_effect = OSError()
-            result = webview2_version()
-            assert result is None
-
-
-def test_webview2_version_non_windows():
-    """Test webview2_version on non-Windows."""
-    # Mock sys.platform so that when we make a new import, it behaves like Linux/Unix
-    # Import a fresh module to ensure the detection behavior works correctly
-    import sys
-    old_platform = sys.platform
+def test_setup_logging(monkeypatch):
+    tmp = tempfile.mkdtemp()
+    monkeypatch.setattr(logs_mod, "app_data_dir", lambda: tmp)
+    log_file = None
     try:
-        sys.platform = "linux"  # This sets the platform for any newly imported modules
-        
-        # Now let's force reload of the module in order to apply our changes
-        import importlib
-        import opengrab.webview2
-        importlib.reload(opengrab.webview2)
-        
-        result = opengrab.webview2.webview2_version()
-        assert result is None
+        log_file = logs_mod.setup_logging()
+        assert Path(log_file) == Path(tmp) / "logs" / "opengrab.log"
+        assert Path(log_file).exists()
+        logging.getLogger("opengrab.test").warning("hello-m5c")
+        for h in _file_handlers(log_file):
+            h.flush()
+        assert "hello-m5c" in Path(log_file).read_text(encoding="utf-8")
+        logs_mod.setup_logging()
+        assert len(_file_handlers(log_file)) == 1
     finally:
-        sys.platform = old_platform  # restore for other tests
-    
-    # Also do a check that the standard case works: ensure we don't break 
-    # when calling it normally on real Windows
-    with patch("opengrab.webview2.sys.platform", "linux"):
-        result = webview2_version()
-        assert result is None
+        if log_file is not None:
+            for h in _file_handlers(log_file):
+                logging.getLogger().removeHandler(h)
+                h.close()
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_webview2_version_none_when_registry_missing(monkeypatch):
+    if os.name != "nt":
+        assert wv.webview2_version() is None
+        return
 
-def test_ensure_webview2_returns_true():
-    """Test ensure_webview2 returns True when version is available."""
-    with patch("opengrab.webview2.os.name", "nt"):
-        with patch("opengrab.webview2.webview2_version") as mock_version:
-            mock_version.return_value = "120.0.0.0"
-            result = ensure_webview2()
-            assert result is True
+    def boom(*a, **k):
+        raise OSError("missing")
+
+    monkeypatch.setattr(wv.winreg, "OpenKey", boom)
+    assert wv.webview2_version() is None
 
 
-def test_ensure_webview2_returns_false():
-    """Test ensure_webview2 returns False when version is not available."""
-    with patch("opengrab.webview2.os.name", "nt"):
-        with patch("opengrab.webview2.webview2_version") as mock_version:
-            mock_version.return_value = None
-            # Mock MessageBox to avoid dialog
-            with patch("opengrab.webview2.ctypes.windll.user32.MessageBoxW") as mock_msgbox:
-                result = ensure_webview2()
-                assert result is False
-                mock_msgbox.assert_called_once()
+def test_webview2_version_none_off_windows(monkeypatch):
+    monkeypatch.setattr(wv.os, "name", "posix")
+    assert wv.webview2_version() is None
+
+
+def test_ensure_webview2_missing_shows_box_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(wv.os, "name", "nt")
+    monkeypatch.setattr(wv, "webview2_version", lambda: None)
+    monkeypatch.setattr(wv, "_message_box", lambda text: calls.append(text))
+    assert wv.ensure_webview2() is False
+    assert len(calls) == 1 and wv.DOWNLOAD_URL in calls[0]
+
+
+def test_ensure_webview2_present(monkeypatch):
+    calls = []
+    monkeypatch.setattr(wv.os, "name", "nt")
+    monkeypatch.setattr(wv, "webview2_version", lambda: "120.0.0.0")
+    monkeypatch.setattr(wv, "_message_box", lambda text: calls.append(text))
+    assert wv.ensure_webview2() is True
+    assert calls == []

@@ -1,81 +1,59 @@
-"""WebView2 runtime check for OpenGrab."""
+﻿"""WebView2 runtime check for OpenGrab."""
 
-import os
-import sys
 import ctypes
-from pathlib import Path
+import logging
+import os
 
+try:
+    import winreg  # Windows only
+except ImportError:  # pragma: no cover - non-Windows
+    winreg = None
 
-def _get_winreg():
-    """Safely get winreg module if available."""
-    try:
-        return __import__('winreg')
-    except ImportError:
-        return None
+_log = logging.getLogger(__name__)
 
-
-def webview2_version() -> str | None:
-    """Get the installed WebView2 version.
-    
-    Returns:
-        The version string, or None if not found or not on Windows.
-    """
-    # Early return if not on Windows
-    if os.name != "nt":
-        return None
-
-    # Import only when needed on Windows
-    winreg = _get_winreg()
-    if not winreg:
-        return None
-
-    keys = [
-        r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
-        r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
-        r"Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
-    ]
-    
-    for key in keys:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as reg_key:
-                pv, _ = winreg.QueryValueEx(reg_key, "pv")
-                if pv and pv != "0.0.0.0":
-                    return pv
-        except OSError:
-            continue
-    return None
-
-
+_CLIENT = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
 
 
+def _registry_keys():
+    return [
+        (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\" + _CLIENT),
+        (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\" + _CLIENT),
+        (winreg.HKEY_CURRENT_USER, "Software\\" + _CLIENT),
+    ]
+
+
+def webview2_version() -> str | None:
+    """Return the installed WebView2 Runtime version, or None if missing or not on Windows."""
+    if os.name != "nt" or winreg is None:
+        return None
+    for hive, key in _registry_keys():
+        try:
+            with winreg.OpenKey(hive, key) as reg_key:
+                pv, _ = winreg.QueryValueEx(reg_key, "pv")
+        except OSError:
+            continue
+        if pv and pv != "0.0.0.0":
+            return str(pv)
+    return None
+
+
+def _message_box(text: str) -> None:
+    ctypes.windll.user32.MessageBoxW(None, text, "OpenGrab", 0x10)
+
+
 def ensure_webview2() -> bool:
-    """Ensure WebView2 is available.
-    
-    Returns:
-        True if WebView2 is available, False otherwise.
-    """
-    # Early return if not on Windows
+    """True if WebView2 is available (or not needed); otherwise tell the user and return False."""
     if os.name != "nt":
         return True
-    
-    version = webview2_version()
-    if version is not None:
+    if webview2_version() is not None:
         return True
-
-    # WebView2 is missing
-    import logging
-    
-    _log = logging.getLogger(__name__)
-    
-    _log.error("Microsoft Edge WebView2 Runtime is missing.")
+    _log.error("Microsoft Edge WebView2 Runtime is missing; download it from %s", DOWNLOAD_URL)
     try:
-        ctypes.windll.user32.MessageBoxW(None, 
-            f"Microsoft Edge WebView2 Runtime is missing.\n\n"
-            f"Please download and install it from:\n\n{DOWNLOAD_URL}",
-            "OpenGrab", 0x10)
+        _message_box(
+            "The Microsoft Edge WebView2 Runtime is missing, so OpenGrab can't open its window.\n\n"
+            f"Download and install it from:\n{DOWNLOAD_URL}"
+        )
     except Exception:
-        # If MessageBox fails, just log it
-        _log.error("Failed to show WebView2 Runtime message box.", exc_info=True)
-    
+        _log.error("Could not show the WebView2 message box", exc_info=True)
     return False
