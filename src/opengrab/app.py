@@ -219,11 +219,27 @@ def run_gui_mode(settings: Optional[Settings] = None,
                 window.destroy()
             
             window.events.closing += on_closing
-            image = Image.new("RGB", (64, 64), "#20242c")
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((8, 8, 56, 56), fill="#38bdf8")
-            draw.polygon([(27, 17), (37, 17), (37, 34), (45, 34),
-                          (32, 49), (19, 34), (27, 34)], fill="#10212b")
+            
+            # Try to load icon from assets if it exists, otherwise generate default
+            try:
+                from pathlib import Path
+                icon_path = Path(__file__).parent / "assets" / "icon.png"
+                if icon_path.exists():
+                    image = Image.open(icon_path)
+                else:
+                    image = Image.new("RGB", (64, 64), "#20242c")
+                    draw = ImageDraw.Draw(image)
+                    draw.ellipse((8, 8, 56, 56), fill="#38bdf8")
+                    draw.polygon([(27, 17), (37, 17), (37, 34), (45, 34),
+                                  (32, 49), (19, 34), (27, 34)], fill="#10212b")
+            except Exception:
+                # Fallback to default if there's any error loading the icon
+                image = Image.new("RGB", (64, 64), "#20242c")
+                draw = ImageDraw.Draw(image)
+                draw.ellipse((8, 8, 56, 56), fill="#38bdf8")
+                draw.polygon([(27, 17), (37, 17), (37, 34), (45, 34),
+                              (32, 49), (19, 34), (27, 34)], fill="#10212b")
+            
             tray = pystray.Icon(
                 "OpenGrab", image, "OpenGrab",
                 menu=pystray.Menu(

@@ -5,6 +5,17 @@ import argparse
 import os
 import sys
 
+# Handle windowed executable stdio when stdout/stderr are None
+if sys.stdout is None or sys.stderr is None:
+    try:
+        # Replace missing stdio with devnull
+        if sys.stdout is None:
+            sys.stdout = open(os.devnull, "w")
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, "w")
+    except Exception:
+        pass
+
 from . import __version__
 from .settings import load_settings
 from .logs import setup_logging
