@@ -35,12 +35,12 @@ def extract_urls(text: str) -> list:
 
 
 def normalize_url(url: str) -> str:
-    # Magnet links
-    if url.lower().startswith("magnet:"):
+    # Magnet links - process with special care for leading whitespace
+    if url.lower().lstrip().startswith("magnet:"):
         clean_url = url.strip()
-        # If we have a malformed "magnet:/?xt=..." with incorrect slash, correct it
-        # But only check if the input originally had a slash in that position as seen from regex match  
+        # Check for malformed "magnet:/?xt=..." (should be "magnet:?xt=...")
         if len(clean_url) >= 8 and clean_url[:8] == "magnet:/?":
+            # Fix the malformed URL by correcting the scheme separator
             return "magnet:?" + clean_url[8:]
         return clean_url
 
