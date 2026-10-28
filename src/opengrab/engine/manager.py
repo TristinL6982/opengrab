@@ -39,6 +39,7 @@ from ..plugins.base import (CaptchaRequired, LoginRequired, PaywallRequired,
 from ..plugins.registry import PluginRegistry
 from ..settings import Settings, app_data_dir, user_plugins_dir
 from .downloader import DownloadError, LinkDownload, _RateLimiter
+from ..sessiondb import SessionDB
 
 log = logging.getLogger("opengrab.engine")
 
@@ -48,6 +49,7 @@ class DownloadManager:
         self.settings = settings
         self.data_dir = app_data_dir()
         self.links_file = self.data_dir / "links.json"
+        self.session_file = self.data_dir / "session.db"
         self.on_change = on_change or (lambda kind, payload: None)
 
         self._links: dict[str, Link] = {}
@@ -75,6 +77,14 @@ class DownloadManager:
         self._retries: dict[str, int] = {}
         self._last_persist = 0.0
         self._persist_scheduled = False
+        # Initialize to None so we can check it later
+        self._db = None
+
+    def _session(self):
+        """Lazily open and cache SessionDB."""
+        if self._db is None:
+            self._db = SessionDB(str(self.session_file))
+        return self._db
 
     # ------------------------------------------------------------------ init
     def start(self) -> None:
@@ -112,6 +122,9 @@ class DownloadManager:
         while self._active and time.monotonic() < deadline:
             time.sleep(0.1)
         self._save_now()
+        if self._db is not None:
+            self._db.close()
+            self._db = None
         self._started = False
         log.info("engine stopped")
 
@@ -723,25 +736,37 @@ class DownloadManager:
             self._last_persist = time.time()
             try:
                 with self._lock:
-                    data = [json.loads(l.model_dump_json())
-                            for l in self._links.values()]
-                tmp = self.links_file.with_suffix(".tmp")
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(data, indent=1))
-                    f.flush()
-                    os.fsync(f.fileno())
-                tmp.replace(self.links_file)
-            except Exception:
-                log.warning("persist failed", exc_info=True)
+                    # Use SessionDB instead of links.json
+                    self._session().replace_all([{"id": "queue", "data": {}, "links": [{"id": l.id, "data": json.loads(l.model_dump_json())} for l in self._links.values()]}])
+            except Exception as e:
+                log.warning("persist failed: %s", e, exc_info=True)
 
     def _load_links(self) -> None:
-        if not self.links_file.exists():
-            return
         try:
-            data = json.loads(self.links_file.read_text(encoding="utf-8"))
-            for d in data:
+            # Try to load from session DB first
+            data = self._session().load()
+            # Get links from "queue" package if it exists  
+            queue_package = next((pkg for pkg in data if pkg["id"] == "queue"), None)
+            if queue_package is not None:
+                links_data = queue_package["links"]
+            else:
+                # If no queue package, fallback to links.json (migration)
+                if self.links_file.exists():
+                    try:
+                        data = json.loads(self.links_file.read_text(encoding="utf-8"))
+                        links_data = [{"id": d["id"], "data": d} for d in data]
+                        # Migration: save the loaded data and rename links.json
+                        self._save_now()
+                        self.links_file.rename(self.links_file.with_suffix(".migrated"))
+                    except Exception:
+                        log.warning("failed to load legacy links.json", exc_info=True)
+                        links_data = []
+                else:
+                    links_data = []
+
+            for d in links_data:
                 try:
-                    l = Link(**d)
+                    l = Link(**d["data"])
                 except Exception:
                     log.warning("skipping corrupt link entry %r", d.get("id"))
                     continue
@@ -750,10 +775,9 @@ class DownloadManager:
                     l.extra["note"] = "was downloading when app closed"
                 elif l.status == LinkStatus.RESOLVING:
                     l.status = LinkStatus.ERROR
-                    l.error = "was resolving when app closed — " \
-                              "remove and re-add the URL"
+                    l.error = "was resolving when app closed — remove and re-add the URL"
                 with self._lock:
                     self._links[l.id] = l
             log.info("loaded %d links from disk", len(self._links))
         except Exception:
-            log.warning("failed to load links.json", exc_info=True)
+            log.warning("failed to load links", exc_info=True)
