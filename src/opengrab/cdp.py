@@ -3,10 +3,14 @@ A minimal standard-library CDP client used by the Edge browser solver.
 No headless, no visible window, no Playwright.
 """
 
+import base64
+import hashlib
 import json
 import os
+import socket
 import struct
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -122,3 +126,113 @@ class CdpClient:
 
     def close(self):
         self.transport.close()
+
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def ws_accept(key: str) -> str:
+    return base64.b64encode(hashlib.sha1((key + WS_GUID).encode("ascii")).digest()).decode("ascii")
+
+
+class SocketTransport:
+    def __init__(self, ws_url: str, timeout: float = 10.0, connect=None, key: str = None):
+        parts = urllib.parse.urlsplit(ws_url)
+        if parts.scheme != "ws":
+            raise CdpError("only ws:// urls are supported")
+        host = parts.hostname or "127.0.0.1"
+        port = parts.port or 80
+        path = parts.path or "/"
+        if parts.query:
+            path += "?" + parts.query
+            
+        connect = connect or socket.create_connection
+        try:
+            self.sock = connect((host, port), timeout)
+        except OSError as e:
+            raise CdpError("cannot connect: " + str(e))
+        
+        self._buf = b""
+        self._frag = b""
+        key = key or base64.b64encode(os.urandom(16)).decode("ascii")
+        self.sock.sendall(("GET %s HTTP/1.1\r\nHost: %s:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (path, host, port, key)).encode("ascii"))
+        
+        # Read handshake
+        while b"\r\n\r\n" not in self._buf:
+            data = self.sock.recv(4096)
+            if not data:
+                raise CdpError("handshake failed: connection closed")
+            self._buf += data
+        
+        head, self._buf = self._buf.split(b"\r\n\r\n", 1)
+        lines = head.decode("latin-1").split("\r\n")
+        if " 101 " not in lines[0] + " ":
+            raise CdpError("handshake failed: " + lines[0])
+        
+        headers = {}
+        for line in lines[1:]:
+            if ":" in line:
+                name, value = line.split(":", 1)
+                headers[name.lower()] = value.strip()
+        
+        if headers.get("sec-websocket-accept", "") != ws_accept(key):
+            raise CdpError("bad Sec-WebSocket-Accept")
+    
+    def send_text(self, text: str):
+        self.sock.sendall(encode_frame(text.encode("utf-8"), 1))
+    
+    def recv_text(self, timeout: float) -> str:
+        self.sock.settimeout(timeout)
+        while True:
+            f = decode_frame(self._buf)
+            if f is None:
+                try:
+                    data = self.sock.recv(65536)
+                except OSError as e:
+                    raise CdpError("socket error: " + str(e))
+                if not data:
+                    raise CdpError("connection closed")
+                self._buf += data
+                continue
+            
+            fin, opcode, payload, used = f
+            self._buf = self._buf[used:]
+            
+            if opcode in (0, 1):
+                self._frag += payload
+                if fin:
+                    text = self._frag.decode("utf-8")
+                    self._frag = b""
+                    return text
+            elif opcode == 8:
+                raise CdpError("closed by browser")
+            elif opcode == 9:
+                self.sock.sendall(encode_frame(payload, 10))
+            # Any other opcode (10 pong, 2 binary) is ignored
+    
+    def close(self):
+        try:
+            self.sock.sendall(encode_frame(b"", 8))
+        except OSError:
+            pass
+        self.sock.close()
+
+
+EDGE_PATHS = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+]
+
+
+def find_browser(candidates=None, exists=os.path.exists) -> str:
+    paths = candidates if candidates is not None else EDGE_PATHS
+    for path in paths:
+        if exists(path):
+            return path
+    return ""
+
+
+def browser_args(exe: str, port: int, user_data_dir: str, url: str = "about:blank") -> list:
+    return [exe, "--remote-debugging-port=%d" % port, "--user-data-dir=" + user_data_dir, "--no-first-run", "--no-default-browser-check", url]
