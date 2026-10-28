@@ -73,17 +73,16 @@ def start_server(settings: Optional[Settings] = None,
                  host: Optional[str] = None, port: Optional[int] = None):
     """Start the download engine and local API, returning their handles."""
     settings = settings or load_settings()
-    host = host or settings.api_host
-    port = settings.api_port if port is None else port
     manager = DownloadManager(settings)
-    server = ApiServer(settings, manager, host=host, port=port)
+    server = ApiServer(settings, manager, host=host or settings.api_host, port=port if port is not None else settings.api_port)
     try:
         manager.start()
         bound_port = server.start()
         # ONLY save settings when both host and port are from defaults (None)
         # When CLI args are provided, don't persist them to settings
-        if host == settings.api_host and port == settings.api_port:
-            settings.api_host, settings.api_port = host, bound_port
+        # We check the actual values passed by using a flag to track if host/port were explicitly set
+        if host is None and port is None:
+            settings.api_host, settings.api_port = server.host, bound_port
             settings.save()
         return settings, manager, server, bound_port
     except Exception:

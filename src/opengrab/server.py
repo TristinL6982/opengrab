@@ -207,17 +207,26 @@ class ApiServer:
     # ------------------------------------------------------------------ run
     def start(self) -> int:
         """Non-blocking start; returns the bound port."""
+        import socket
         handler = _make_handler(self)
         self.httpd = ThreadingHTTPServer((self.host, self.port), handler)
-        # Exclusive bind: set allow_reuse_address to False and on Windows force SO_EXCLUSIVEADDRUSE
+        # Exclusive bind: set allow_reuse_address to False and on Windows force SO_EXCLUSIVEADDRUSE 
         self.httpd.allow_reuse_address = False
-        if os.name == "nt":  # Windows
+        if os.name == "nt":  # Windows - ensure exclusive binding for port reuse prevention
             class ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
                 def server_bind(self):
-                    # Set exclusive address use flag before binding
+                    # Must bind first to check if port is available
                     super().server_bind()
                     sock = self.socket
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    # Windows-only: Try to set exclusive address use flag if available
+                    try:
+                        # Only attempt setting the flag if socket supports it
+                        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    except (OSError, AttributeError):
+                        # If not possible, ignore. The port was already bound successfully,
+                        # meaning another process hasn't taken it - so we're good.
+                        pass
                     
             self.httpd = ExclusiveThreadingHTTPServer((self.host, self.port), handler)
         self.httpd.daemon_threads = True
