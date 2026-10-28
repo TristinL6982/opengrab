@@ -80,7 +80,7 @@ def start_server(settings: Optional[Settings] = None,
         bound_port = server.start()
         # ONLY save settings when both host and port are from defaults (None)
         # When CLI args are provided, don't persist them to settings
-        # We check the actual values passed by using a flag to track if host/port were explicitly set
+        # We check the actual values passed using direct parameter checking
         if host is None and port is None:
             settings.api_host, settings.api_port = server.host, bound_port
             settings.save()

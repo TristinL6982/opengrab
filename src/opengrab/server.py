@@ -209,27 +209,38 @@ class ApiServer:
         """Non-blocking start; returns the bound port."""
         import socket
         handler = _make_handler(self)
+        # Exclusive bind: set allow_reuse_address to False for all OS
         self.httpd = ThreadingHTTPServer((self.host, self.port), handler)
-        # Exclusive bind: set allow_reuse_address to False and on Windows force SO_EXCLUSIVEADDRUSE 
         self.httpd.allow_reuse_address = False
-        if os.name == "nt":  # Windows - ensure exclusive binding for port reuse prevention
-            class ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
-                def server_bind(self):
-                    # Must bind first to check if port is available
-                    super().server_bind()
-                    sock = self.socket
-                    # Windows-only: Try to set exclusive address use flag if available
-                    try:
-                        # Only attempt setting the flag if socket supports it
-                        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
-                            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-                    except (OSError, AttributeError):
-                        # If not possible, ignore. The port was already bound successfully,
-                        # meaning another process hasn't taken it - so we're good.
-                        pass
+
+        if os.name == "nt":  # Windows - ensure exclusive binding 
+            # We'll directly use socket-level access control by setting the necessary flags
+            # This is more reliable than letting the system handle the exclusive bind logic
+            original_server_bind = self.httpd.server_bind
+            
+            def custom_server_bind():
+                try:
+                    # Create a new socket that will be used with exclusivity flags set 
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
                     
-            self.httpd = ExclusiveThreadingHTTPServer((self.host, self.port), handler)
+                    if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                        
+                    sock.bind((self.host, self.port))
+                    self.httpd.socket = sock
+                except OSError as e:
+                    # If binding fails, clean up and re-raise to ensure it's seen
+                    try:
+                        sock.close()
+                    except:
+                        pass  # Nothing we can do
+                    raise
+                    
+            self.httpd.server_bind = custom_server_bind
+            
         self.httpd.daemon_threads = True
+
         # port 0 -> OS-picked ephemeral; record the real bound port
         self.port = self.httpd.server_address[1]
         self._thread = threading.Thread(target=self.httpd.serve_forever,
