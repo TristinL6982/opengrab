@@ -88,7 +88,7 @@ def create_icon():
     
     # Save the main ICO file
     ico_path = Path("build/opengrab.ico")
-    icon_images[0].save(ico_path, format='ICO', sizes=[(s,s) for s in sizes])
+    icon_images[-1].save(ico_path, format='ICO', sizes=[(s,s) for s in sizes])
     print(f"Icon saved: {ico_path}")
 
 if __name__ == "__main__":

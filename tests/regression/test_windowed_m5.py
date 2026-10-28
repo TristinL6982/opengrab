@@ -24,8 +24,11 @@ def test_windowed_exe_build():
     assert "opengrab/assets" in spec_content, "Build spec should include assets in datas"
     
     # Check that the icon files exist
-    icon_path = Path("build/opengrab_32.png")
-    assert icon_path.exists(), "Icon file should exist at build/opengrab_32.png"
+    icon_path = Path("build/opengrab.ico")
+    assert icon_path.exists(), "build/opengrab.ico should exist"
+    from PIL import Image
+    with Image.open(icon_path) as ico:
+        assert (256, 256) in ico.info.get("sizes", set()), "ICO must contain a 256x256 image"
     
     # Check that asset file exists
     asset_path = Path("src/opengrab/assets/icon.png")
@@ -45,6 +48,8 @@ def test_windowed_stdio_handling(monkeypatch):
     result = main(["--smoke-test"])
     assert isinstance(result, int), "Main should return an integer exit code"
     assert result in [0, 1], "Exit code should be 0 or 1"
+    # main() must have replaced the missing streams so print() works in a windowed exe
+    assert sys.stdout is not None and sys.stderr is not None
     
     # Restore to avoid affecting the rest of the tests
     monkeypatch.setattr(sys, 'stdout', sys.__stdout__)
