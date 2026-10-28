@@ -1,8 +1,9 @@
+"""Captcha inbox: challenges waiting for a human to solve them in the UI."""
+import threading
 import time
 import uuid
-import threading
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import asdict, dataclass
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -17,87 +18,62 @@ class CaptchaRequest:
     status: str = "pending"
     answer: Optional[str] = None
 
-    def is_expired(self, now=None) -> bool:
+    def is_expired(self, now: Optional[float] = None) -> bool:
         if now is None:
             now = time.time()
         return now >= self.created_at + self.timeout_s
 
     def to_dict(self) -> dict:
-        return {
-            'id': self.id,
-            'host': self.host,
-            'kind': self.kind,
-            'sitekey': self.sitekey,
-            'page_url': self.page_url,
-            'created_at': self.created_at,
-            'timeout_s': self.timeout_s,
-            'status': self.status,
-            'answer': self.answer
-        }
+        return asdict(self)
 
 
 class InboxFull(Exception):
-    """Raised when the captcha inbox reaches its maximum capacity."""
-    pass
+    """Raised when max_pending pending requests already exist."""
 
 
 class CaptchaInbox:
     def __init__(self, max_pending: int = 50):
         self._max_pending = max_pending
-        self._requests: dict[str, CaptchaRequest] = {}
+        self._requests: Dict[str, CaptchaRequest] = {}
         self._lock = threading.Lock()
-        self._condition = threading.Condition(self._lock)
+        self._cond = threading.Condition(self._lock)
 
-    def submit(self, host: str, kind: str, page_url: str, sitekey=None, timeout_s=300.0, now=None) -> CaptchaRequest:
+    # --- internal helpers (caller holds the lock) ---
+    def _expire(self, now: float) -> None:
+        changed = False
+        for r in self._requests.values():
+            if r.status == "pending" and r.is_expired(now):
+                r.status = "expired"
+                changed = True
+        if changed:
+            self._cond.notify_all()
+
+    def _live(self, now: float) -> List[CaptchaRequest]:
+        self._expire(now)
+        return [r for r in self._requests.values() if r.status == "pending"]
+
+    # --- public API ---
+    def submit(self, host: str, kind: str, page_url: str, sitekey: Optional[str] = None,
+               timeout_s: float = 300.0, now: Optional[float] = None) -> CaptchaRequest:
         if now is None:
             now = time.time()
-        
-        # Check for existing pending request with same host and kind
         with self._lock:
-            for request in self._requests.values():
-                if (request.host == host and 
-                    request.kind == kind and 
-                    request.status == "pending" and 
-                    not request.is_expired(now)):
-                    return request
-            
-            # Create new request
-            request_id = uuid.uuid4().hex
-            request = CaptchaRequest(
-                id=request_id,
-                host=host,
-                kind=kind,
-                sitekey=sitekey,
-                page_url=page_url,
-                created_at=now,
-                timeout_s=timeout_s,
-                status="pending"
-            )
-            
-            # Check if we're at max capacity
-            pending_count = sum(1 for r in self._requests.values() if r.status == "pending" and not r.is_expired(now))
-            if pending_count >= self._max_pending:
-                raise InboxFull("Maximum pending captcha requests reached")
-                
-            self._requests[request_id] = request
-            
-        return request
+            live = self._live(now)
+            for r in live:
+                if r.host == host and r.kind == kind:
+                    return r
+            if len(live) >= self._max_pending:
+                raise InboxFull(f"captcha inbox full ({self._max_pending} pending)")
+            req = CaptchaRequest(id=uuid.uuid4().hex, host=host, kind=kind, sitekey=sitekey,
+                                 page_url=page_url, created_at=now, timeout_s=timeout_s)
+            self._requests[req.id] = req
+            return req
 
-    def pending(self, now=None) -> List[CaptchaRequest]:
+    def pending(self, now: Optional[float] = None) -> List[CaptchaRequest]:
         if now is None:
             now = time.time()
-            
         with self._lock:
-            # Get pending, non-expired requests ordered by creation time
-            pending_requests = []
-            for request in self._requests.values():
-                if request.status == "pending" and not request.is_expired(now):
-                    pending_requests.append(request)
-                    
-            # Sort by created_at (oldest first)
-            pending_requests.sort(key=lambda r: r.created_at)
-            
-        return pending_requests
+            return sorted(self._live(now), key=lambda r: r.created_at)
 
     def get(self, id: str) -> Optional[CaptchaRequest]:
         with self._lock:
@@ -105,74 +81,52 @@ class CaptchaInbox:
 
     def solve(self, id: str, answer: str) -> bool:
         with self._lock:
-            request = self._requests.get(id)
-            if (request is not None and 
-                request.status == "pending" and 
-                not request.is_expired() and
-                answer):
-                request.answer = answer
-                request.status = "solved"
-                self._condition.notify_all()
-                return True
-        return False
+            self._expire(time.time())
+            r = self._requests.get(id)
+            if r is None or r.status != "pending" or not answer:
+                return False
+            r.answer = answer
+            r.status = "solved"
+            self._cond.notify_all()
+            return True
 
     def skip(self, id: str) -> bool:
         with self._lock:
-            request = self._requests.get(id)
-            if (request is not None and 
-                request.status == "pending" and 
-                not request.is_expired()):
-                request.status = "skipped"
-                self._condition.notify_all()
-                return True
-        return False
+            self._expire(time.time())
+            r = self._requests.get(id)
+            if r is None or r.status != "pending":
+                return False
+            r.status = "skipped"
+            self._cond.notify_all()
+            return True
 
     def wait(self, id: str, timeout: float) -> Optional[CaptchaRequest]:
+        deadline = time.monotonic() + timeout
         with self._lock:
-            # Check if the request exists
-            request = self._requests.get(id)
-            if request is None:
+            r = self._requests.get(id)
+            if r is None:
                 return None
-                
-            # If it's not pending, return it as-is
-            if request.status != "pending":
-                return request
-            
-            # Wait for the condition or timeout
-            start_time = time.time()
-            remaining_timeout = timeout
-            
-            while (request.status == "pending" and 
-                   not request.is_expired() and 
-                   remaining_timeout > 0):
-                self._condition.wait(timeout=remaining_timeout)
-                remaining_timeout = timeout - (time.time() - start_time)
-                
-            # Return the updated status
-            return self._requests.get(id)
+            while True:
+                self._expire(time.time())
+                if r.status != "pending":
+                    return r
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return r
+                # wake at least by the request's own expiry so status can flip
+                until_expiry = max(0.0, r.created_at + r.timeout_s - time.time())
+                self._cond.wait(min(remaining, until_expiry + 0.001))
 
-    def purge(self, now=None) -> int:
+    def purge(self, now: Optional[float] = None) -> int:
         if now is None:
             now = time.time()
-            
         with self._lock:
-            initial_count = len(self._requests)
-            expired_requests = []
-            for request_id, request in list(self._requests.items()):
-                if (request.status != "pending" or 
-                    request.is_expired(now)):
-                    expired_requests.append(request_id)
-            
-            for request_id in expired_requests:
-                del self._requests[request_id]
-                
-        return initial_count - len(self._requests)
+            self._expire(now)
+            gone = [k for k, r in self._requests.items() if r.status != "pending"]
+            for k in gone:
+                del self._requests[k]
+            return len(gone)
 
     def __len__(self) -> int:
-        now = time.time()
         with self._lock:
-            count = 0
-            for request in self._requests.values():
-                if request.status == "pending" and not request.is_expired(now):
-                    count += 1
-            return count
+            return len(self._live(time.time()))

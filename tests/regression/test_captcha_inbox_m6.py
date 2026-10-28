@@ -64,7 +64,8 @@ def test_pending_order():
     # Submit requests in order
     req1 = inbox.submit("example.com", "hcaptcha", "https://example.com/1")
     time.sleep(0.01)  # Small delay to ensure different timestamps
-    req2 = inbox.submit("example.com", "hcaptcha", "https://example.com/2")
+    # different host, otherwise submit dedupes it into req1
+    req2 = inbox.submit("example2.com", "hcaptcha", "https://example2.com/2")
     
     pending = inbox.pending()
     assert len(pending) == 2
@@ -198,18 +199,21 @@ def test_purge_count():
     inbox = CaptchaInbox()
     
     # Submit requests
-    req1 = inbox.submit("example.com", "hcaptcha", "https://example.com/1")
-    req2 = inbox.submit("example.com", "hcaptcha", "https://example.com/2")
-    
-    # Add some expired ones
-    expired_req = inbox.submit("example.com", "hcaptcha", "https://example.com/expired", timeout_s=0.01)
+    # distinct hosts so submit does not dedupe them
+    req1 = inbox.submit("a.example", "hcaptcha", "https://a.example/1")
+    req2 = inbox.submit("b.example", "hcaptcha", "https://b.example/2")
+    solved = inbox.submit("c.example", "hcaptcha", "https://c.example/3")
+    assert inbox.solve(solved.id, "answer")
+    expired_req = inbox.submit("d.example", "hcaptcha", "https://d.example/expired", timeout_s=0.01)
     time.sleep(0.02)  # Wait for expiration
-    
-    # Purge expired ones
+
+    # Purge removes the solved one and the expired one, keeps the two pending
     purged_count = inbox.purge()
-    
-    # Should have purged 1 expired item (the last one)
-    assert purged_count == 1
+    assert purged_count == 2
+    assert inbox.get(solved.id) is None
+    assert inbox.get(expired_req.id) is None
+    assert inbox.get(req1.id) is not None and inbox.get(req2.id) is not None
+    assert len(inbox) == 2
 
 
 def test_to_dict_keys():
