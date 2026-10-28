@@ -28,10 +28,6 @@ def decrypt_crypted(crypted: str, key: bytes) -> str:
     # Strip whitespace from crypted
     crypted = crypted.strip()
     
-    # Check if the length is a multiple of 16 (AES block size)
-    if len(crypted) % 16 != 0:
-        raise CnlError("Crypted data length must be multiple of 16")
-    
     try:
         # Base64 decode
         encrypted_data = base64.b64decode(crypted)
@@ -40,7 +36,12 @@ def decrypt_crypted(crypted: str, key: bytes) -> str:
     
     # AES-CBC decrypt with key as IV
     cipher = AES.new(key, AES.MODE_CBC, iv=key)
-    decrypted = cipher.decrypt(encrypted_data)
+    try:
+        decrypted = cipher.decrypt(encrypted_data)
+    except ValueError as e:
+        if "Data must be padded to 16 byte boundary in CBC mode" in str(e):
+            raise CnlError("Crypted data length must be multiple of 16")
+        raise
     
     # Decode as utf-8 with error replacement and strip trailing \x00 characters and whitespace
     result = decrypted.decode('utf-8', errors='replace').rstrip('\x00 \t\n\r')
