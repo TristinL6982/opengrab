@@ -29,7 +29,6 @@ def test_c8_pause_frees_slot():
     assert False, "Line not found"
 
 
-@pytest.mark.xfail(strict=True, reason="B3: manual solver always first, paid solvers never reached")
 def test_b3_paid_solver_before_manual():
     for line in misc_output.splitlines():
         if line.startswith("D. auto chain order for turnstile"):

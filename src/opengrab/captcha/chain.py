@@ -1,8 +1,8 @@
 """Solver registry / chain with failover.
 
 Priority order (lower number = earlier) is configurable per run.  The
-default 'auto' chain:  ddddocr (free, fast, text only) -> manual (UI)
--> 2captcha -> capmonster -> capsolver (only if a key is configured).
+default 'auto' chain:  ddddocr (free, fast, text only) -> automatic paid solvers (2captcha, capmonster, capsolver)
+(only if a key is configured) -> manual (UI).
 The engine uses the chain for OCR-able kinds and always falls back to
 'manual' so a captcha can never be a dead end.
 """
@@ -45,12 +45,35 @@ class SolverChain:
             except Exception:
                 continue
             enabled.append(s)
-        if pref != "auto":
+        
+        # For auto mode, we need to reorganize to put paid solvers first
+        # and manual solver always last (even if preferred is 'manual')
+        if pref == "auto":
+            # Separate solvers into automatic (paid) and manual solver
+            auto_solvers = [s for s in enabled if s.id != "manual"]
+            manual_solver = [s for s in enabled if s.id == "manual"]
+            
+            # Sort automatic solvers by priority (lower number = earlier)
+            auto_solvers_sorted = sorted(auto_solvers, key=lambda s: s.priority)
+            
+            # Manual solver always goes last  
+            ordered = auto_solvers_sorted + manual_solver
+        else:
+            # For non-auto mode, keep current behaviour but ensure manual is still last if preferred is not manual
             preferred = [s for s in enabled if s.id == pref]
             others = [s for s in enabled if s.id != pref]
-            ordered = preferred + others
-        else:
-            ordered = sorted(enabled, key=lambda s: s.priority)
+            
+            # If preferred isn't manual, put manual at the end
+            # If preferred IS manual, then it should be first (current behavior)  
+            if pref != "manual":
+                ordered = preferred + others
+                # Ensure manual is last if present
+                manual_solver = [s for s in ordered if s.id == "manual"]
+                other_solvers = [s for s in ordered if s.id != "manual"]
+                ordered = other_solvers + manual_solver
+            else:
+                ordered = preferred + others
+                
         return ordered
 
     # -- solving ---------------------------------------------------------------
