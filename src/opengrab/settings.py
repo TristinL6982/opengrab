@@ -63,7 +63,7 @@ class Settings(BaseModel):
     media_playlist_max_entries: int = 10000
 
     # captcha solving (unpaywalled: BYO keys, local OCR, or manual)
-    captcha_provider: str = "auto"     # auto|manual|2captcha|capmonster|capsolver|nopecha|ddddocr
+    captcha_provider: str = "auto"     # auto|manual|2captcha|capmonster|capsolver|nopecha|ddddocr|tesseract
     captcha_2captcha_key: str = ""
     captcha_capmonster_key: str = ""
     captcha_capsolver_key: str = ""
