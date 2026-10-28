@@ -105,3 +105,46 @@ def test_tesseract_solver(monkeypatch):
     result = solver.solve(req_no_image)
     assert result.ok == False
     assert "no image to OCR" in result.error
+
+
+def test_tesseract_extra_cases(monkeypatch):
+    import os
+    import shutil
+    import subprocess
+    from opengrab.captcha.base import TesseractSolver, DdddOCRSolver
+    from opengrab.captcha.chain import SolverChain
+
+    monkeypatch.setattr(os.path, "isfile", lambda p: p == "C:\\fake\\tesseract.exe")
+    s = Settings()
+    s.captcha_tesseract_path = "C:\\fake\\tesseract.exe"
+    s.captcha_tesseract_enabled = False
+    assert TesseractSolver(s).enabled() is False
+    s.captcha_tesseract_enabled = True
+    assert TesseractSolver(s).enabled() is True
+    s.captcha_tesseract_path = "C:\\nope.exe"
+    assert TesseractSolver(s).enabled() is False
+
+    s.captcha_tesseract_path = ""
+    monkeypatch.setattr(shutil, "which", lambda name: "C:\\w\\tesseract.exe")
+    assert TesseractSolver(s).find_binary() == "C:\\w\\tesseract.exe"
+
+    calls = []
+
+    def fake(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout=b"x", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    s.captcha_tesseract_path = "C:\\fake\\tesseract.exe"
+    res = TesseractSolver(s).solve(CaptchaRequest(image_b64="", kind="text"))
+    assert res.ok is False
+    assert res.error == "no image to OCR"
+    assert calls == []
+
+    ids = [x.id for x in SolverChain(s).solvers]
+    assert ids.count("tesseract") == 1
+    assert ids.index("tesseract") == ids.index("ddddocr") + 1
+
+    s.captcha_provider = "auto"
+    monkeypatch.setattr(DdddOCRSolver, "enabled", lambda self: False)
+    assert SolverChain(s)._ordered("text")[0].id == "tesseract"
