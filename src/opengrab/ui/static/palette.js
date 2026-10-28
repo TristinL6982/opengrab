@@ -11,8 +11,8 @@ function ogFuzzyScore(query, text) {
   
   while (qi < q.length && ti < t.length) {
     if (q[qi] === t[ti]) {
+      // Consecutive match gets bonus
       if (lastMatchedPos === ti - 1) {
-        // Consecutive match gets bonus
         score += 2;
       } else {
         score += 1;
@@ -91,7 +91,7 @@ if (typeof document !== "undefined") {
         commands.push({
           title: `Download: ${name}`,
           run: () => {
-            document.querySelector('[data-tab="queue"]').click();
+            document.querySelector('[data-tab="all"]').click();
           }
         });
       });
@@ -111,7 +111,7 @@ if (typeof document !== "undefined") {
     const items = buildCommands();
     const rankedItems = ogPaletteRank(query, items);
     
-    listEl.innerHTML = '';
+    listEl.replaceChildren();
     rankedItems.forEach(title => {
       const li = document.createElement('li');
       li.textContent = title;
@@ -188,6 +188,7 @@ if (typeof document !== "undefined") {
         const sel = listEl.querySelector('li.sel');
         if (sel) {
           try {
+            // Find the command by title from items used in updatePalette
             const cmd = currentCommands.find(c => c.title === sel.textContent);
             if (cmd) cmd.run();
           } catch (e) {
