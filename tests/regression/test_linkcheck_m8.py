@@ -23,7 +23,7 @@ def test_200_with_content_length_and_disposition():
 
 
 def test_content_disposition_utf8():
-    """Content-Disposition 'attachment; filename*=UTF-8''%E2%82%AC.txt' gives filename '€.txt'."""
+    """Content-Disposition 'attachment; filename*=UTF-8''%E2%82%AC.txt' gives the euro-sign filename."""
     
     def head(url):
         if url == "http://example.com/file.zip":
@@ -186,3 +186,24 @@ def test_summarize_empty():
     result = summarize([])
     
     assert result == {"online": 0, "offline": 0, "unknown": 0}
+
+def test_content_disposition_quoted_with_apostrophe():
+    """A quoted filename containing an apostrophe is kept whole."""
+
+    def head(url):
+        return (200, {"Content-Disposition": 'attachment; filename="it\'s here.zip"; size=5'})
+
+    result = check_link("http://example.com/x", head)
+
+    assert result.filename == "it's here.zip"
+
+
+def test_content_disposition_missing_filename():
+    """A Content-Disposition without a filename gives an empty filename."""
+
+    def head(url):
+        return (200, {"Content-Disposition": "inline"})
+
+    result = check_link("http://example.com/x", head)
+
+    assert result.filename == ""
