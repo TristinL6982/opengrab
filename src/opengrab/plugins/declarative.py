@@ -2,6 +2,8 @@ import json
 import os
 import re
 from typing import List, Dict, Any, Optional
+import html
+from urllib.parse import urljoin
 
 from .base import SitePlugin, PluginError, GrabResult, ResolveResult, PluginContext
 
@@ -111,6 +113,7 @@ class DeclarativePlugin(SitePlugin):
             m = self._filename_regex.search(r.text)
             if m:
                 filename = m.group(1).strip()
+                filename = html.unescape(filename)
 
         if not filename:
             # Use last path segment as filename
@@ -125,7 +128,7 @@ class DeclarativePlugin(SitePlugin):
             if m:
                 size_str = m.group(1)
                 # Remove commas and spaces
-                size_clean = re.sub(r'[,\s]', '', size_str)
+                size_clean = re.sub(r'[,\\s]', '', size_str)
                 try:
                     size = int(size_clean)
                 except ValueError:
@@ -137,9 +140,7 @@ class DeclarativePlugin(SitePlugin):
             m = self._direct_url_regex.search(r.text)
             if m:
                 direct_url = m.group(1)
-                import html
                 direct_url = html.unescape(direct_url)
-                from urllib.parse import urljoin
                 direct_url = urljoin(r.url, direct_url)
 
         return GrabResult(
@@ -168,7 +169,7 @@ def load_templates_dir(path: str) -> tuple[List[DeclarativePlugin], Dict[str, st
     """Load all JSON templates from a directory."""
     plugins = []
     errors = {}
-
+    
     if not os.path.exists(path):
         return [], {}
     
@@ -177,7 +178,7 @@ def load_templates_dir(path: str) -> tuple[List[DeclarativePlugin], Dict[str, st
     except OSError:
         # If we can't list the directory, treat as empty
         files = []
-
+        
     seen_ids = set()
 
     for filename in files:
@@ -188,7 +189,7 @@ def load_templates_dir(path: str) -> tuple[List[DeclarativePlugin], Dict[str, st
         try:
             with open(filepath, encoding="utf-8") as f:
                 template = json.load(f)
-
+                
             plugin = DeclarativePlugin(template)
             
             # Check for duplicate IDs
