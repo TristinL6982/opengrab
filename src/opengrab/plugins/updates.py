@@ -54,13 +54,12 @@ def check_and_update(installed: dict, index_url: str, fetch, dest_dir) -> dict:
     
     for entry in plan_updates(installed, index):
         try:
-            # For relative URLs in templates, construct the absolute path from index_url
-            # This is important because fetch expects the full URL to work with  
+            # Handle relative URLs by constructing the absolute path from index_url
             import urllib.parse
             if not entry["url"].startswith(("http://", "https://")):
                 # Handle relative URLs by combining with base path of index_url
                 parsed_index = urllib.parse.urlparse(index_url)
-                base_url = f"{parsed_index.scheme}://{parsed_index.netloc}"
+                base_url = f"{parsed_index.scheme}://{parsed_index.netloc}{parsed_index.path.rpartition('/')[0]}"
                 full_url = urllib.parse.urljoin(base_url, entry["url"])
             else:
                 full_url = entry["url"]
