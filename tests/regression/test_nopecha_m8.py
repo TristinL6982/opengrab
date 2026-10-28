@@ -23,6 +23,9 @@ class FakeClient:
     def post(self, url, json_body=None, **kw):
         self.posts.append((url, json_body))
         # Return a mock response
+        # For text image type, this is the default that will be overridden 
+        # by the specific test cases - but we need to keep consistency with 
+        # how it's called in the real solver
         return FakeResp('{"data": "J1"}', {"data": "J1"})
     
     def get(self, url, **kw):
@@ -30,7 +33,7 @@ class FakeClient:
         # Return the next response from our queue
         if self.next_gets:
             return self.next_gets.pop(0)
-        # Default response for first call
+        # Default response for first call - this is not actually used for tests  
         return FakeResp('{"data": "TOKEN"}', {"data": "TOKEN"})
 
 
