@@ -1,4 +1,5 @@
 import pytest
+from opengrab.plugins.base import PluginError
 from opengrab.plugins.registry import PluginRegistry
 from opengrab.plugins.builtin.gdrive import file_id, direct_url, GoogleDrivePlugin
 
@@ -36,7 +37,7 @@ def test_plugin_resolve():
 
 
 def test_plugin_grab_error():
-    with pytest.raises(Exception):
+    with pytest.raises(PluginError):
         GoogleDrivePlugin().grab("https://example.com/x", None)
 
 
