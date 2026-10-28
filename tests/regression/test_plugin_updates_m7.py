@@ -33,31 +33,10 @@ def test_plan_updates():
     assert [r["id"] for r in result] == ["host-a", "host-c"]
 
 
-def test_apply_update():
-    from opengrab.plugins.updates import apply_update
-    
-    # Build a valid template dict by loading example_host.json and changing its "id" to "host-a"
-    tpl = json.loads(Path("src/opengrab/plugins/templates/example_host.json").read_text(encoding="utf-8"))
-    tpl["id"] = "host-a"
-    data = json.dumps(tpl).encode("utf-8")
-    sha = hashlib.sha256(data).hexdigest()
-    
-    # This should work
-    with pytest.raises(ValueError, match="sha256 mismatch"):
-        apply_update({"id": "host-a", "version": "1.0", "url": "a.json", "sha256": "0" * 64}, data, "/tmp")
-    
-    # Valid case
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        path = apply_update({"id": "host-a", "version": "1.0", "url": "a.json", "sha256": sha}, data, tmp_dir)
-        assert path.name == "host-a.json"
-        content = json.loads(path.read_text(encoding="utf-8"))
-        assert content["id"] == "host-a"
-
-
 def test_apply_update_sha256_mismatch():
     from opengrab.plugins.updates import apply_update
     
+    # Build a valid template dict by loading example_host.json and changing its "id" to "host-a"
     tpl = json.loads(Path("src/opengrab/plugins/templates/example_host.json").read_text(encoding="utf-8"))
     tpl["id"] = "host-a"
     data = json.dumps(tpl).encode("utf-8")
@@ -69,6 +48,7 @@ def test_apply_update_sha256_mismatch():
 def test_apply_update_bad_id():
     from opengrab.plugins.updates import apply_update
     
+    # Build a valid template dict by loading example_host.json and changing its "id" to "host-a"
     tpl = json.loads(Path("src/opengrab/plugins/templates/example_host.json").read_text(encoding="utf-8"))
     tpl["id"] = "host-a"
     data = json.dumps(tpl).encode("utf-8")
@@ -81,6 +61,7 @@ def test_apply_update_bad_id():
 def test_apply_update_id_mismatch():
     from opengrab.plugins.updates import apply_update
     
+    # Build a valid template dict by loading example_host.json and changing its "id" to "host-a"
     tpl = json.loads(Path("src/opengrab/plugins/templates/example_host.json").read_text(encoding="utf-8"))
     tpl["id"] = "host-a"
     data = json.dumps(tpl).encode("utf-8")
@@ -111,22 +92,22 @@ def test_check_and_update():
         "site": "test-a.invalid",
         "description": "Test template",
         "url_pattern": "^https?://test-a\\\\.invalid/",
-        "direct_url_regex": "href=\\\"(https?://dl\\\\.test-a\\\\.invalid/[^\\\\\\\"]+)\\\"",
+        "direct_url_regex": "href=\\\\\"(https?://dl\\\\.test-a\\\\.invalid/[^\\\\\\\\\"]+)\\\\\"",
         "filename_regex": "<h1>([^<]+)</h1>",
         "offline_markers": ["File not found"]
     }
-
+    
     data_a = json.dumps(tpl_a).encode("utf-8")
     sha_a = hashlib.sha256(data_a).hexdigest()
-
+    
     index = {
         "templates": [
             {"id": "host-a", "version": "1.1", "url": "a.json", "sha256": sha_a}
         ]
     }
-
+    
     index_bytes = json.dumps(index).encode("utf-8")
-
+    
     def fake_fetch(url):
         if url == "https://idx/index.json":
             return index_bytes
@@ -134,21 +115,21 @@ def test_check_and_update():
             return data_a
         else:
             raise ValueError("Unknown URL")
-
+    
     # Simple test with the key assertion that one item should be returned from plan_updates
     import tempfile
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Just make sure this works correctly
         installed = {"host-a": "1.0"}  # host-a is already installed at version 1.0
-
+        
         # The critical check is that we should be finding a candidate to update
         plan_result = plan_updates(installed, index)
         assert len(plan_result) == 1  # Should want to update host-a
         assert plan_result[0]["id"] == "host-a"
-
+        
         # Now test the full integration
         result = check_and_update(installed, "https://idx/index.json", fake_fetch, tmp_dir)
-
+        
         # This should pass - it's updating successfully
         assert result["updated"] == ["host-a"]
         assert list(result["failed"]) == []

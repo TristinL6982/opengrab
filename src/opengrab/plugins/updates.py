@@ -9,9 +9,11 @@ from .sdk import validate_template
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
+
 def version_tuple(v: str) -> tuple:
     parts = str(v).split(".")
     return tuple(int(p) if p.isdigit() else 0 for p in parts)
+
 
 def plan_updates(installed: dict, index: dict) -> list:
     result = []
@@ -25,6 +27,7 @@ def plan_updates(installed: dict, index: dict) -> list:
         elif version_tuple(entry["version"]) > version_tuple(installed[entry["id"]]):
             result.append(entry)
     return sorted(result, key=lambda x: x["id"])
+
 
 def apply_update(entry: dict, data: bytes, dest_dir) -> Path:
     if not ID_RE.match(entry["id"]):
@@ -47,6 +50,7 @@ def apply_update(entry: dict, data: bytes, dest_dir) -> Path:
     path.write_text(json.dumps(tpl, indent=2), encoding="utf-8")
     return path
 
+
 def check_and_update(installed: dict, index_url: str, fetch, dest_dir) -> dict:
     index = json.loads(fetch(index_url).decode("utf-8"))
     updated = []
@@ -54,17 +58,7 @@ def check_and_update(installed: dict, index_url: str, fetch, dest_dir) -> dict:
     
     for entry in plan_updates(installed, index):
         try:
-            # Handle relative URLs by constructing the absolute path from index_url
-            import urllib.parse
-            if not entry["url"].startswith(("http://", "https://")):
-                # Handle relative URLs by combining with base path of index_url
-                parsed_index = urllib.parse.urlparse(index_url)
-                base_url = f"{parsed_index.scheme}://{parsed_index.netloc}{parsed_index.path.rpartition('/')[0]}"
-                full_url = urllib.parse.urljoin(base_url, entry["url"])
-            else:
-                full_url = entry["url"]
-                
-            apply_update(entry, fetch(full_url), dest_dir)  
+            apply_update(entry, fetch(entry["url"]), dest_dir)  
             updated.append(entry["id"])
         except Exception as e:
             failed[entry["id"]] = str(e)
