@@ -331,8 +331,7 @@ class DownloadManager:
     def _resolve(self, link: Link, plugin, ctx: PluginContext) -> None:
         if link.direct_url:
             link.status = LinkStatus.WAITING
-            # Record health for already-resolved links
-            self.registry.record_result(getattr(plugin, "id", "?"), True)
+            # The early "if link.direct_url:" return does not call plugin.resolve and must record nothing.
             return
         if link.status in (LinkStatus.CAPTCHA, LinkStatus.LOGIN,
                            LinkStatus.PAYWALL, LinkStatus.SKIPPED):
@@ -369,7 +368,6 @@ class DownloadManager:
             # For other exceptions, record the failure and re-raise
             self.registry.record_result(getattr(plugin, "id", "?"), False, str(e))
             raise
-        # The early "if link.direct_url:" return does not call plugin.resolve and must record nothing.
 
     # ------------------------------------------------------------- download
     def _ready_put(self, link_id: str) -> None:
