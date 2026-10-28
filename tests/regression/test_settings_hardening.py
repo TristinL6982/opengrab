@@ -71,7 +71,8 @@ def test_load_settings_with_corrupt_file(monkeypatch):
     
 def _req(port, method, path, body=None, headers=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    conn.request(method, path, body=body, headers=headers or {})
+    from tests.regression.test_api_security import AUTH
+    conn.request(method, path, body=body, headers={**AUTH, **(headers or {})})
     resp = conn.getresponse()
     data = resp.read().decode("utf-8", "replace")
     conn.close()

@@ -21,11 +21,15 @@ from opengrab.engine.manager import DownloadManager  # noqa: E402
 from opengrab.settings import Settings  # noqa: E402
 
 
+TEST_TOKEN = "regressiontoken0123456789"
+AUTH = {"Authorization": "Bearer " + TEST_TOKEN}
+
+
 @pytest.fixture(scope="module")
 def port():
     dl = _TMP / "downloads"
     dl.mkdir(exist_ok=True)
-    settings = Settings(download_dir=str(dl))
+    settings = Settings(download_dir=str(dl), api_token=TEST_TOKEN)
     mgr = DownloadManager(settings)
     mgr.start()
     srv = server.ApiServer(settings, mgr, host="127.0.0.1", port=0)
@@ -66,3 +70,9 @@ def test_c5_invalid_setting_rejected():
     s = Settings()
     with pytest.raises(Exception):
         s.max_parallel = "lots"
+
+def test_m4e_loopback_without_token_is_401(port):
+    resp, _ = _req(port, "GET", "/api/settings")
+    assert resp.status == 401
+    resp, data = _req(port, "GET", "/api/settings", headers=AUTH)
+    assert resp.status == 200 and "api_token" not in json.loads(data)

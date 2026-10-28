@@ -91,6 +91,7 @@ def main() -> int:
 
     def req(method: str, path: str, body=None, timeout=60):
         r = urllib.request.Request(base + path, method=method)
+        r.add_header("Authorization", f"Bearer {srv.token}")
         data = None
         if body is not None:
             data = json.dumps(body).encode()
@@ -191,7 +192,7 @@ def main() -> int:
 
         # ---- 4. SSE event stream ----------------------------------------
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
-        conn.request("GET", "/api/events")
+        conn.request("GET", "/api/events", headers={"Authorization": f"Bearer {srv.token}"})
         resp = conn.getresponse()
         got = []
         for _ in range(6):

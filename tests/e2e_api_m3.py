@@ -53,8 +53,10 @@ def main() -> int:
     original_add_url = manager.add_url
 
     def request(path: str, method: str = "GET", body=None,
-                data: bytes | None = None, headers=None):
+                data: bytes | None = None, headers=None, auth=True):
         request_headers = dict(headers or {})
+        if auth:
+            request_headers.setdefault("Authorization", f"Bearer {server.token}")
         if body is not None:
             data = json.dumps(body).encode()
             request_headers["Content-Type"] = "application/json"
@@ -212,7 +214,8 @@ def main() -> int:
 
         settings.terminal_enabled = True
         try:
-            request("/api/terminal", "POST", {"command": "echo terminal-check"})
+            request("/api/terminal", "POST", {"command": "echo terminal-check"},
+                    auth=False)
             unauthenticated = False
         except urllib.error.HTTPError as exc:
             unauthenticated = exc.code == 401
