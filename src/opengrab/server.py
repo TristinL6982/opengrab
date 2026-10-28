@@ -211,32 +211,36 @@ class ApiServer:
         handler = _make_handler(self)
         # Exclusive bind: set allow_reuse_address to False for all OS
         self.httpd = ThreadingHTTPServer((self.host, self.port), handler)
+        # Ensure the server will not share address, even on Windows
         self.httpd.allow_reuse_address = False
-
-        if os.name == "nt":  # Windows - ensure exclusive binding 
-            # We'll directly use socket-level access control by setting the necessary flags
-            # This is more reliable than letting the system handle the exclusive bind logic
+        
+        if os.name == "nt":  # Windows - ensure exclusive binding using direct socket setting
+            # Replace with custom method that sets appropriate socket flags for exclusive binding
             original_server_bind = self.httpd.server_bind
             
             def custom_server_bind():
                 try:
-                    # Create a new socket that will be used with exclusivity flags set 
+                    # Create a new socket explicitly for exclusive binding
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    # Disable SO_REUSEADDR to prevent reuse of address
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-                    
+                    # Set exclusive address use flag for Windows
                     if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
                         sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
                         
+                    # Bind the socket directly  
                     sock.bind((self.host, self.port))
+                    # Replace the server's socket with our exclusive one
                     self.httpd.socket = sock
-                except OSError as e:
-                    # If binding fails, clean up and re-raise to ensure it's seen
+                except OSError:
+                    # If we fail to bind exclusively, clean up and re-raise OSError
                     try:
                         sock.close()
                     except:
-                        pass  # Nothing we can do
+                        pass  # Nothing we can do at this point
                     raise
                     
+            # Override with our exclusive binding function  
             self.httpd.server_bind = custom_server_bind
             
         self.httpd.daemon_threads = True
