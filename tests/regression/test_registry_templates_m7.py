@@ -1,79 +1,74 @@
-import pytest
-import tempfile
-import pathlib
+﻿import json
 import os
+import pathlib
+import tempfile
+
 from opengrab.plugins.registry import PluginRegistry
-from opengrab.plugins.declarative import DeclarativePlugin
+
+T = {"id": "exhost", "name": "ExHost", "site": "exhost.com",
+     "direct_url_regex": r'href="([^"]+)" id="dl"'}
 
 
-def test_template_loading():
-    # Test case 1: good template loads
+def _registry():
     r = PluginRegistry()
     d = tempfile.mkdtemp()
     r.set_user_dir(pathlib.Path(d))
-    
-    # Write a valid JSON template file
-    template_content = {
-        "id":"exhost",
-        "name":"ExHost",
-        "site":"exhost.com",
-        "direct_url_regex":r'href="([^"]+)" id="dl"'
-    }
-    
-    with open(os.path.join(d, "good.json"), "w", encoding="utf-8") as f:
-        import json
-        json.dump(template_content, f)
-    
-    # Scan and check that template is loaded
+    return r, d
+
+
+def _write(d, name, obj):
+    with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+        if isinstance(obj, str):
+            f.write(obj)
+        else:
+            json.dump(obj, f)
+
+
+def test_good_template_loads():
+    r, d = _registry()
+    _write(d, "good.json", T)
     r.scan(force=True)
     assert r.get("exhost") is not None
     assert r.get("exhost").origin == "template"
-    assert any(p.id == "exhost" for p in r.for_url("https://exhost.com/f/abc"))
-    
-    # Test case 2: bad JSON file
-    with open(os.path.join(d, "bad.json"), "w", encoding="utf-8") as f:
-        f.write('{nope": "template:bad.json"')
-    
+    assert any(p.id == "exhost" for p in r.for_url("https://exhost.com/f/abc")) is True
+
+
+def test_bad_json_records_error():
+    r, d = _registry()
+    _write(d, "bad.json", "{nope")
     r.scan(force=True)
     assert "template:bad.json" in r.errors
-    
-    # Test case 3: removing the file
+
+
+def test_removed_template_disappears():
+    r, d = _registry()
+    _write(d, "good.json", T)
+    r.scan(force=True)
+    assert r.get("exhost") is not None
     os.remove(os.path.join(d, "good.json"))
     r.scan(force=True)
     assert r.get("exhost") is None
-    
-    # Test case 4: fixing bad.json 
-    with open(os.path.join(d, "bad.json"), "w", encoding="utf-8") as f:
-        import json
-        json.dump(template_content, f)
-        
+
+
+def test_fixed_template_clears_error():
+    r, d = _registry()
+    _write(d, "bad.json", "{nope")
+    r.scan(force=True)
+    assert "template:bad.json" in r.errors
+    _write(d, "bad.json", T)
     r.scan(force=True)
     assert "template:bad.json" not in r.errors
     assert r.get("exhost") is not None
-    
-    # Test case 5: conflict with builtin plugin
-    builtin_plugin_id = list(r.plugins.keys())[0]  # Get first builtin plugin ID
-    # Make sure it's a builtin plugin
-    if r.plugins[builtin_plugin_id].origin == "builtin":
-        conflict_template = {
-            "id": builtin_plugin_id,
-            "name":"Conflicting Plugin",
-            "site":"conflict.example",
-            "direct_url_regex":r'href="([^"]+)" id="dl"'
-        }
-        
-        with open(os.path.join(d, "conflict.json"), "w", encoding="utf-8") as f:
-            import json
-            json.dump(conflict_template, f)
-        
-        r.scan(force=True)
-        
-        # Check that the builtin plugin still exists and has origin "builtin"
-        assert r.get(builtin_plugin_id).origin == "builtin"
-        # Check that error is recorded
-        assert f"template:{builtin_plugin_id}" in r.errors
 
 
-if __name__ == "__main__":
-    test_template_loading()
-    print("All tests passed!")
+def test_template_cannot_override_builtin():
+    fresh = PluginRegistry()
+    fresh.scan(force=True)
+    builtin_ids = [k for k, p in fresh.plugins.items() if p.origin == "builtin"]
+    assert len(builtin_ids) > 0
+    bid = builtin_ids[0]
+    r, d = _registry()
+    _write(d, "conflict.json", dict(T, id=bid, site="conflict.example"))
+    r.scan(force=True)
+    assert r.get(bid).origin == "builtin"
+    assert f"template:{bid}" in r.errors
