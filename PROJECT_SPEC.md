@@ -78,6 +78,24 @@ All of these must respect the hard constraint in section 2 (weak 2014 laptops, n
 - **Authentication protocols (M11):** Basic, Digest, Negotiate, NTLM and Kerberos for servers and proxies (via libcurl/curl_cffi auth options with Windows SSPI for integrated login), with saved per-site credentials stored with DPAPI.
 - **Automatic antivirus checking (M11, see 6a)** and **simple installation wizard (M14, see section 5 M14 installer requirements).**
 
+### 6c. Also required in the final release (Tristin, 2026-10-27 8:17 PM; Motrix-class features)
+- **BitTorrent (M11):** libtorrent-based engine (CPU-light, no GPU) with magnet links, per-file selection inside a torrent, sequential download option, seeding ratio/time limits, DHT/PEX/LSD.
+- **Tracker management (M11):** built-in tracker list with automatic updates from public lists, per-torrent add/remove, and health checks (announce success, seeds/peers).
+- **Port mapping (M11):** UPnP and NAT-PMP for the torrent listen port, with a manual port option and a reachability test.
+- **Upload and download limits with speed profiles (M11):** global and per-task upload/download limits; named profiles (e.g. Normal, Gaming, Night) switchable from the tray and the scheduler.
+- **SQLite-backed sessions (M6):** move queue and task state to SQLite (WAL mode) so every download, torrent and LinkGrabber entry is restored after a restart or crash; keep the chunk-map sidecars for byte-level resume.
+- **Customizable dashboard (M14):** transfer stats (speed graph, totals per day), live activity, and rearrangeable task tiles.
+- **Notifications (M11):** native Windows toast notifications when downloads finish or fail, plus an in-app notification center with history.
+- **Plugin sandboxing and marketplace (M7):** declarative plugins plus script plugins run in a sandbox (QuickJS via a small CPU-only runtime, or restricted subprocesses) with fine-grained permissions (network hosts, file access, cookies) the user approves; an in-app plugin marketplace with signed plugins, ratings and updates.
+- **Browser extension one-click handoff (M12, see 6a/6b):** Chrome, Edge and Firefox (plus others) hand browser downloads to OpenGrab in one click.
+- **Official CLI (M13):** `opengrab` command-line client for everyday shell use and AI agents (add, list, pause, resume, remove, status, JSON output), talking to the token-authenticated local API.
+- **Headless server and secure pairing (M12):** Docker-ready headless server with device-code pairing for remote CLI, mobile and agent clients (no shared passwords; revocable device tokens).
+- **URL resolver plugins (M9):** extensible resolvers that extract media from supported sites (yt-dlp backed plus custom resolvers through the plugin system).
+- **Tray and launch at startup (M5/M14):** system tray with quick actions and an optional launch-at-startup setting (also offered in the installer).
+- **Languages (M14):** English and Simplified Chinese at launch, more through translation files (see 6b).
+- **Link handlers and file associations (M14 installer):** `opengrab://` and `magnet:` protocol handlers and `.torrent` (plus `.dlc`, `.crawljob`) file associations, each optional in the installer and in Settings.
+- **Search and navigation (M14, basic version in M6):** a command palette (Ctrl+K) and search box that finds features, settings, actions, downloads and plugins by name or keyword, jumps straight to the matching page or setting, and can run actions (e.g. "pause all", "add torrent"). Fuzzy matching, keyboard-first, works offline.
+
 ## 7. Licensing
 reimplement from public site behaviour; never port JD2 GPL plugin code; no AppWork Utilities; yt-dlp is Unlicense
 
