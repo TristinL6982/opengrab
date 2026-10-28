@@ -76,25 +76,26 @@ class DeclarativePlugin(SitePlugin):
 
         # Handle offline markers (default to empty list)
         if "offline_markers" in template:
-            if not isinstance(template["offline_markers"], list):
+            om = template["offline_markers"]
+            if not isinstance(om, list) or not all(isinstance(m, str) for m in om):
                 raise TemplateError("offline_markers must be a list of strings")
-            self.offline_markers = [str(m) for m in template["offline_markers"]]
+            self.offline_markers = list(om)
         else:
             self.offline_markers = []
 
         # Handle headers (default to empty dict)
         if "headers" in template:
-            if not isinstance(template["headers"], dict):
+            hd = template["headers"]
+            if not isinstance(hd, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in hd.items()):
                 raise TemplateError("headers must be a dict of string->string")
-            self.headers = {str(k): str(v) for k, v in template["headers"].items()}
+            self.headers = dict(hd)
         else:
             self.headers = {}
 
     def supports(self, url: str) -> bool:
-        return super().supports(url) and (
-                not self._url_pattern or
-                self._url_pattern.search(url)
-        )
+        if not super().supports(url):
+            return False
+        return self._url_pattern is None or self._url_pattern.search(url) is not None
 
     def grab(self, url: str, ctx: PluginContext) -> GrabResult:
         r = ctx.client.get(url)
@@ -119,7 +120,7 @@ class DeclarativePlugin(SitePlugin):
         if not filename:
             # Use last path segment as filename
             from urllib.parse import urlparse
-            parsed_url = urlparse(r.url)
+            parsed_url = urlparse(url)
             filename = os.path.basename(parsed_url.path)
 
         # Extract size (digits only, remove commas and spaces)
@@ -129,7 +130,7 @@ class DeclarativePlugin(SitePlugin):
             if m:
                 size_str = m.group(1)
                 # Remove commas and spaces
-                size_clean = re.sub(r'[,\\s]', '', size_str)
+                size_clean = re.sub(r'[,\s]', '', size_str)
                 try:
                     size = int(size_clean)
                 except ValueError:
@@ -183,7 +184,7 @@ def load_templates_dir(path: str) -> tuple[List[DeclarativePlugin], Dict[str, st
     seen_ids = set()
 
     for filename in files:
-        if not filename.endswith(".json"):
+        if not filename.lower().endswith(".json"):
             continue
 
         filepath = os.path.join(path, filename)

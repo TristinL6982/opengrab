@@ -26,6 +26,18 @@ class FakeClient:
         return self.responses.get(url, FakeResp(200, "", url))
 
 
+T = {
+    "id": "exhost",
+    "name": "ExHost",
+    "site": "exhost.com",
+    "url_pattern": r"/f/\w+",
+    "filename_regex": r'<h1 class="name">([^<]+)</h1>',
+    "size_regex": r'Size: ([\d,]+) bytes',
+    "direct_url_regex": r'href="([^"]+)" id="dl"',
+    "offline_markers": ["File not found"],
+    "headers": {"Referer": "https://exhost.com/"},
+}
+
 def test_supports():
     T = {
         "id": "exhost",
@@ -257,3 +269,33 @@ def test_load_templates_dir():
         plugins, errors = load_templates_dir("/non/existent/directory")
         assert plugins == []
         assert errors == {}
+
+def test_size_with_spaces_and_supports_is_bool_m7a_fix():
+    import copy
+    from opengrab.plugins.base import PluginContext as _PC
+    tpl = copy.deepcopy(T)
+    tpl["size_regex"] = r"Size: ([\d, ]+) bytes"
+    p = DeclarativePlugin(tpl)
+    class _R:
+        status_code = 200
+        text = '<h1 class="name">a.bin</h1> Size: 1 048 576 bytes <a href="/d/x" id="dl">'
+        url = "https://exhost.com/f/abc"
+    class _C:
+        def get(self, url, **kw):
+            return _R()
+    g = p.grab("https://exhost.com/f/abc", _PC(_C(), None))
+    assert g.size == 1048576
+    assert p.supports("https://exhost.com/f/abc") is True
+    assert p.supports("https://exhost.com/about") is False
+
+
+def test_non_string_markers_and_headers_rejected_m7a_fix():
+    import copy
+    bad1 = copy.deepcopy(T)
+    bad1["offline_markers"] = ["ok", 5]
+    with pytest.raises(TemplateError):
+        DeclarativePlugin(bad1)
+    bad2 = copy.deepcopy(T)
+    bad2["headers"] = {"Referer": 1}
+    with pytest.raises(TemplateError):
+        DeclarativePlugin(bad2)
