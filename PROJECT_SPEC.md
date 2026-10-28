@@ -104,3 +104,11 @@ cross-platform Python core, owner token, visible tray/clipboard capture, Docker 
 
 For M14 (installer): ship a downloadable setup .exe with an installer wizard (Inno Setup or similar). It offers the install location (default C:\Program Files\OpenGrab), an opt-in download of the small local OCR/captcha model plus a toggle to enable it by default, Start menu/desktop shortcuts, autostart, and link/protocol handling. Installed layout is organized (app\, plugins\, models\), user data lives in %APPDATA%\OpenGrab, and a proper uninstaller is registered.
 
+
+### 6d. Open-source captcha fallbacks (added Oct 28, 2026)
+Optional, free, CPU-only fallbacks inserted in the auto solver chain after ddddocr and before paid solvers/manual:
+- Second OCR engine for image/text captchas (Tesseract or a small ONNX captcha model), used when ddddocr fails or has low confidence.
+- reCAPTCHA audio-challenge solver (Buster-style): request the audio challenge and transcribe it offline with a small speech model (Vosk or Whisper tiny, CPU). Must fail gracefully when Google refuses audio.
+- Both opt-in, models downloaded on demand, no GPU required, must run on 2014-era laptops.
+- hCaptcha/Turnstile: no OSS solver; fallback remains the real-browser (Edge) solver + saved clearance cookie, then manual.
+Scheduled as M8 sub-tasks.
