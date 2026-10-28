@@ -23,12 +23,12 @@ def _filename_from_cd(value: str) -> str:
     """Extract filename from Content-Disposition header value."""
     # Look for filename*=UTF-8''<name>
     import re
-    match = re.search(r'filename\*=UTF-8\'\'(.+?)(?:;|$)', value, re.IGNORECASE)
+    match = re.search(r"filename\*=UTF-8''(.+?)(?:;|$)", value, re.IGNORECASE)
     if match:
         return unquote(match.group(1))
     
     # Look for filename="<name>" or filename=<name>
-    match = re.search(r'filename=[\'"]?([^\'";]+)[\'"]?(?:;|$)', value, re.IGNORECASE)
+    match = re.search(r"filename=[\"']?([^\"';]+)[\"']?(?:;|$)", value, re.IGNORECASE)
     if match:
         return match.group(1).strip()
     
