@@ -17,6 +17,7 @@ from urllib.parse import urlparse, urljoin, unquote
 from ..base import (SitePlugin, GrabResult, ResolveResult, PluginError,
                     CaptchaRequired, PluginContext)
 from .direct import FILE_EXTS, _filename_from_cd
+from ..dirindex import is_dir_index, parse_dir_index, split_entries
 
 
 def _meta_title(html: str) -> str:
@@ -110,6 +111,11 @@ class GenericPagePlugin(SitePlugin):
             return GrabResult(title=title or fname, filename=fname, size=size,
                               site=host, plugin_id=self.id,
                               direct_url=str(r.url))
+        # Check for directory index
+        if is_dir_index(html):
+            entries = parse_dir_index(html, str(r.url))
+            files, subdirs = split_entries(entries)
+            return GrabResult(title=title or url, site=host, plugin_id=self.id, children=[(u, name) for u, name in files[:500]], extra={"final_url": str(r.url), "dir_index": True, "subdirs": [u for u, _ in subdirs]})
         return GrabResult(
             title=title or url,
             site=host,
