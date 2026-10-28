@@ -63,10 +63,11 @@ class Settings(BaseModel):
     media_playlist_max_entries: int = 10000
 
     # captcha solving (unpaywalled: BYO keys, local OCR, or manual)
-    captcha_provider: str = "auto"     # auto|manual|2captcha|capmonster|capsolver|ddddocr
+    captcha_provider: str = "auto"     # auto|manual|2captcha|capmonster|capsolver|nopecha|ddddocr
     captcha_2captcha_key: str = ""
     captcha_capmonster_key: str = ""
     captcha_capsolver_key: str = ""
+    captcha_nopecha_key: str = ""
     captcha_manual_timeout_s: int = 120
     captcha_auto_failover: bool = True # try cheaper/faster solvers first, escalate
 

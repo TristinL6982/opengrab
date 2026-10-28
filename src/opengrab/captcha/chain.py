@@ -1,7 +1,7 @@
 """Solver registry / chain with failover.
 
 Priority order (lower number = earlier) is configurable per run.  The
-default 'auto' chain:  ddddocr (free, fast, text only) -> automatic paid solvers (2captcha, capmonster, capsolver)
+default 'auto' chain:  ddddocr (free, fast, text only) -> automatic paid solvers (2captcha, capmonster, capsolver, nopecha)
 (only if a key is configured) -> manual (UI).
 The engine uses the chain for OCR-able kinds and always falls back to
 'manual' so a captcha can never be a dead end.
@@ -13,7 +13,7 @@ import logging
 from .base import (
     BaseSolver, CaptchaRequest, CaptchaResult,
     ManualSolver, DdddOCRSolver, TwoCaptchaSolver,
-    CapMonsterSolver, CapSolverSolver,
+    CapMonsterSolver, CapSolverSolver, NopeCHASolver,
 )
 from ..settings import Settings
 
@@ -30,6 +30,7 @@ class SolverChain:
             TwoCaptchaSolver(settings),
             CapMonsterSolver(settings),
             CapSolverSolver(settings),
+            NopeCHASolver(settings),
         ]
 
     # -- selection -----------------------------------------------------------

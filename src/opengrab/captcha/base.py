@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import logging
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -341,3 +342,76 @@ class CapSolverSolver(BaseSolver):
                                      error=str(res.get("error") or "task failed"))
         return CaptchaResult(ok=False, provider=self.id,
                              error="timed out waiting for solution")
+
+
+class NopeCHASolver(BaseSolver):
+    id = "nopecha"
+    name = "NopeCHA"
+    kinds = ("text", "image", "recaptcha", "hcaptcha", "turnstile")
+    priority = 110
+    needs_key = True
+    poll_interval = 3.0
+    
+    def enabled(self) -> bool:
+        return bool(self.settings.captcha_nopecha_key)
+    
+    def solve(self, req: CaptchaRequest, timeout_s: float = 90.0, client=None) -> CaptchaResult:
+        key = self.settings.captcha_nopecha_key
+        if not client:
+            from ..http_client import HttpClient
+            from ..settings import Settings
+            client = HttpClient(Settings())
+        if req.kind in ("recaptcha", "hcaptcha", "turnstile"):
+            kind_map = {
+                "recaptcha": "recaptcha2",
+                "hcaptcha": "hcaptcha",
+                "turnstile": "turnstile"
+            }
+            type_ = kind_map[req.kind]
+            r = client.post("https://api.nopecha.com/token/", json_body={
+                "key": key,
+                "type": type_,
+                "sitekey": req.recaptcha_sitekey,
+                "url": req.site_url or "http://localhost"
+            })
+        else:
+            img_b64 = self.fetch_image_b64(req, client)
+            if not img_b64:
+                return CaptchaResult(ok=False, provider=self.id, error="nothing to send")
+            r = client.post("https://api.nopecha.com/", json_body={
+                "key": key,
+                "type": "textcaptcha",
+                "image_data": [img_b64]
+            })
+        
+        try:
+            created = r.json()
+        except Exception:
+            return CaptchaResult(ok=False, provider=self.id, error=f"bad response: {r.text[:200]}")
+            
+        if "error" in created or "data" not in created:
+            return CaptchaResult(ok=False, provider=self.id, 
+                                error=str(created.get("message") or created.get("error") or created))
+        
+        job_id = created["data"]
+        
+        # Poll for solution
+        t0 = time.time()
+        base = "https://api.nopecha.com/token/" if req.kind in ("recaptcha", "hcaptcha", "turnstile") else "https://api.nopecha.com/"
+        while time.time() - t0 < timeout_s:
+            time.sleep(self.poll_interval)
+            rr = client.get(base + "?" + urllib.parse.urlencode({"key": key, "id": job_id}))
+            try:
+                res = rr.json()
+            except Exception:
+                continue
+            if res.get("error") == 14:
+                continue  # Job incomplete
+            if "error" in res:
+                return CaptchaResult(ok=False, provider=self.id, error=str(res.get("message") or res.get("error")))
+            if "data" in res:
+                data = res["data"]
+                text = data[0] if isinstance(data, list) and data else data
+                return CaptchaResult(ok=True, text=str(text), provider=self.id, cost=0.001, raw={"id": job_id})
+        
+        return CaptchaResult(ok=False, provider=self.id, error="timeout")
