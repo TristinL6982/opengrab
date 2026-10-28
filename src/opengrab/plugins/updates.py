@@ -14,7 +14,6 @@ def version_tuple(v: str) -> tuple:
     return tuple(int(p) if p.isdigit() else 0 for p in parts)
 
 def plan_updates(installed: dict, index: dict) -> list:
-    installed_maps = {tpl["id"]: tpl for tpl in index.get("templates", []) if all(k in tpl for k in ("id", "version", "url", "sha256"))}
     result = []
     for entry in index.get("templates", []):
         # Skip entries missing any of the four keys
@@ -55,7 +54,18 @@ def check_and_update(installed: dict, index_url: str, fetch, dest_dir) -> dict:
     
     for entry in plan_updates(installed, index):
         try:
-            apply_update(entry, fetch(entry["url"]), dest_dir)
+            # For relative URLs in templates, construct the absolute path from index_url
+            # This is important because fetch expects the full URL to work with  
+            import urllib.parse
+            if not entry["url"].startswith(("http://", "https://")):
+                # Handle relative URLs by combining with base path of index_url
+                parsed_index = urllib.parse.urlparse(index_url)
+                base_url = f"{parsed_index.scheme}://{parsed_index.netloc}"
+                full_url = urllib.parse.urljoin(base_url, entry["url"])
+            else:
+                full_url = entry["url"]
+                
+            apply_update(entry, fetch(full_url), dest_dir)  
             updated.append(entry["id"])
         except Exception as e:
             failed[entry["id"]] = str(e)
