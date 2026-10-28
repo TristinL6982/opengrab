@@ -222,3 +222,23 @@ def test_ray_id_extraction():
     )
     assert response2.kind == ChallengeKind.CF_BLOCK
     # The ray_id in the current implementation isn't extracted from body, which is expected for this exercise
+
+def test_ray_id_from_body_and_on_js_challenge():
+    from opengrab.challenge import detect_challenge, ChallengeKind
+    body = "<html><title>Just a moment...</title><p>Ray ID: <code>8a1b2c3d4e5f6a7b</code></p></html>"
+    c = detect_challenge(503, {"Server": "cloudflare"}, body)
+    assert c.kind == ChallengeKind.CF_JS
+    assert c.ray_id == "8a1b2c3d4e5f6a7b"
+    c2 = detect_challenge(503, {"server": "cloudflare", "CF-RAY": "abc123def456-JNB"}, body)
+    assert c2.ray_id == "abc123def456-JNB"
+
+
+def test_cf_mitigated_header_case_insensitive_value():
+    from opengrab.challenge import detect_challenge, ChallengeKind
+    assert detect_challenge(200, {"CF-Mitigated": "Challenge"}, "").kind == ChallengeKind.CF_JS
+
+
+def test_body_limit_200k():
+    from opengrab.challenge import detect_challenge, ChallengeKind
+    body = "x" * 200000 + '<div class="g-recaptcha" data-sitekey="k"></div>'
+    assert detect_challenge(200, {}, body).kind == ChallengeKind.NONE
