@@ -18,16 +18,17 @@ def detect_container(filename: str) -> str | None:
 
 
 def decode_rsdf(data: bytes) -> list[str]:
-    # Remove all ASCII whitespace
+    # Remove all ASCII whitespace from data first  
     no_whitespace = re.sub(r"\s+", "", data.decode("ascii"))
+    
     try:
         hex_bytes = bytes.fromhex(no_whitespace)
     except Exception:
         raise ContainerError()
-    
+        
     if len(hex_bytes) == 0:
         raise ContainerError()
-    
+        
     cipher = AES.new(RSDF_KEY, AES.MODE_CFB, iv=RSDF_IV, segment_size=8)
     
     lines = hex_bytes.split(b"\n")
@@ -67,5 +68,5 @@ def encode_rsdf(links: list[str]) -> bytes:
         encrypted = cipher.encrypt(link.encode("utf-8"))
         encoded_line = base64.b64encode(encrypted).decode("ascii")
         encoded_lines.append(encoded_line)
-    
+        
     return "\n".join(encoded_lines).encode("ascii").hex().upper().encode("ascii")
