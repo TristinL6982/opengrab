@@ -1,212 +1,192 @@
-import subprocess
+"""M8m: offline audio captcha transcriber (ffmpeg + Vosk) and AudioCaptchaSolver.
+
+ffmpeg and vosk are never run: subprocess.run and the vosk module are faked.
+pytest's tmp_path is broken on the dev PC, so folders come from tempfile.mkdtemp.
+"""
 import shutil
-import os
+import subprocess
 import sys
 import tempfile
-from types import ModuleType
+import types
 
 import pytest
 
-from opengrab.captcha.audio import to_pcm16k, transcribe_vosk, AudioUnavailable
-from opengrab.captcha.base import AudioCaptchaSolver
+from opengrab.captcha import audio
+from opengrab.captcha.audio import AudioUnavailable, to_pcm16k, transcribe_vosk
+from opengrab.captcha.base import AudioCaptchaSolver, CaptchaRequest
+from opengrab.captcha.chain import SolverChain
 from opengrab.settings import Settings
-from opengrab.captcha import CaptchaRequest
 
 
-# Global for storing fake accept waveform lengths (to avoid scope issues)
-class FakeKaldiRecognizer:
-    """Fake KaldiRecognizer for testing."""
-    accept_waveform_lengths = []  # Track the lengths passed to AcceptWaveform
-    
-    def __init__(self, model, rate):
-        self.model = model
-        self.rate = rate
-        FakeKaldiRecognizer.accept_waveform_lengths = []  # Reset before each test
-        
-    def AcceptWaveform(self, b):
-        self.accept_waveform_lengths.append(len(b))
-        return True
-        
-    def FinalResult(self):
-        return '{"text": "  hello   world "}'
+def _fake_run(calls, returncode=0, stdout=b"", stderr=b""):
+    def fake(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], returncode, stdout=stdout, stderr=stderr)
+    return fake
 
 
-def test_to_pcm16k():
-    """Test to_pcm16k function."""
-    # Fake subprocess.run with correct return values
-    fake_calls = []
-    
-    def fake_subprocess_run(*args, **kwargs):
-        fake_calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args[0], 0, stdout=b"PCM", stderr=b"")
-    
-    # Test case a: Normal operation with ffmpeg path
-    with tempfile.TemporaryDirectory() as tmpdir:
-        fake_ffmpeg = os.path.join(tmpdir, "ff.exe")
-        with pytest.MonkeyPatch().context() as mp:
-            mp.setattr(subprocess, 'run', fake_subprocess_run)
-            mp.setattr(shutil, 'which', lambda n: fake_ffmpeg)  # Return the fake path
-            result = to_pcm16k(b"MP3", ffmpeg=fake_ffmpeg)
-                
-            assert result == b"PCM"
-            # Check the first arg in the command (should be the exe path)
-            assert fake_calls[0][0][0] == fake_ffmpeg
-            assert "16000" in fake_calls[0][0]
-            assert fake_calls[0][1]["input"] == b"MP3"
+def _fake_vosk(lengths, models):
+    mod = types.ModuleType("vosk")
+
+    class Model:
+        def __init__(self, path):
+            models.append(path)
+
+    class KaldiRecognizer:
+        def __init__(self, model, rate):
+            self.rate = rate
+
+        def AcceptWaveform(self, b):
+            lengths.append(len(b))
+            return True
+
+        def FinalResult(self):
+            return '{"text": "  hello   world "}'
+
+    mod.Model = Model
+    mod.KaldiRecognizer = KaldiRecognizer
+    return mod
 
 
-def test_to_pcm16k_errors():
-    """Test error conditions for to_pcm16k."""
-    
-    # Test case b: ffmpeg failure (non-zero return code)
-    def fake_subprocess_run_fail(*args, **kwargs):
-        return subprocess.CompletedProcess(args[0], 1, stdout=b"", stderr=b"bad")
-    
-    with pytest.MonkeyPatch().context() as mp:
-        mp.setattr(subprocess, 'run', fake_subprocess_run_fail)
-        mp.setattr(shutil, 'which', lambda n: None)  # Not found in PATH
-        with pytest.raises(AudioUnavailable, match="ffmpeg failed: bad"):
-            to_pcm16k(b"MP3")
-    
-    # Test case b: timeout error  
-    def fake_subprocess_run_timeout(*args, **kwargs):
+# a
+def test_to_pcm16k(monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_run(calls, 0, stdout=b"PCM"))
+    assert to_pcm16k(b"MP3", ffmpeg="C:\\ff.exe") == b"PCM"
+    args, kwargs = calls[0]
+    assert args[0][0] == "C:\\ff.exe"
+    assert "16000" in args[0]
+    assert kwargs["input"] == b"MP3"
+
+
+# b
+def test_to_pcm16k_errors(monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_run(calls, 1, stderr=b"bad"))
+    with pytest.raises(AudioUnavailable, match="ffmpeg failed: bad"):
+        to_pcm16k(b"MP3", ffmpeg="C:\\ff.exe")
+
+    def raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd="f", timeout=1)
-    
-    with pytest.MonkeyPatch().context() as mp:
-        mp.setattr(subprocess, 'run', fake_subprocess_run_timeout)
-        mp.setattr(shutil, 'which', lambda n: None)  # Not found in PATH
-        with pytest.raises(AudioUnavailable, match="ffmpeg timeout"):
-            to_pcm16k(b"MP3")
-    
-    # Test case b: ffmpeg not found  
-    with pytest.MonkeyPatch().context() as mp:
-        mp.setattr(shutil, 'which', lambda n: None)  # Not found in PATH
-        with pytest.raises(AudioUnavailable, match="ffmpeg not found"):
-            to_pcm16k(b"MP3")
+
+    monkeypatch.setattr(subprocess, "run", raise_timeout)
+    with pytest.raises(AudioUnavailable, match="ffmpeg timeout"):
+        to_pcm16k(b"MP3", ffmpeg="C:\\ff.exe")
+
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    with pytest.raises(AudioUnavailable, match="ffmpeg not found"):
+        to_pcm16k(b"MP3", ffmpeg="")
 
 
-def test_transcribe_vosk():
-    """Test transcribe_vosk function."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        model_path = os.path.join(tmpdir, "model")
-        os.makedirs(model_path)
-        
-        # Create a fake vosk module
-        fake_mod = ModuleType("vosk")
-        fake_mod.Model = lambda path: None  # Just need the class to exist
-        fake_mod.KaldiRecognizer = FakeKaldiRecognizer
-        
-        with pytest.MonkeyPatch().context() as mp:
-            mp.setitem(sys.modules, "vosk", fake_mod)
-            
-            # Test the function
-            pcm = b"x" * 20000
-            result = transcribe_vosk(pcm, model_path)
-            
-            assert result == "hello world"
-            # Check that the AcceptWaveform was called with the correct chunk sizes
-            assert FakeKaldiRecognizer.accept_waveform_lengths == [8000, 8000, 4000]
+# b2: a zero exit code with no PCM output is still a failure
+def test_to_pcm16k_empty_output(monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_run(calls, 0, stdout=b"", stderr=b"silent"))
+    with pytest.raises(AudioUnavailable, match="ffmpeg failed: silent"):
+        to_pcm16k(b"MP3", ffmpeg="C:\\ff.exe")
 
 
-def test_transcribe_vosk_errors():
-    """Test error conditions for transcribe_vosk."""
-    
-    # Test case d: model not found
-    with tempfile.TemporaryDirectory() as tmpdir:
-        model_path = os.path.join(tmpdir, "missing")
-        with pytest.raises(AudioUnavailable, match="vosk model not found"):
-            transcribe_vosk(b"test", model_path)
-            
-    # Test case d: vosk not installed
-    with tempfile.TemporaryDirectory() as tmpdir:
-        model_path = os.path.join(tmpdir, "model")
-        os.makedirs(model_path)
-        
-        with pytest.MonkeyPatch().context() as mp:
-            mp.setitem(sys.modules, "vosk", None)  # Vosk module not found
-            with pytest.raises(AudioUnavailable, match="vosk not installed"):
-                transcribe_vosk(b"test", model_path)
+# b3: ffmpeg path that cannot be executed
+def test_to_pcm16k_oserror(monkeypatch):
+    def raise_oserror(*args, **kwargs):
+        raise OSError("cannot execute")
+
+    monkeypatch.setattr(subprocess, "run", raise_oserror)
+    with pytest.raises(AudioUnavailable, match="cannot execute"):
+        to_pcm16k(b"MP3", ffmpeg="C:\\ff.exe")
 
 
-def test_audio_captcha_solver():
-    """Test AudioCaptchaSolver."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        settings = Settings()
-        
-        # Test case e: solver disabled by default
-        solver = AudioCaptchaSolver(settings)
-        assert not solver.enabled()
-        
-        # Test case e: solver enabled
-        settings.captcha_audio_enabled = True
-        settings.captcha_vosk_model_path = str(tmpdir)
-        assert solver.enabled()
-        
-        # Test case e: no audio in request - should fail
-        req = CaptchaRequest(kind="audio", extra={})
-        result = solver.solve(req)
-        assert not result.ok
-        assert "no audio" in result.error
-        
-        # Test case e: audio_b64 is not base64
-        req = CaptchaRequest(kind="audio", extra={"audio_b64": "invalid"})
-        result = solver.solve(req)
-        assert not result.ok
-        assert "bad audio data" in result.error
-        
-        # Test case e: successful solve with mocked transcribe
-        def mock_transcribe(data, model_path, ffmpeg=""):
-            return "abc"
-        
-        with pytest.MonkeyPatch().context() as mp:
-            mp.setattr("opengrab.captcha.audio.transcribe", mock_transcribe)
-            
-            req = CaptchaRequest(kind="audio", extra={"audio_b64": "VGEz"})  # "VA3" base64 encoded
-            result = solver.solve(req)
-            assert result.ok
-            assert result.text == "abc"
-            assert result.provider == "audio"
-        
-        # Test case e: transcribe raises AudioUnavailable
-        def mock_transcribe_2(data, model_path, ffmpeg=""):
-            raise AudioUnavailable("vosk not installed")
-            
-        with pytest.MonkeyPatch().context() as mp:
-            mp.setattr("opengrab.captcha.audio.transcribe", mock_transcribe_2)
-            
-            req = CaptchaRequest(kind="audio", extra={"audio_b64": "VGEz"})
-            result = solver.solve(req)
-            assert not result.ok
-            assert "vosk not installed" in result.error
-            
-        # Test case e: transcribe returns empty
-        def mock_transcribe_3(data, model_path, ffmpeg=""):
-            return ""
-            
-        with pytest.MonkeyPatch().context() as mp:
-            mp.setattr("opengrab.captcha.audio.transcribe", mock_transcribe_3)
-            
-            req = CaptchaRequest(kind="audio", extra={"audio_b64": "VGEz"})
-            result = solver.solve(req)
-            assert not result.ok
-            assert "no speech recognised" in result.error
+# c
+def test_transcribe_vosk(monkeypatch):
+    model_dir = tempfile.mkdtemp()
+    lengths, models = [], []
+    monkeypatch.setitem(sys.modules, "vosk", _fake_vosk(lengths, models))
+    assert transcribe_vosk(b"x" * 20000, model_dir) == "hello world"
+    assert lengths == [8000, 8000, 4000]
+    assert models == [model_dir]
 
 
-def test_solver_chain():
-    """Test AudioCaptchaSolver is in the SolverChain."""
-    settings = Settings()
-    from opengrab.captcha.chain import SolverChain
-    
-    # Test case f: solver chain contains audio exactly once after tesseract
-    chain = SolverChain(settings)
-    solvers_ids = [s.id for s in chain.solvers]
-    
-    assert "audio" in solvers_ids
-    assert solvers_ids.count("audio") == 1
-    
-    # Find positions of audio and tesseract solvers
-    tesseract_pos = solvers_ids.index("tesseract")
-    audio_pos = solvers_ids.index("audio")
-    
-    # Audio should come directly after tesseract 
-    assert audio_pos == tesseract_pos + 1
+# d
+def test_transcribe_vosk_errors(monkeypatch):
+    model_dir = tempfile.mkdtemp()
+    with pytest.raises(AudioUnavailable, match="vosk model not found"):
+        transcribe_vosk(b"...", model_dir + "\\missing")
+    monkeypatch.setitem(sys.modules, "vosk", None)
+    with pytest.raises(AudioUnavailable, match="vosk not installed"):
+        transcribe_vosk(b"...", model_dir)
+
+
+# d2: an invalid model folder makes vosk.Model raise; that must become AudioUnavailable
+def test_transcribe_vosk_bad_model(monkeypatch):
+    model_dir = tempfile.mkdtemp()
+    mod = types.ModuleType("vosk")
+
+    def bad_model(path):
+        raise Exception("Failed to create a model")
+
+    mod.Model = bad_model
+    monkeypatch.setitem(sys.modules, "vosk", mod)
+    with pytest.raises(AudioUnavailable, match="vosk model failed to load: Failed to create a model"):
+        transcribe_vosk(b"...", model_dir)
+
+
+# transcribe() chains ffmpeg conversion into vosk
+def test_transcribe_pipeline(monkeypatch):
+    model_dir = tempfile.mkdtemp()
+    calls, lengths, models = [], [], []
+    monkeypatch.setattr(subprocess, "run", _fake_run(calls, 0, stdout=b"y" * 9000))
+    monkeypatch.setitem(sys.modules, "vosk", _fake_vosk(lengths, models))
+    assert audio.transcribe(b"MP3", model_dir, "C:\\ff.exe") == "hello world"
+    assert calls[0][0][0][0] == "C:\\ff.exe"
+    assert lengths == [8000, 1000]
+
+
+# e
+def test_audio_captcha_solver(monkeypatch):
+    s = Settings()
+    solver = AudioCaptchaSolver(s)
+    assert solver.enabled() is False
+    s.captcha_audio_enabled = True
+    s.captcha_vosk_model_path = tempfile.mkdtemp()
+    assert solver.enabled() is True
+
+    r = solver.solve(CaptchaRequest(kind="audio", extra={}))
+    assert r.ok is False
+    assert r.error == "no audio"
+
+    r = solver.solve(CaptchaRequest(kind="audio", extra={"audio_b64": "invalid"}))
+    assert r.ok is False
+    assert r.error == "bad audio data"
+
+    seen = []
+
+    def ok_transcribe(d, m, f=""):
+        seen.append((d, m, f))
+        return "abc"
+
+    monkeypatch.setattr(audio, "transcribe", ok_transcribe)
+    r = solver.solve(CaptchaRequest(kind="audio", extra={"audio_b64": "TVAz"}))
+    assert r.ok is True
+    assert r.text == "abc"
+    assert r.provider == "audio"
+    assert seen == [(b"MP3", s.captcha_vosk_model_path, "")]
+
+    def unavailable(d, m, f=""):
+        raise AudioUnavailable("vosk not installed")
+
+    monkeypatch.setattr(audio, "transcribe", unavailable)
+    r = solver.solve(CaptchaRequest(kind="audio", extra={"audio_b64": "TVAz"}))
+    assert r.ok is False
+    assert r.error == "vosk not installed"
+
+    monkeypatch.setattr(audio, "transcribe", lambda d, m, f="": "")
+    r = solver.solve(CaptchaRequest(kind="audio", extra={"audio_b64": "TVAz"}))
+    assert r.ok is False
+    assert r.error == "no speech recognised"
+
+
+# f
+def test_solver_chain_order():
+    ids = [x.id for x in SolverChain(Settings()).solvers]
+    assert ids.count("audio") == 1
+    assert ids.index("audio") == ids.index("tesseract") + 1
