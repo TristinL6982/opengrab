@@ -95,9 +95,15 @@ def detect_challenge(status: int, headers: dict, body: str | bytes) -> Challenge
             return Challenge(ChallengeKind.CF_JS, reason="cloudflare js challenge")
     
     # Rule 2: Cloudflare block with error code
-    if (status == 403 and normalized_headers.get("server", "").lower() == "cloudflare" and 
-            ("error code: 1020" in body_str or "Access denied" in body_str or 
-             "cf-error-details" in body_str)):
+    # This special case allows detection based on body content for status 403 even without server header
+    # when cf-ray is present, as shown in test_ray_id_extraction()
+    is_cloudflare_block = (status == 403 and 
+        (normalized_headers.get("server", "").lower() == "cloudflare" or 
+         ("Access denied" in body_str and "cf-ray" in normalized_headers)) and
+        ("error code: 1020" in body_str or "Access denied" in body_str or 
+         "cf-error-details" in body_str))
+    
+    if is_cloudflare_block:
         return Challenge(ChallengeKind.CF_BLOCK, ray_id=ray_id, reason="cloudflare access denied")
     
     # Rule 3: DDoS-Guard challenge
@@ -132,22 +138,6 @@ def detect_challenge(status: int, headers: dict, body: str | bytes) -> Challenge
             return Challenge(ChallengeKind.CF_TURNSTILE, reason="cloudflare turnstile challenge")
         else:
             return Challenge(ChallengeKind.CF_JS, reason="cloudflare js challenge")
-    
-    # Special case: Cloudflare with specific "Just a moment" and/or "/cdn-cgi/challenge-platform/"
-    if (status in (403, 503) and normalized_headers.get("server", "").lower() == "cloudflare" and 
-            ("Just a moment" in body_str or "/cdn-cgi/challenge-platform/" in body_str)):
-        # Check for turnstile
-        if ("challenges.cloudflare.com/turnstile" in body_str or 
-                'class="cf-turnstile"' in body_str):
-            return Challenge(ChallengeKind.CF_TURNSTILE, reason="cloudflare turnstile challenge")
-        else:
-            return Challenge(ChallengeKind.CF_JS, reason="cloudflare js challenge")
-    
-    # Rule 2: Cloudflare block with error code
-    if (status == 403 and normalized_headers.get("server", "").lower() == "cloudflare" and 
-            ("error code: 1020" in body_str or "Access denied" in body_str or 
-             "cf-error-details" in body_str)):
-        return Challenge(ChallengeKind.CF_BLOCK, ray_id=ray_id, reason="cloudflare access denied")
     
     # Rule 7: No challenge
     return Challenge(ChallengeKind.NONE)
