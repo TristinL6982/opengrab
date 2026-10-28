@@ -3,7 +3,7 @@ import os
 import shutil
 import subprocess
 
-ROOT = "C:/Users/trist/opengrab"
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STATIC = os.path.join(ROOT, "src", "opengrab", "ui", "static")
 PALETTE = os.path.join(STATIC, "palette.js")
 NODE = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"

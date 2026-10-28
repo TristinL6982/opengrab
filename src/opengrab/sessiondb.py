@@ -13,10 +13,26 @@ class SessionDB:
         self._conn = None
         
         # Open connection and set up database
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30.0)
+        self._conn.execute("PRAGMA busy_timeout=30000")
+        # Switching to WAL needs an exclusive lock and SQLite does not use the
+        # busy handler for it, so retry briefly when another connection is
+        # opening the same file at the same moment.
+        for attempt in range(200):
+            try:
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e) or attempt == 199:
+                    raise
+                time.sleep(0.05)
         self._conn.execute("PRAGMA foreign_keys=ON")
         
+        # Take the write lock up front: a read-then-write (SELECT then INSERT)
+        # in a deferred transaction fails with "database is locked" right away
+        # when another connection is writing, because SQLite skips the busy
+        # handler for lock upgrades.
+        self._conn.execute("BEGIN IMMEDIATE")
         # Create tables if they don't exist
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS meta (
@@ -54,7 +70,7 @@ class SessionDB:
         
         # Initialize schema version if not present
         if not result:
-            self._conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+            self._conn.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
         
         self._conn.commit()
     
