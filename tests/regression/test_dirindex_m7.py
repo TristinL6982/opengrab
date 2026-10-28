@@ -91,3 +91,8 @@ def test_single_quoted_href():
     expected = [("https://mirror.invalid/pub/c.txt", "c.txt")]
     
     assert result == expected
+
+def test_is_dir_index_h1_when_title_differs():
+    from opengrab.plugins.dirindex import is_dir_index
+    assert is_dir_index('<html><title>Mirror</title><h1>Index of /x/</h1></html>') is True
+

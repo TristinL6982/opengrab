@@ -15,20 +15,11 @@ def is_dir_index(html: str) -> bool:
     Returns:
         True if the page is a directory index, False otherwise
     """
-    # Look for title tag
-    title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
-    
-    # If no title found, look for first h1 tag
-    if not title_match:
-        h1_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.IGNORECASE | re.DOTALL)
-        if h1_match:
-            h1_text = h1_match.group(1).strip()
-            return h1_text.lower().startswith("index of ")
-        return False
-    
-    # Check title text
-    title_text = title_match.group(1).strip()
-    return title_text.lower().startswith("index of ")
+    for tag in ("title", "h1"):
+        m = re.search(r"<%s[^>]*>(.*?)</%s>" % (tag, tag), html, re.IGNORECASE | re.DOTALL)
+        if m and html_module.unescape(m.group(1)).strip().lower().startswith("index of "):
+            return True
+    return False
 
 
 def parse_dir_index(html: str, base_url: str) -> list[tuple[str, str]]:
