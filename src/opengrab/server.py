@@ -986,8 +986,10 @@ def _make_handler(srv: ApiServer):
                     },
                 })
             if p == "/api/plugins":
-                return self._json({"plugins": mgr.registry.snapshot(),
-                                   "errors": mgr.registry.errors_snapshot()})
+                snap = mgr.registry.snapshot()
+                return self._json({"plugins": snap,
+                                   "errors": mgr.registry.errors_snapshot(),
+                                   "health": {d["id"]: mgr.registry.health_for(d["id"]) for d in snap}})
             if p == "/api/accounts":
                 return self._json(mgr.accounts.snapshot())
             if p == "/api/filters":
