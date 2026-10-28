@@ -1,13 +1,14 @@
 # PyInstaller onedir build. Run from this directory with:
 #   py -3.12 -m PyInstaller --clean OpenGrab.spec
 from pathlib import Path
+import os
 from PyInstaller.utils.hooks import collect_all
 
 ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 UI = SRC / "opengrab" / "ui" / "static"
 
-datas = [(str(UI), "ui/static")]
+datas = [(str(UI), "ui/static"), (os.path.join(SPECPATH, "..", "src", "opengrab", "assets"), "opengrab/assets")]
 binaries = []
 hiddenimports = ["webview", "pystray", "PIL", "curl_cffi", "yt_dlp", "ddddocr", "py7zr", "rarfile", "opengrab.smoke", "opengrab.engine.archives", "opengrab.engine.packagizer"]
 for package in ("yt_dlp", "ddddocr", "curl_cffi", "webview", "pystray", "py7zr"):
@@ -28,6 +29,7 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [], exclude_binaries=True, name="OpenGrab",
     debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
-    console=True,
+    console=False,
+    icon=os.path.join(SPECPATH, "opengrab_32.png"),
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="OpenGrab")
