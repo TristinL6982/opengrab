@@ -27,8 +27,8 @@ def _filename_from_cd(value: str) -> str:
     if match:
         return unquote(match.group(1))
     
-    # Look for filename="<name>" or filename=<name>
-    match = re.search(r"filename=[\"']?([^\"';]+)[\"']?(?:;|$)", value, re.IGNORECASE)
+    # Look for filename="name" or filename=name pattern - strip quotes and whitespace, stop at ";"
+    match = re.search(r'filename=[\'"]?([^\'";]+)[\'"]?(?:;|$)', value, re.IGNORECASE)
     if match:
         return match.group(1).strip()
     
