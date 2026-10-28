@@ -330,44 +330,40 @@ class DownloadManager:
 
     def _resolve(self, link: Link, plugin, ctx: PluginContext) -> None:
         if link.direct_url:
+            # Already resolved: the plugin is not called and no health is recorded.
             link.status = LinkStatus.WAITING
-            # The early "if link.direct_url:" return does not call plugin.resolve and must record nothing.
             return
         if link.status in (LinkStatus.CAPTCHA, LinkStatus.LOGIN,
                            LinkStatus.PAYWALL, LinkStatus.SKIPPED):
             return
+        pid = getattr(plugin, "id", "?")
         try:
             r = plugin.resolve(link.url, ctx)
-            if r.url:
-                link.direct_url = r.url
-                link.direct_headers = dict(r.headers or {})
-                if r.filename:
-                    link.filename = r.filename
-                if r.size:
-                    link.size = r.size
-                if r.children and not link.children:
-                    link.children = [[str(u), str(t)] for u, t in r.children]
-                link.status = LinkStatus.WAITING
-                # Record successful resolution when setting link.status = LinkStatus.WAITING after calling plugin.resolve  
-                self.registry.record_result(getattr(plugin, "id", "?"), True)
-            elif r.children:
-                # package parent: the children carry the download
-                link.status = LinkStatus.WAITING
-                # Record successful resolution when setting link.status = LinkStatus.WAITING after calling plugin.resolve 
-                self.registry.record_result(getattr(plugin, "id", "?"), True)
-            else:
-                # Before raising the "produced no direct url and no children" PluginError, call self.registry.record_result(getattr(plugin, "id", "?"), False, "no direct url and no children").
-                self.registry.record_result(getattr(plugin, "id", "?"), False, "no direct url and no children")
-                raise PluginError(
-                    f"plugin '{getattr(plugin, 'id', '?')}' produced no direct "
-                    "url and no children")
         except (CaptchaRequired, LoginRequired, PaywallRequired):
-            # Do not record anything for these exceptions
+            # User-action states are not plugin failures: record nothing.
             raise
         except Exception as e:
-            # For other exceptions, record the failure and re-raise
-            self.registry.record_result(getattr(plugin, "id", "?"), False, str(e))
+            self.registry.record_result(pid, False, str(e))
             raise
+        if r.url:
+            link.direct_url = r.url
+            link.direct_headers = dict(r.headers or {})
+            if r.filename:
+                link.filename = r.filename
+            if r.size:
+                link.size = r.size
+            if r.children and not link.children:
+                link.children = [[str(u), str(t)] for u, t in r.children]
+            link.status = LinkStatus.WAITING
+            self.registry.record_result(pid, True)
+        elif r.children:
+            # package parent: the children carry the download
+            link.status = LinkStatus.WAITING
+            self.registry.record_result(pid, True)
+        else:
+            self.registry.record_result(pid, False, "no direct url and no children")
+            raise PluginError(
+                f"plugin '{pid}' produced no direct url and no children")
 
     # ------------------------------------------------------------- download
     def _ready_put(self, link_id: str) -> None:
