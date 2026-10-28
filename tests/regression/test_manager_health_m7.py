@@ -4,7 +4,7 @@ from pathlib import Path
 from opengrab.engine.manager import DownloadManager
 from opengrab.settings import Settings
 from opengrab.models import Link
-from opengrab.plugins.base import PluginContext, CaptchaRequired, LoginRequired, PaywallRequired, PluginError
+from opengrab.plugins.base import PluginContext, CaptchaRequired, LoginRequired, PaywallRequired, PluginError, ResolveResult
 from opengrab import models
 
 def test_resolve_returns_result():
@@ -23,7 +23,7 @@ def test_resolve_returns_result():
             
         def resolve(self, url, ctx):
             # Simulate a successful resolution with direct URL
-            return models.LinkResolveResult(url="https://example.com/file.zip")
+            return ResolveResult(url="https://example.com/file.zip")
     
     # Create test link
     link = Link(url="https://example.com/test")
@@ -90,7 +90,7 @@ def test_resolve_returns_no_url_and_no_children():
             
         def resolve(self, url, ctx):
             # Return empty result - no direct_url or children
-            return models.LinkResolveResult()
+            return ResolveResult(url="", children=[])
     
     # Create test link with no children to start
     link = Link(url="https://example.com/test")
@@ -127,7 +127,7 @@ def test_resolve_raises_captcha_required():
             
         def resolve(self, url, ctx):
             raise CaptchaRequired(image_b64="fake_image_data", site_url="https://example.com")
-
+    
     # Create test link
     link = Link(url="https://example.com/test")
     

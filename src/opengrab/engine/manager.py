@@ -349,14 +349,16 @@ class DownloadManager:
                 if r.children and not link.children:
                     link.children = [[str(u), str(t)] for u, t in r.children]
                 link.status = LinkStatus.WAITING
-                # Record successful resolution when setting link.status = LinkStatus.WAITING after calling plugin.resolve (both the r.url branch and the children branch)
+                # Record successful resolution when setting link.status = LinkStatus.WAITING after calling plugin.resolve  
                 self.registry.record_result(getattr(plugin, "id", "?"), True)
-            elif link.children:
+            elif r.children:
                 # package parent: the children carry the download
                 link.status = LinkStatus.WAITING
-                # Record successful resolution when setting link.status = LinkStatus.WAITING after calling plugin.resolve (both the r.url branch and the children branch)        
+                # Record successful resolution when setting link.status = LinkStatus.WAITING after calling plugin.resolve 
                 self.registry.record_result(getattr(plugin, "id", "?"), True)
             else:
+                # Before raising the "produced no direct url and no children" PluginError, call self.registry.record_result(getattr(plugin, "id", "?"), False, "no direct url and no children").
+                self.registry.record_result(getattr(plugin, "id", "?"), False, "no direct url and no children")
                 raise PluginError(
                     f"plugin '{getattr(plugin, 'id', '?')}' produced no direct "
                     "url and no children")
@@ -367,7 +369,6 @@ class DownloadManager:
             # For other exceptions, record the failure and re-raise
             self.registry.record_result(getattr(plugin, "id", "?"), False, str(e))
             raise
-        # Before raising the "produced no direct url and no children" PluginError, call self.registry.record_result(getattr(plugin, "id", "?"), False, "no direct url and no children").
         # The early "if link.direct_url:" return does not call plugin.resolve and must record nothing.
 
     # ------------------------------------------------------------- download
