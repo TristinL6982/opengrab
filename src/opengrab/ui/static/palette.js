@@ -46,175 +46,127 @@ function ogPaletteRank(query, items) {
 
 // Command palette UI logic
 if (typeof document !== "undefined") {
-  const paletteOverlay = document.getElementById('palette');
-  const inputEl = document.getElementById('palette-input');
-  const listEl = document.getElementById('palette-list');
-  
+  const paletteOverlay = document.getElementById("palette");
+  const inputEl = document.getElementById("palette-input");
+  const listEl = document.getElementById("palette-list");
+  let commands = [];
+  let shown = [];
+
+  function allLinks() {
+    return (typeof S !== "undefined" && S.links) ? Array.from(S.links.values()) : [];
+  }
+
+  async function postEach(links, action) {
+    for (const l of links) {
+      await api(`/api/links/${l.id}/${action}`, "POST");
+    }
+  }
+
   function buildCommands() {
-    const commands = [];
-    
-    // Tab navigation commands
-    const tabs = $$('[data-tab]');
-    tabs.forEach(tab => {
-      const label = tab.textContent.trim();
-      commands.push({
-        title: `Go to ${label}`,
-        run: () => { tab.click(); }
-      });
+    const cmds = [];
+    $$("#tabs .tab[data-tab]").forEach(tab => {
+      cmds.push({ title: `Go to ${tab.textContent.trim()}`, run: () => tab.click() });
     });
-    
-    // Settings commands
-    const settingsTab = document.getElementById('tab-settings');
-    if (settingsTab) {
-      const settingLabels = settingsTab.querySelectorAll('label');
-      settingLabels.forEach(labelEl => {
-        const text = labelEl.textContent.trim();
-        commands.push({
+    const settings = document.getElementById("tab-settings");
+    if (settings) {
+      settings.querySelectorAll("label").forEach(labelEl => {
+        const text = labelEl.textContent.trim().replace(/\s+/g, " ");
+        if (!text) return;
+        cmds.push({
           title: `Setting: ${text}`,
           run: () => {
-            // Click settings tab
-            document.querySelector('[data-tab="settings"]').click();
-            // Focus the corresponding input or select element
-            const input = labelEl.nextElementSibling;
-            if (input && (input.tagName === 'INPUT' || input.tagName === 'SELECT')) {
-              input.focus();
-            }
+            $('.tab[data-tab="settings"]').click();
+            const field = labelEl.querySelector("input, select, textarea")
+              || (labelEl.htmlFor && document.getElementById(labelEl.htmlFor));
+            if (field) field.focus();
           }
         });
       });
     }
-    
-    // Download commands (links)
-    if (S && S.links) {
-      S.links.forEach(link => {
-        const name = link.name || link.url;
-        commands.push({
-          title: `Download: ${name}`,
-          run: () => {
-            document.querySelector('[data-tab="all"]').click();
-          }
-        });
+    allLinks().forEach(link => {
+      cmds.push({
+        title: `Download: ${link.name || link.url}`,
+        keywords: link.url || "",
+        run: () => $('.tab[data-tab="all"]').click()
       });
-    }
-    
-    // Actions
-    commands.push(
-      { title: "Pause all", run: () => fetch('/api/links/pause', { method: 'POST' }).catch(e => toast(e.message)) },
-      { title: "Resume all", run: () => fetch('/api/links/resume', { method: 'POST' }).catch(e => toast(e.message)) },
-      { title: "Clear finished", run: () => document.getElementById('btn-clear-finished').click() }
+    });
+    cmds.push(
+      { title: "Pause all", keywords: "stop halt", run: () =>
+          postEach(allLinks().filter(l => l.status === "downloading" || l.status === "waiting"), "pause") },
+      { title: "Resume all", keywords: "start continue", run: () =>
+          postEach(allLinks().filter(l => l.status === "paused"), "resume") },
+      { title: "Clear finished", keywords: "remove completed", run: () =>
+          document.getElementById("btn-clear-finished").click() }
     );
-    
-    return commands;
+    return cmds;
   }
-  
-  function updatePalette(query) {
-    const items = buildCommands();
-    const rankedItems = ogPaletteRank(query, items);
-    
+
+  function runCommand(title) {
+    const cmd = commands.find(c => c.title === title);
+    closePalette();
+    if (!cmd) return;
+    try {
+      const r = cmd.run();
+      if (r && typeof r.catch === "function") r.catch(e => toast(String(e && e.message || e)));
+    } catch (e) {
+      toast(String(e && e.message || e));
+    }
+  }
+
+  function render() {
+    shown = ogPaletteRank(inputEl.value, commands);
     listEl.replaceChildren();
-    rankedItems.forEach(title => {
-      const li = document.createElement('li');
+    shown.forEach((title, i) => {
+      const li = document.createElement("li");
       li.textContent = title;
-      li.addEventListener('click', () => {
-        try {
-          const cmd = items.find(i => i.title === title);
-          if (cmd) cmd.run();
-        } catch (e) {
-          toast(e.message);
-        }
-        paletteOverlay.classList.add('hidden');
-      });
+      if (i === 0) li.classList.add("sel");
+      li.addEventListener("mousedown", e => e.preventDefault());
+      li.addEventListener("click", () => runCommand(title));
       listEl.appendChild(li);
     });
-    
-    if (listEl.children.length > 0) {
-      listEl.children[0].classList.add('sel');
-    }
   }
-  
-  let currentCommands = [];
-  
+
+  function moveSel(delta) {
+    const items = Array.from(listEl.children);
+    if (!items.length) return;
+    let i = items.findIndex(li => li.classList.contains("sel"));
+    if (i >= 0) items[i].classList.remove("sel");
+    i = Math.max(0, Math.min(items.length - 1, (i < 0 ? 0 : i + delta)));
+    items[i].classList.add("sel");
+    items[i].scrollIntoView({ block: "nearest" });
+  }
+
+  function isOpen() { return !paletteOverlay.classList.contains("hidden"); }
+
   function openPalette() {
-    paletteOverlay.classList.remove('hidden');
-    inputEl.value = '';
-    updatePalette('');
+    commands = buildCommands();
+    inputEl.value = "";
+    paletteOverlay.classList.remove("hidden");
+    render();
     inputEl.focus();
   }
-  
-  function closePalette() {
-    paletteOverlay.classList.add('hidden');
-  }
-  
-  function handleKeyDown(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+
+  function closePalette() { paletteOverlay.classList.add("hidden"); }
+
+  document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
       e.preventDefault();
-      openPalette();
+      if (isOpen()) closePalette(); else openPalette();
       return;
     }
-    
-    if (paletteOverlay.classList.contains('hidden')) return;
-    
-    switch (e.key) {
-      case 'Escape':
-        closePalette();
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        const currentSel = listEl.querySelector('li.sel');
-        if (currentSel) {
-          const prev = currentSel.previousElementSibling;
-          if (prev) {
-            currentSel.classList.remove('sel');
-            prev.classList.add('sel');
-          }
-        }
-        break;
-      case 'ArrowDown':
-        e.preventDefault();
-        const currentSel2 = listEl.querySelector('li.sel');
-        if (currentSel2) {
-          const next = currentSel2.nextElementSibling;
-          if (next) {
-            currentSel2.classList.remove('sel');
-            next.classList.add('sel');
-          }
-        } else {
-          const first = listEl.firstElementChild;
-          if (first) first.classList.add('sel');
-        }
-        break;
-      case 'Enter':
-        e.preventDefault();
-        const sel = listEl.querySelector('li.sel');
-        if (sel) {
-          try {
-            // Find the command by title from items used in updatePalette
-            const cmd = currentCommands.find(c => c.title === sel.textContent);
-            if (cmd) cmd.run();
-          } catch (e) {
-            toast(e.message);
-          }
-          closePalette();
-        }
-        break;
+    if (!isOpen()) return;
+    if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); moveSel(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveSel(-1); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      const sel = listEl.querySelector("li.sel");
+      if (sel) runCommand(sel.textContent);
     }
-  }
-  
-  inputEl.addEventListener('input', () => {
-    updatePalette(inputEl.value);
   });
-  
-  document.addEventListener('keydown', handleKeyDown);
-  
-  // Ensure updatePalette is called correctly
-  function handlePaletteInput() {
-    const query = inputEl.value;
-    const items = buildCommands();
-    currentCommands = items; // Store for reference
-    updatePalette(query);
-  }
-  
-  inputEl.addEventListener('input', handlePaletteInput);
+
+  inputEl.addEventListener("input", render);
+  paletteOverlay.addEventListener("click", e => { if (e.target === paletteOverlay) closePalette(); });
 }
 
 // Export for Node.js usage
