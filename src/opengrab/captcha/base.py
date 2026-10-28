@@ -19,6 +19,9 @@ import base64
 import logging
 import time
 import urllib.parse
+import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -415,3 +418,59 @@ class NopeCHASolver(BaseSolver):
                 return CaptchaResult(ok=True, text=str(text), provider=self.id, cost=0.001, raw={"id": job_id})
         
         return CaptchaResult(ok=False, provider=self.id, error="timeout")
+
+
+class TesseractSolver(BaseSolver):
+    id = "tesseract"
+    name = "Local OCR (Tesseract)"
+    kinds = ("text", "image")
+    priority = 20
+    needs_key = False
+
+    def find_binary(self) -> str:
+        p = (self.settings.captcha_tesseract_path or "").strip()
+        if p:
+            return p if os.path.isfile(p) else ""
+        w = shutil.which("tesseract")
+        if w:
+            return w
+        for c in (r"C:\Program Files\Tesseract-OCR\tesseract.exe", 
+                  r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"):
+            if os.path.isfile(c):
+                return c
+        return ""
+
+    def enabled(self) -> bool:
+        return bool(self.settings.captcha_tesseract_enabled) and bool(self.find_binary())
+
+    def solve(self, req, timeout_s=90.0, client=None):
+        img_b64 = self.fetch_image_b64(req, client)
+        if not img_b64:
+            return CaptchaResult(ok=False, provider=self.id, error="no image to OCR")
+        
+        exe = self.find_binary()
+        if not exe:
+            return CaptchaResult(ok=False, provider=self.id, error="tesseract not found")
+            
+        try:
+            img = base64.b64decode(img_b64)
+        except Exception:
+            return CaptchaResult(ok=False, provider=self.id, error="bad image data")
+            
+        try:
+            p = subprocess.run([exe, "stdin", "stdout", "--psm", "7", "-c", "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"], 
+                                input=img, capture_output=True, timeout=min(float(timeout_s), 30.0))
+        except subprocess.TimeoutExpired:
+            return CaptchaResult(ok=False, provider=self.id, error="tesseract timeout")
+        except OSError as e:
+            return CaptchaResult(ok=False, provider=self.id, error=str(e))
+            
+        if p.returncode != 0:
+            return CaptchaResult(ok=False, provider=self.id, 
+                                error="tesseract failed: " + p.stderr.decode("utf-8", "replace")[:200])
+        
+        text = "".join(p.stdout.decode("utf-8", "replace").split())
+        if not text:
+            return CaptchaResult(ok=False, provider=self.id, error="OCR returned empty")
+        else:
+            return CaptchaResult(ok=True, text=text, provider=self.id)

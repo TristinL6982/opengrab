@@ -68,6 +68,8 @@ class Settings(BaseModel):
     captcha_capmonster_key: str = ""
     captcha_capsolver_key: str = ""
     captcha_nopecha_key: str = ""
+    captcha_tesseract_enabled: bool = False   # opt-in second local OCR
+    captcha_tesseract_path: str = ""          # empty = auto-detect
     captcha_manual_timeout_s: int = 120
     captcha_auto_failover: bool = True # try cheaper/faster solvers first, escalate
 
