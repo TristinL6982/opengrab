@@ -65,9 +65,7 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
     if options is None:
         options = SpiderOptions()
     
-    # Ensure extensions in options are lowercase for comparison
-    if options.extensions:
-        options.extensions = tuple(ext.lower() for ext in options.extensions)
+    extensions = tuple(ext.lower() for ext in options.extensions)
     
     pages = []
     files = []
@@ -104,7 +102,7 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
         
         for link in extract_links(body, url):
             # Check if it's a file (extension in options.extensions)
-            if _extension(link) in options.extensions:
+            if _extension(link) in extensions:
                 # Skip based on exclude regex
                 if any(re.search(pattern, link) for pattern in options.exclude):
                     continue
@@ -114,7 +112,8 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
                 ):
                     continue
                 
-                files.append(link)
+                if link not in files:
+                    files.append(link)
             else:
                 # Page candidate
                 if options.same_domain:
@@ -127,7 +126,7 @@ def crawl(start_url: str, fetch: FetchFn, options: SpiderOptions = None) -> dict
                     continue
                 
                 # Only add to queue if we haven't exceeded max_depth
-                if depth + 1 <= options.max_depth:
+                if depth + 1 <= options.max_depth and link not in visited:
                     queue.append((link, depth + 1))
     
     return {"pages": pages, "files": files, "errors": errors}

@@ -37,7 +37,8 @@ def test_depth():
         fetch,
         SpiderOptions(max_depth=2, extensions=(".zip",)),
     )
-    assert "https://s.com/f2.zip" in result["files"]
+    assert result["pages"] == ["https://s.com/", "https://s.com/p1", "https://s.com/p2"]
+    assert result["files"] == ["https://s.com/f0.zip", "https://s.com/f1.zip", "https://s.com/f2.zip"]
 
 
 def test_same_domain():
@@ -46,6 +47,7 @@ def test_same_domain():
             "text/html",
             '<a href="https://other.com/page">other</a><a href="https://cdn.other.com/x.zip">zip</a>',
         ),
+        "https://other.com/page": ("text/html", "<p>no links</p>"),
     }
 
     def fetch(url):
@@ -68,7 +70,7 @@ def test_same_domain():
         fetch,
         SpiderOptions(extensions=(".zip",), same_domain=False),
     )
-    assert "https://other.com/page" in result["pages"]
+    assert result["pages"] == ["https://s.com/", "https://other.com/page"]
     assert result["files"] == ["https://cdn.other.com/x.zip"]
 
 
@@ -115,7 +117,8 @@ def test_errors_and_max_pages():
 
     # Missing page ends up in errors
     result = crawl("https://s.com/", fetch)
-    assert "https://s.com/missing" in result["errors"]
+    assert result["errors"] == ["https://s.com/missing"]
+    assert "https://s.com/missing" not in result["pages"]
 
     # JSON content type is visited but not parsed for files
     fake_fetch_with_json = {
@@ -141,3 +144,19 @@ def test_errors_and_max_pages():
     result = crawl("https://s.com/", fetch_multi, SpiderOptions(max_pages=1))
     assert result["pages"] == ["https://s.com/"]
     assert result["files"] == []
+
+def test_files_deduped_and_options_not_mutated():
+    fake_fetch = {
+        "https://s.com/": ("text/html", '<a href="/a.zip">1</a><a href="/p1">p</a>'),
+        "https://s.com/p1": ("text/html", '<a href="/a.zip">again</a>'),
+    }
+
+    def fetch(url):
+        if url not in fake_fetch:
+            raise ConnectionError("Not found")
+        return fake_fetch[url]
+
+    opts = SpiderOptions(extensions=(".ZIP",))
+    result = crawl("https://s.com/", fetch, opts)
+    assert result["files"] == ["https://s.com/a.zip"]
+    assert opts.extensions == (".ZIP",)
