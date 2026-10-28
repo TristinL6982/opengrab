@@ -165,7 +165,7 @@ def test_poll_error():
     
     # Mock first response is success for POST, and a subsequent error in the polling
     # But we must make sure it fails on the second poll, not on first one
-    fake_resp1 = FakeResp('{"data": "J3"}', {"data": "J3"})  # For POST - success job creation
+    fake_resp1 = FakeResp('{"error": 14}', {"error": 14})  # first poll: job incomplete
     fake_resp2 = FakeResp('{"error": 11, "message": "Out of credit"}', {"error": 11, "message": "Out of credit"})
     client.next_gets = [fake_resp1, fake_resp2]
     
