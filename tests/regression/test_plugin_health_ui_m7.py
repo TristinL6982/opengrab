@@ -37,3 +37,13 @@ def test_app_js():
     
     # Check that loadPluginHealth is in this section (meaning it's within the reload plugins handler)
     assert "loadPluginHealth()" in handler_content
+
+
+def test_boot_iife_intact():
+    app = _read("app.js")
+    assert app.count("(function boot() {") == 1
+
+
+def test_load_plugin_health_defined_before_boot():
+    app = _read("app.js")
+    assert app.index("async function loadPluginHealth()") < app.index("(function boot() {")

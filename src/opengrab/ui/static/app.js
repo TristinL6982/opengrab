@@ -848,6 +848,9 @@ async function loadPluginHealth() {
   } catch (e) { toast("Plugin health failed: " + e.message, "err"); }
 }
 loadPluginHealth();
+
+/* ============================================================ boot */
+(function boot() {
   getToken();
   updatePills();
   renderGraph();
