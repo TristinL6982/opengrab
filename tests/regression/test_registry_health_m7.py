@@ -1,24 +1,23 @@
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
+from opengrab.plugins.registry import PluginRegistry
 
-from src.opengrab.plugins.registry import PluginRegistry
+
+def _builtin_id(r):
+    return next((pid for pid, p in r.plugins.items() if p.origin == "builtin"), None)
 
 
 def test_fresh():
     r = PluginRegistry()
     r.scan(force=True)
-    # Use a known builtin plugin ID instead of searching
-    bid = "direct"
-    assert bid in r.plugins
+    bid = _builtin_id(r)
+    assert bid is not None
     assert r.health_for(bid) == {"ok": 0, "fail": 0, "last_error": None, "last_used": None}
 
 
 def test_two_then_one():
     r = PluginRegistry()
     r.scan(force=True)
-    bid = "direct"
-    assert bid in r.plugins
+    bid = _builtin_id(r)
+    assert bid is not None
     
     # Record two successes and one failure
     r.record_result(bid, True)
@@ -35,8 +34,8 @@ def test_two_then_one():
 def test_unknown_error():
     r = PluginRegistry()
     r.scan(force=True)
-    bid = "direct"
-    assert bid in r.plugins
+    bid = _builtin_id(r)
+    assert bid is not None
     
     r.record_result(bid, False)
     h = r.health_for(bid)
@@ -46,8 +45,8 @@ def test_unknown_error():
 def test_error_truncate():
     r = PluginRegistry()
     r.scan(force=True)
-    bid = "direct"
-    assert bid in r.plugins
+    bid = _builtin_id(r)
+    assert bid is not None
     
     r.record_result(bid, False, "x" * 600)
     h = r.health_for(bid)
@@ -57,8 +56,8 @@ def test_error_truncate():
 def test_returns_copy():
     r = PluginRegistry()
     r.scan(force=True)
-    bid = "direct"
-    assert bid in r.plugins
+    bid = _builtin_id(r)
+    assert bid is not None
     
     h = r.health_for(bid)
     h["ok"] = 99
@@ -68,8 +67,8 @@ def test_returns_copy():
 def test_snapshot_includes_health():
     r = PluginRegistry()
     r.scan(force=True)
-    bid = "direct"
-    assert bid in r.plugins
+    bid = _builtin_id(r)
+    assert bid is not None
     
     r.record_result(bid, True)
     entry = [e for e in r.snapshot() if e["id"] == bid][0]
@@ -80,8 +79,8 @@ def test_snapshot_includes_health():
 def test_survives_rescan():
     r = PluginRegistry()
     r.scan(force=True)
-    bid = "direct"
-    assert bid in r.plugins
+    bid = _builtin_id(r)
+    assert bid is not None
     
     r.record_result(bid, True)
     r.scan(force=True)

@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 
 from .base import SitePlugin
-from .builtin import direct
 
 log = logging.getLogger("opengrab.plugins")
 
@@ -21,7 +20,7 @@ class PluginRegistry:
         self.errors: dict[str, str] = {}
         self._user_dir: Path | None = None
         self._scan_time = 0.0
-        self.health = {}
+        self.health: dict[str, dict] = {}
 
     # -- discovery -----------------------------------------------------------
     def set_user_dir(self, d: Path) -> None:
@@ -51,13 +50,6 @@ class PluginRegistry:
 
     def _scan_builtin_package(self) -> None:
         from . import builtin
-        # Scan builtin package, with specific fallback for direct plugin
-        try:
-            mod = importlib.import_module(f".builtin.direct", "opengrab.plugins")
-            self._collect(mod, origin="builtin")
-        except Exception:
-            pass  # Skip if no direct plugin
-
         for m in pkgutil.iter_modules(builtin.__path__):
             if m.name.startswith("_"):
                 continue
@@ -149,9 +141,12 @@ class PluginRegistry:
                 "id": p.id, "name": p.name, "site": p.site,
                 "origin": p.origin, "supports_captcha": p.supports_captcha,
                 "supports_login": p.supports_login, "description": p.description,
-                "health": self.health_for(p.id)
+                "health": self.health_for(p.id),
             })
         return out
+
+    def errors_snapshot(self) -> list[dict]:
+        return [{"where": k, "error": v} for k, v in self.errors.items()]
 
     def record_result(self, plugin_id: str, ok: bool, error: str | None = None) -> None:
         """Record a plugin execution result.
