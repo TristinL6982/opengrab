@@ -9,6 +9,11 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "Download with OpenGrab",
     contexts: ["link", "page", "selection"],
   });
+  chrome.contextMenus.create({
+    id: "opengrab-download-all",
+    title: "Download all links with OpenGrab",
+    contexts: ["page"],
+  });
 });
 
 function urlsFromSelection(text) {
@@ -153,3 +158,50 @@ chrome.downloads.onCreated.addListener(async (item) => {
 });
 
 loadRules(true);
+
+// -- M12h: Download All: every link and media URL on the page into the LinkGrabber --
+const MENU_ALL_ID = "opengrab-download-all";
+const DOWNLOAD_ALL_MAX = 200;
+
+function collectPageLinks() {
+  const out = [];
+  const add = (u) => { if (u) out.push(String(u)); };
+  document.querySelectorAll("a[href]").forEach((a) => add(a.href));
+  document.querySelectorAll("img[src], video[src], audio[src], source[src], embed[src], iframe[src]")
+    .forEach((el) => add(el.src));
+  return out;
+}
+
+function filterPageLinks(urls, pattern) {
+  let re = null;
+  if (pattern) { try { re = new RegExp(pattern, "i"); } catch (e) { re = null; } }
+  const seen = new Set();
+  const out = [];
+  for (const raw of urls || []) {
+    const u = String(raw || "").split("#")[0];
+    if (!/^https?:\/\//i.test(u)) continue;
+    if (re && !re.test(u)) continue;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+    if (out.length >= DOWNLOAD_ALL_MAX) break;
+  }
+  return out;
+}
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== MENU_ALL_ID || !tab || tab.id === undefined) return;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: collectPageLinks,
+    });
+    const found = [];
+    for (const r of results || []) if (Array.isArray(r.result)) found.push(...r.result);
+    const s = await chrome.storage.local.get({ downloadAllPattern: "" });
+    const urls = filterPageLinks(found, s.downloadAllPattern);
+    if (urls.length) await sendToOpenGrab(urls);
+  } catch (e) {
+    console.warn("OpenGrab Download All failed:", e && e.message);
+  }
+});
