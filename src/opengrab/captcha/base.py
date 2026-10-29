@@ -484,10 +484,9 @@ class BrowserCaptchaSolver(BaseSolver):
         from .. import browser_solver as bs      # import INSIDE solve, and always call bs.solve_in_browser / bs.make_driver / bs.make_stealth_driver through the module so tests can monkeypatch them
         if not req.site_url: return CaptchaResult(ok=False, provider=self.id, error="no site url")
         store = self.store if self.store is not None else (req.extra or {}).get("clearance_store")
+        if store is None: return CaptchaResult(ok=False, provider=self.id, error="no clearance store")
         make = self.make
-        if make is None: 
-            if store is None:
-                return CaptchaResult(ok=False, provider=self.id, error="no clearance store")
+        if make is None:
             make = bs.make_stealth_driver if (self.settings.captcha_browser_engine or "edge").lower() == "camoufox" else bs.make_driver
         try: c = bs.solve_in_browser(req.site_url, store, make(), timeout=timeout_s)
         except bs.BrowserSolverUnavailable as e: return CaptchaResult(ok=False, provider=self.id, error=str(e))

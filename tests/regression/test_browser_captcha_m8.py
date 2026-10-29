@@ -81,7 +81,7 @@ def test_browser_store_from_extra(monkeypatch):
 def test_browser_unavailable(monkeypatch):
     def boom():
         raise browser_solver.BrowserSolverUnavailable("nope")
-    s = BrowserCaptchaSolver(Settings(captcha_browser_enabled=True), make=boom)
+    s = BrowserCaptchaSolver(Settings(captcha_browser_enabled=True), store=FakeStore(), make=boom)
     res = s.solve(CaptchaRequest(kind="turnstile", site_url="https://example.com/x"))
     assert res.ok is False
     assert res.error == "nope"
@@ -115,3 +115,13 @@ def test_chain_orders_browser_before_manual():
     assert ids[0] == "browser"
     assert ids[-1] == "manual"
     assert "browser" in [s.id for s in chain.solvers]
+
+
+def test_browser_no_store_with_custom_make(monkeypatch):
+    calls = []
+    monkeypatch.setattr(browser_solver, "solve_in_browser", record(calls, object()))
+    s = BrowserCaptchaSolver(Settings(captcha_browser_enabled=True), make=lambda: "D")
+    res = s.solve(CaptchaRequest(kind="turnstile", site_url="https://example.com/x"))
+    assert res.ok is False
+    assert res.error == "no clearance store"
+    assert calls == []
