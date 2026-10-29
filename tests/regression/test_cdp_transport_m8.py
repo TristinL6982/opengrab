@@ -45,17 +45,19 @@ class FakeSocket:
         self.closed = True
 
 
-def fake_connect(addr, timeout):
-    fake_connect.calls.append((addr, timeout))
-    fake_sock = FakeSocket([])
-    return fake_sock
+CALLS = []
 
 
 def make(chunks, url="ws://127.0.0.1:9222/devtools/browser/abc"):
-    fake_connect.calls = []
-    fake_sock = FakeSocket(chunks)
+    del CALLS[:]
+    sock = FakeSocket(chunks)
+
+    def fake_connect(addr, timeout):
+        CALLS.append((addr, timeout))
+        return sock
+
     t = SocketTransport(url, connect=fake_connect, key=KEY)
-    return t, fake_sock
+    return t, sock
 
 
 def server_frame(payload, opcode=1, fin=True):
@@ -68,7 +70,7 @@ def test_ws_accept():
 
 def test_handshake_request():
     t, s = make([OK])
-    assert fake_connect.calls == [("127.0.0.1", 9222), 10.0]
+    assert CALLS == [(("127.0.0.1", 9222), 10.0)]
     assert s.sent[0] == b"GET /devtools/browser/abc HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
 
 
@@ -80,7 +82,7 @@ def test_handshake_split_and_leftover():
 
 def test_handshake_errors():
     with pytest.raises(CdpError, match="only ws:// urls are supported"):
-        SocketTransport("wss://x/y", connect=fake_connect, key=KEY)
+        SocketTransport("wss://x/y", connect=lambda a, t: FakeSocket([]), key=KEY)
     
     with pytest.raises(CdpError, match="handshake failed: HTTP/1.1 404 Not Found"):
         make([b"HTTP/1.1 404 Not Found\r\n\r\n"])
@@ -120,15 +122,16 @@ def test_recv_ping_gets_pong():
 
 
 def test_recv_close_and_errors():
+    t, s = make([OK + server_frame(b"", opcode=8)])
     with pytest.raises(CdpError, match="closed by browser"):
-        make([OK + server_frame(b"", opcode=8)])
-    
-    with pytest.raises(CdpError, match="connection closed"):
-        make([OK])
         t.recv_text(1.0)
-    
+
+    t, s = make([OK])
+    with pytest.raises(CdpError, match="connection closed"):
+        t.recv_text(1.0)
+
+    t, s = make([OK, socket.timeout("timed out")])
     with pytest.raises(CdpError, match="socket error"):
-        make([OK, socket.timeout("timed out")])
         t.recv_text(1.0)
 
 
