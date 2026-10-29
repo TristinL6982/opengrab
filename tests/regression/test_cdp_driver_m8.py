@@ -4,6 +4,7 @@ import pytest
 import tempfile
 from unittest.mock import patch
 
+from opengrab import cdp
 from opengrab.browser_solver import BrowserSolverUnavailable, CdpDriver
 
 
@@ -37,19 +38,20 @@ class FakeProc:
 
 def make(results=None, discover=None, attempts=50):
     calls = {"popen": [], "factory": [], "sleep": []}
+    procs = []
     
     t = FakeTransport(results or {})
     
     def popen(args):
         calls["popen"].append(args)
         proc = FakeProc()
-        # Return the proc so it can be accessed 
+        procs.append(proc)
         return proc
-
+    
     def factory(ws):
         calls["factory"].append(ws)
         return t
-
+    
     d = CdpDriver(
         port=9333,
         user_data_dir="D:\\prof",
@@ -60,11 +62,7 @@ def make(results=None, discover=None, attempts=50):
         sleep=lambda s: calls["sleep"].append(s),
         attempts=attempts
     )
-    
-    # We are not returning proc because in tests we create it directly, 
-    # but the function is structured so that we capture it in make().
-    return d, t, None, calls
-
+    return d, t, procs[0], calls
 
 def test_not_found():
     with pytest.raises(BrowserSolverUnavailable, match="was not found"):
@@ -85,7 +83,7 @@ def test_discover_retries():
         nonlocal call_count
         call_count += 1
         if call_count <= 2:
-            raise Exception("down")
+            raise cdp.CdpError("down")
         return "ws://y"
 
     d, t, proc, calls = make(discover=discover)
@@ -95,16 +93,18 @@ def test_discover_retries():
 
 def test_discover_never():
     def discover(port):
-        raise Exception("down")
+        raise cdp.CdpError("down")
 
     # This is a simplified version of what make() does
     calls = {"popen": [], "factory": [], "sleep": []}
     
     t = FakeTransport({})
+    procs = []
     
     def popen(args):
         calls["popen"].append(args)
         proc = FakeProc()
+        procs.append(proc)
         return proc
 
     def factory(ws):
@@ -124,7 +124,8 @@ def test_discover_never():
         )
     
     assert calls["sleep"] == [0.2, 0.2, 0.2]
-    assert proc.terminated is True
+    assert calls["factory"] == []
+    assert procs[0].terminated is True
 
 
 def test_open_cookies_user_agent():
