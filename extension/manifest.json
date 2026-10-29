@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "OpenGrab",
+  "version": "0.12.0",
+  "description": "Send links, pages and selected text to your OpenGrab download manager.",
+  "minimum_chrome_version": "110",
+  "permissions": ["contextMenus", "storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html"
+}
