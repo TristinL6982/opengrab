@@ -61,6 +61,7 @@ class Settings(BaseModel):
     ua_pool: list[str] = Field(default_factory=list)
     media_max_height: int = 0          # 0 = best progressive format
     media_playlist_max_entries: int = 10000
+    media_ffmpeg_path: str = ""        # empty = ffmpeg on PATH; used to merge video+audio
 
     # captcha solving (unpaywalled: BYO keys, local OCR, or manual)
     captcha_provider: str = "auto"     # auto|manual|2captcha|capmonster|capsolver|nopecha|ddddocr|tesseract
