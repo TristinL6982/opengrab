@@ -47,6 +47,7 @@ class FakeSocket:
 
 def fake_connect(addr, timeout):
     fake_connect.calls.append((addr, timeout))
+    fake_sock = FakeSocket([])
     return fake_sock
 
 
