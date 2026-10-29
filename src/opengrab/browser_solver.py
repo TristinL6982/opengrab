@@ -216,3 +216,38 @@ def solve_clearance(url: str, store, make=None, **kwargs) -> Optional[Clearance]
     """Solve a Cloudflare challenge for url in the default browser driver."""
     make = make or make_driver
     return solve_in_browser(url, store, make(), **kwargs)
+
+
+class CamoufoxDriver(BrowserDriver):
+    """Optional stealth browser (Camoufox, hardened Firefox), visible window. Opt-in; ~300 MB download."""
+    def __init__(self, camoufox_cls=None):
+        if camoufox_cls is None:
+            try:
+                from camoufox.sync_api import Camoufox as camoufox_cls
+            except ImportError as e:
+                raise BrowserSolverUnavailable("Camoufox is optional: run 'pip install camoufox' then 'python -m camoufox fetch' (about 300 MB).") from e
+        self._cm = camoufox_cls(headless=False)
+        self._browser = self._cm.__enter__()
+        self._page = self._browser.new_page()
+
+    def open(self, url):
+        self._page.goto(url)
+
+    def cookies(self):
+        return self._page.context.cookies()
+
+    def user_agent(self):
+        return self._page.evaluate("navigator.userAgent")
+
+    def close(self):
+        self._cm.__exit__(None, None, None)
+
+
+def make_stealth_driver(camoufox_factory=None, fallback=None) -> BrowserDriver:
+    """Return a CamoufoxDriver; fall back to the default driver (make_driver) if Camoufox is unavailable."""
+    camoufox_factory = camoufox_factory or CamoufoxDriver
+    fallback = fallback or make_driver
+    try:
+        return camoufox_factory()
+    except BrowserSolverUnavailable:
+        return fallback()
