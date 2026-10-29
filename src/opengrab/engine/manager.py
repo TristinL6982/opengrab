@@ -626,6 +626,8 @@ class DownloadManager:
             self._persist()
             if self._is_hls(link, url):
                 path = self._download_hls(link, url, dest / filename)
+            elif self._is_dash(link, url):
+                path = self._download_dash(link, url, dest / filename)
             else:
                 dl = LinkDownload(link, url, dest,
                                   headers=link.direct_headers,
@@ -752,6 +754,69 @@ class DownloadManager:
             raise DownloadError("HLS: %s" % exc) from exc
         link.extra["hls"] = {"segments": info["segments"], "bytes": info["bytes"]}
         return Path(path)
+
+    @staticmethod
+    def _is_dash(link: Link, url: str) -> bool:
+        """M9g: True for DASH streams (yt-dlp protocol hint or a .mpd URL)."""
+        proto = str(link.extra.get("media_protocol", "") or "").lower()
+        if proto in ("dash", "http_dash_segments"):
+            return True
+        return urlparse(url).path.lower().endswith(".mpd")
+
+    def _download_dash(self, link: Link, url: str, path: Path, merge_fn=None) -> Path:
+        """M9g: download a static DASH stream, then merge video and audio with ffmpeg."""
+        from ..media import ffmpeg as media_ffmpeg
+        from ..media.dashdl import DashError, download_dash
+        headers = dict(link.direct_headers or {})
+
+        def fetch_bytes(u):
+            return self._fetch_url(u, headers)
+
+        def fetch_text(u):
+            return self._fetch_url(u, headers).decode("utf-8", "replace")
+
+        def progress(i, total, written):
+            link.downloaded = written
+            link.progress = min(i / total, 1.0)
+            self._broadcast("progress", link)
+
+        def cancel():
+            return link.status != LinkStatus.DOWNLOADING
+
+        path = Path(path)
+        video_tmp = path.with_name(path.stem + ".video.mp4")
+        audio_tmp = path.with_name(path.stem + ".audio.m4a")
+        max_height = int(getattr(self.settings, "media_max_height", 0) or 0)
+        try:
+            info = download_dash(url, str(video_tmp), str(audio_tmp), fetch_bytes, fetch_text,
+                                 max_height=max_height, on_progress=progress, cancel=cancel)
+        except DashError as exc:
+            video_tmp.unlink(missing_ok=True)
+            audio_tmp.unlink(missing_ok=True)
+            if str(exc) == "cancelled":
+                raise DownloadError("cancelled by user") from exc
+            raise DownloadError("DASH: %s" % exc) from exc
+        link.extra["dash"] = {"segments": info["segments"], "bytes": info["bytes"]}
+        if info["video"] is None:
+            final = path.with_suffix(".m4a")
+            os.replace(audio_tmp, final)
+            return final
+        final = path.with_suffix(".mp4")
+        if info["audio"] is None:
+            os.replace(video_tmp, final)
+            return final
+        merge_fn = merge_fn or media_ffmpeg.merge
+        try:
+            merge_fn(str(video_tmp), str(audio_tmp), str(final),
+                     ffmpeg=self.settings.media_ffmpeg_path)
+        except (media_ffmpeg.MediaUnavailable, media_ffmpeg.MergeError, OSError) as exc:
+            link.extra["media_merge"] = {"status": "failed", "message": str(exc)[:300]}
+            os.replace(video_tmp, final)
+            return final
+        video_tmp.unlink(missing_ok=True)
+        audio_tmp.unlink(missing_ok=True)
+        link.extra["media_merge"] = {"status": "ok"}
+        return final
 
     def _fetch_url(self, url: str, headers: dict) -> bytes:
         """Fetch one URL (an HLS playlist or segment) into memory."""
