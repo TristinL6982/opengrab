@@ -165,3 +165,25 @@ def public_config(rules) -> dict:
     """Payload for GET /api/extension/config."""
     rules = normalize_rules(rules)
     return {"version": 1, "rules": rules}
+
+
+def browser_request_extras(extra, url) -> tuple:
+    """(headers, cookies) for url from link.extra["browser"] set by the extension.
+
+    headers holds Referer and User-Agent when known; cookies maps name to value
+    for cookies whose domain covers url's host. Bad or missing data gives ({}, {}).
+    """
+    info = extra.get("browser") if isinstance(extra, dict) else None
+    if not isinstance(info, dict):
+        return {}, {}
+    headers = {}
+    ref = str(info.get("referrer") or "").strip()
+    if ref.lower().startswith(("http://", "https://")):
+        headers["Referer"] = ref
+    ua = str(info.get("user_agent") or "").strip()
+    if ua and "\n" not in ua and "\r" not in ua:
+        headers["User-Agent"] = ua
+    cookies = {}
+    for c in scope_cookies(info.get("cookies") or [], url):
+        cookies[c["name"]] = c["value"]
+    return headers, cookies

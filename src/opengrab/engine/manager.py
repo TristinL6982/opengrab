@@ -629,10 +629,13 @@ class DownloadManager:
             elif self._is_dash(link, url):
                 path = self._download_dash(link, url, dest / filename)
             else:
+                from ..extrules import browser_request_extras
+                b_headers, b_cookies = browser_request_extras(link.extra, url)
                 dl = LinkDownload(link, url, dest,
-                                  headers=link.direct_headers,
+                                  headers={**b_headers, **(link.direct_headers or {})},
                                   settings=self.settings,
-                                  cookies=self.client._cookies_for(url),
+                                  cookies={**dict(self.client._cookies_for(url) or {}),
+                                           **b_cookies},
                                   rate_limiter=self._global_limiter,
                                   on_tick=lambda d: self._on_tick(link, d))
                 with self._lock:
