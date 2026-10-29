@@ -1316,8 +1316,14 @@ def _make_handler(srv: ApiServer):
                 manifest = json.loads(data)
                 manifest["start_url"] = srv.base_path + "/"
                 data = json.dumps(manifest).encode("utf-8")
+            cache = "max-age=60"
+            if safe.name == "sw.js":
+                from . import __version__
+                data = data.replace(b"__OPENGRAB_VERSION__",
+                                    __version__.encode("utf-8"))
+                cache = "no-cache"
             self._send(200, data, ctype,
-                       extra={"Cache-Control": "max-age=60"})
+                       extra={"Cache-Control": cache})
 
     return Handler
 
