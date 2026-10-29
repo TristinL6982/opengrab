@@ -57,6 +57,8 @@ import secrets
 
 from .engine.manager import DownloadManager
 from .settings import Settings, app_data_dir
+from .access import AccessGate
+from .remote import is_loopback, policy_from_dict
 
 log = __import__("logging").getLogger("opengrab.server")
 
@@ -123,6 +125,13 @@ class ApiServer:
                 settings.save()
             except Exception:
                 pass
+        # -- M12 access gate: pairing, remote policy, auth rate limit -------
+        self.access = AccessGate.load(
+            app_data_dir(), self.token,
+            policy=policy_from_dict({
+                "allow_remote_http": getattr(settings, "allow_remote_http", False),
+                "trusted_proxies": getattr(settings, "trusted_proxies", None) or [],
+            }))
         # -- nonce ------------------------------------------------------------
         self.nonce = secrets.token_hex(16)
         # -- SSE fanout ----------------------------------------------------
@@ -248,7 +257,10 @@ class ApiServer:
     # ---------------------------------------------------------------- auth
     def authorize(self, client_ip: str, headers) -> bool:
         h = headers.get("Authorization", "")
-        return hmac.compare_digest(h, f"Bearer {self.token}")
+        if hmac.compare_digest(h, f"Bearer {self.token}"):
+            return True
+        access = getattr(self, "access", None)
+        return access is not None and access.scope_for(headers) is not None
 
     @staticmethod
     def remote_transport_allowed(client_ip: str, headers,
@@ -410,10 +422,18 @@ def _make_handler(srv: ApiServer):
             return srv.authorize(ip, self.headers)
 
         def _transport_allowed(self) -> bool:
-            return srv.remote_transport_allowed(
-                self.client_address[0], self.headers,
-                isinstance(self.connection, ssl.SSLSocket),
-            )
+            is_tls = isinstance(self.connection, ssl.SSLSocket)
+            if srv.remote_transport_allowed(self.client_address[0], self.headers, is_tls):
+                return True
+            return srv.access.transport_allowed(self.client_address[0], self.headers, is_tls)
+
+        def _gate(self, action: str):
+            """Return the caller's scope, or None after sending the error."""
+            code, result = srv.access.check(self.client_address[0], self.headers, action)
+            if code != 200:
+                self._err(code, result)
+                return None
+            return result
 
         def _route_path(self, path: str) -> str:
             prefix = srv.base_path
@@ -570,6 +590,18 @@ def _make_handler(srv: ApiServer):
             p = self._route_path(u.path)
             if not p.startswith("/api/"):
                 return self._err(404, "not found")
+            if p == "/api/pair/claim":
+                code, payload = srv.access.pair_claim(
+                    self.client_address[0], self.headers, self._body())
+                return self._json(payload, code)
+            if p == "/api/pair/start":
+                if not is_loopback(srv.access.client_ip(self.client_address[0], self.headers)):
+                    return self._err(403, "pairing can only be started on this computer")
+                scope = self._gate("pair_start")
+                if scope is None:
+                    return
+                code, payload = srv.access.pair_start(scope)
+                return self._json(payload, code)
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
             try:
@@ -588,6 +620,11 @@ def _make_handler(srv: ApiServer):
                 return self._err(403, "remote access requires HTTPS")
             u = urlparse(self.path)
             p = self._route_path(u.path)
+            if p.startswith("/api/devices/"):
+                if self._gate("devices_revoke") is None:
+                    return
+                code, payload = srv.access.devices_revoke(p[len("/api/devices/"):])
+                return self._json(payload, code)
             if not p.startswith("/api/") or not self._authorized():
                 return self._err(403 if p.startswith("/api/") else 404,
                                  "forbidden")
@@ -919,6 +956,11 @@ def _make_handler(srv: ApiServer):
                     return self._serve_file(file_path, attachment=False)
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
+            if p == "/api/devices":
+                if self._gate("devices_list") is None:
+                    return
+                code, payload = srv.access.devices_list()
+                return self._json(payload, code)
             if p == "/api/links":
                 return self._json([l.to_public() for l in mgr.all_links()])
             import re as _re
