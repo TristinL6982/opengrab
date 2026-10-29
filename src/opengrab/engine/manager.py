@@ -624,19 +624,22 @@ class DownloadManager:
                     "filename": filename, "subdir": plan["subdir"],
                 }
             self._persist()
-            dl = LinkDownload(link, url, dest,
-                              headers=link.direct_headers,
-                              settings=self.settings,
-                              cookies=self.client._cookies_for(url),
-                              rate_limiter=self._global_limiter,
-                              on_tick=lambda d: self._on_tick(link, d))
-            with self._lock:
-                self._active[link.id] = dl
-            try:
-                path = dl.run()
-            finally:
+            if self._is_hls(link, url):
+                path = self._download_hls(link, url, dest / filename)
+            else:
+                dl = LinkDownload(link, url, dest,
+                                  headers=link.direct_headers,
+                                  settings=self.settings,
+                                  cookies=self.client._cookies_for(url),
+                                  rate_limiter=self._global_limiter,
+                                  on_tick=lambda d: self._on_tick(link, d))
                 with self._lock:
-                    self._active.pop(link.id, None)
+                    self._active[link.id] = dl
+                try:
+                    path = dl.run()
+                finally:
+                    with self._lock:
+                        self._active.pop(link.id, None)
             path = self._finish_media(link, Path(path))
             link.path = str(path)
             if self.settings.auto_extract_archives:
@@ -710,6 +713,52 @@ class DownloadManager:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as fh:
             shutil.copyfileobj(resp, fh, 1024 * 1024)
+
+    @staticmethod
+    def _is_hls(link: Link, url: str) -> bool:
+        """M9f: True for HLS streams (yt-dlp protocol hint or a .m3u8 URL)."""
+        proto = str(link.extra.get("media_protocol", "") or "").lower()
+        if proto == "hls" or proto.startswith("m3u8"):
+            return True
+        return urlparse(url).path.lower().endswith(".m3u8")
+
+    def _download_hls(self, link: Link, url: str, path: Path) -> Path:
+        """M9f: download an HLS stream segment by segment into path."""
+        from ..media.hlsdl import HlsError, download_hls
+        headers = dict(link.direct_headers or {})
+
+        def fetch_bytes(u):
+            return self._fetch_url(u, headers)
+
+        def fetch_text(u):
+            return self._fetch_url(u, headers).decode("utf-8", "replace")
+
+        def progress(i, total, written):
+            link.downloaded = written
+            link.progress = min(i / total, 1.0)
+            self._broadcast("progress", link)
+
+        def cancel():
+            return link.status != LinkStatus.DOWNLOADING
+
+        max_height = int(getattr(self.settings, "media_max_height", 0) or 0)
+        try:
+            info = download_hls(url, str(path), fetch_bytes, fetch_text,
+                                max_height=max_height,
+                                on_progress=progress, cancel=cancel)
+        except HlsError as exc:
+            if str(exc) == "cancelled":
+                raise DownloadError("cancelled by user") from exc
+            raise DownloadError("HLS: %s" % exc) from exc
+        link.extra["hls"] = {"segments": info["segments"], "bytes": info["bytes"]}
+        return Path(path)
+
+    def _fetch_url(self, url: str, headers: dict) -> bytes:
+        """Fetch one URL (an HLS playlist or segment) into memory."""
+        import urllib.request
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read()
 
     def _fail(self, link: Link, msg: str, transient: bool) -> None:
         n = self._retries.get(link.id, 0)
