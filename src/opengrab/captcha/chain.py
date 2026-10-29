@@ -1,7 +1,7 @@
 """Solver registry / chain with failover.
 
 Priority order (lower number = earlier) is configurable per run.  The
-default 'auto' chain:  ddddocr -> tesseract (opt-in) -> offline audio/Vosk (opt-in, audio kind only) -> automatic paid solvers (2captcha, capmonster, capsolver, nopecha)
+default 'auto' chain:  ddddocr -> tesseract (opt-in) -> offline audio/Vosk (opt-in, audio kind only) -> real browser Edge CDP or Camoufox (opt-in, turnstile kind) -> automatic paid solvers (2captcha, capmonster, capsolver, nopecha)
 (only if a key is configured) -> manual (UI).
 The engine uses the chain for OCR-able kinds and always falls back to
 'manual' so a captcha can never be a dead end.
@@ -14,7 +14,7 @@ from .base import (
     BaseSolver, CaptchaRequest, CaptchaResult,
     ManualSolver, DdddOCRSolver, TwoCaptchaSolver,
     CapMonsterSolver, CapSolverSolver, NopeCHASolver,
-    TesseractSolver, AudioCaptchaSolver,
+    TesseractSolver, AudioCaptchaSolver, BrowserCaptchaSolver,
 )
 from ..settings import Settings
 
@@ -29,6 +29,7 @@ class SolverChain:
             DdddOCRSolver(settings),
             TesseractSolver(settings),
             AudioCaptchaSolver(settings),
+            BrowserCaptchaSolver(settings),
             ManualSolver(settings),
             TwoCaptchaSolver(settings),
             CapMonsterSolver(settings),

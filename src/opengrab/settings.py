@@ -73,6 +73,8 @@ class Settings(BaseModel):
     captcha_audio_enabled: bool = False      # opt-in offline audio captcha solver
     captcha_vosk_model_path: str = ""         # folder of an unpacked Vosk model
     captcha_ffmpeg_path: str = ""             # empty = ffmpeg on PATH
+    captcha_browser_enabled: bool = False   # opt-in real-browser Cloudflare solver
+    captcha_browser_engine: str = "edge"    # edge (CDP) | camoufox
     captcha_manual_timeout_s: int = 120
     captcha_auto_failover: bool = True # try cheaper/faster solvers first, escalate
 
