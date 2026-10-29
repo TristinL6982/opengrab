@@ -1,13 +1,13 @@
 import pytest
 from opengrab.media import presets as pr
 
-P360 = {"format_id": "18", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "tbr": 500}
-P720 = {"format_id": "22", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 720, "tbr": 1500}
-V1080 = {"format_id": "137", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "height": 1080, "tbr": 4000}
-V1080B = {"format_id": "136", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "height": 1080, "tbr": 2500}
-V2160 = {"format_id": "313", "ext": "webm", "vcodec": "vp9", "acodec": "none", "height": 2160, "tbr": 15000}
-A128 = {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a", "abr": 128}
-A160 = {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus", "abr": 160}
+P360 = {"format_id": "18", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "tbr": 500, "url": "http://x/18"}
+P720 = {"format_id": "22", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 720, "tbr": 1500, "url": "http://x/22"}
+V1080 = {"format_id": "137", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "height": 1080, "tbr": 4000, "url": "http://x/137"}
+V1080B = {"format_id": "136", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "height": 1080, "tbr": 2500, "url": "http://x/136"}
+V2160 = {"format_id": "313", "ext": "webm", "vcodec": "vp9", "acodec": "none", "height": 2160, "tbr": 15000, "url": "http://x/313"}
+A128 = {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a", "abr": 128, "url": "http://x/140"}
+A160 = {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus", "abr": 160, "url": "http://x/251"}
 NOURL = {"format_id": "999", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 4320, "tbr": 99999}
 
 INFO = {"formats": [NOURL, P360, P720, V1080B, V1080, V2160, A128, A160]}
