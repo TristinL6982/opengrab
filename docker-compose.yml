@@ -12,6 +12,7 @@ services:
       OPENGRAB_DATA_DIR: /config
       OPENGRAB_DOWNLOAD_DIR: /downloads
       OPENGRAB_BASE_PATH: ${OPENGRAB_BASE_PATH:-}
+      OPENGRAB_PAIR_ON_START: ${OPENGRAB_PAIR_ON_START:-1}
       TZ: ${TZ:-UTC}
     volumes:
       - ./config:/config

@@ -40,6 +40,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="add a URL on startup; may be repeated")
     parser.add_argument("--list-plugins", action="store_true",
                         help="list discovered plugins and exit")
+    parser.add_argument("--pair", action="store_true",
+                        help="with --headless, print a one-time device pairing code at startup")
     parser.add_argument("--smoke-test", action="store_true",
                         help="run the OpenGrab smoke check and exit")
     return parser
@@ -90,8 +92,11 @@ def main(argv=None) -> int:
                 manager.shutdown()
 
         from .app import run_gui_mode, run_headless_mode
-        runner = run_headless_mode if args.headless else run_gui_mode
-        runner(settings, host=host, port=port, urls=args.grab)
+        if args.headless:
+            run_headless_mode(settings, host=host, port=port, urls=args.grab,
+                              pair=args.pair)
+        else:
+            run_gui_mode(settings, host=host, port=port, urls=args.grab)
         return 0
     except KeyboardInterrupt:
         return 130

@@ -4,6 +4,7 @@ This module handles the initialization of all components:
 settings, accounts, filters, registry, solver chain, manager, server.
 """
 
+import os
 from typing import Optional
 import json
 import threading
@@ -266,14 +267,40 @@ def run_gui_mode(settings: Optional[Settings] = None,
         release(lock_handle)
 
 
+def pair_on_start_requested(pair: bool = False, env=None) -> bool:
+    """True when a pairing code should be printed at headless startup."""
+    if pair:
+        return True
+    env = os.environ if env is None else env
+    return str(env.get("OPENGRAB_PAIR_ON_START", "")).strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
+def headless_pairing_banner(server) -> str:
+    """Start a one-time pairing code on the server and return a console line.
+
+    In Docker the web UI is never reached from loopback, so /api/pair/start
+    is refused; the console (docker logs) is the trusted channel instead.
+    """
+    from .remote import SCOPE_MASTER
+    status, payload = server.access.pair_start(SCOPE_MASTER)
+    if status != 200:
+        return f"OpenGrab pairing unavailable: {payload.get('error', status)}"
+    minutes = max(1, int(payload.get("expires_in", 0)) // 60)
+    return (f"OpenGrab pairing code: {payload['code']} "
+            f"(valid for {minutes} min, one device)")
+
+
 def run_headless_mode(settings: Optional[Settings] = None,
                       host: Optional[str] = None, port: Optional[int] = None,
-                      urls=()) -> None:
+                      urls=(), pair: bool = False) -> None:
     """Run the API and web UI until interrupted."""
     settings, manager, server, bound_port = start_server(settings, host, port)
     for url in urls:
         manager.add_url(url)
     print(f"OpenGrab API -> http://{server.host}:{bound_port}")
+    if pair_on_start_requested(pair):
+        print(headless_pairing_banner(server), flush=True)
     try:
         server.wait()
     except KeyboardInterrupt:
