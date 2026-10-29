@@ -659,6 +659,7 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "archive_max_expanded_gib", "archive_password_file"];
 
 async function loadSettings() {
+  loadDevices();
   try {
     const s = await api("/api/settings");
     for (const f of SET_FIELDS) {
@@ -715,6 +716,39 @@ $("#btn-diagnostics-export").addEventListener("click", async () => {
     link.href = URL.createObjectURL(blob); link.download = "opengrab-diagnostics.json";
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   } catch (e) { toast("Could not create diagnostics: " + e.message, "err"); }
+});
+
+/* ============================================================ paired devices */
+function fmtTime(t) { return t ? new Date(t * 1000).toLocaleString() : "never"; }
+
+async function loadDevices() {
+  const body = $("#devices-body");
+  if (!body) return;
+  try {
+    const r = await api("/api/devices");
+    const list = (r && r.devices) || [];
+    body.innerHTML = list.length
+      ? list.map(d => `<tr><td>${esc(d.name)}</td><td>${esc(fmtTime(d.created))}</td><td>${esc(fmtTime(d.last_seen))}</td><td><button data-revoke="${esc(d.id)}">Revoke</button></td></tr>`).join("")
+      : `<tr><td colspan="4" class="hint">No paired devices.</td></tr>`;
+  } catch { body.innerHTML = `<tr><td colspan="4" class="hint">Paired devices are unavailable.</td></tr>`; }
+}
+
+$("#btn-pair-new").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/pair/start", "POST", {});
+    $("#pair-code").textContent = r.code;
+    $("#pair-expiry").textContent = "expires in " + Math.max(1, Math.round(r.expires_in / 60)) + " min";
+  } catch (e) { toast("Pairing failed: " + e.message, "err"); }
+});
+
+$("#devices-body").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-revoke]");
+  if (!btn) return;
+  try {
+    await api("/api/devices/" + encodeURIComponent(btn.dataset.revoke), "DELETE");
+    toast("Device revoked", "ok");
+    loadDevices();
+  } catch (e) { toast("Revoke failed: " + e.message, "err"); }
 });
 
 async function pollTerminal() {

@@ -252,6 +252,11 @@
       </div>
       <h2>Plugin health</h2>
       <table id="plugin-health"><thead><tr><th>Plugin</th><th>OK</th><th>Fail</th><th>Last error</th></tr></thead><tbody id="plugin-health-body"></tbody></table>
+      <h2>Paired devices</h2>
+      <p class="hint">Phones and browser extensions paired with this OpenGrab. Revoke one to sign it out.</p>
+      <div class="formrow"><button id="btn-pair-new">Pair new device</button>
+        <code id="pair-code"></code> <span id="pair-expiry" class="hint"></span></div>
+      <table id="devices"><thead><tr><th>Name</th><th>Paired</th><th>Last seen</th><th></th></tr></thead><tbody id="devices-body"></tbody></table>
       <h2>Local API</h2>
       <p class="hint">Console token (for LAN / browser access): <code id="token-display"></code>
       LAN URL: <code id="lan-url"></code></p>
