@@ -196,3 +196,23 @@ def solve_in_browser(
             sleep(poll)
     finally:
         driver.close()
+
+
+def make_driver(cdp_factory=None, playwright_factory=None) -> BrowserDriver:
+    """Return a CdpDriver (visible Edge over CDP); fall back to PlaywrightDriver if CDP is unavailable."""
+    cdp_factory = cdp_factory or CdpDriver
+    playwright_factory = playwright_factory or PlaywrightDriver
+    try:
+        return cdp_factory()
+    except BrowserSolverUnavailable as e1:
+        first = str(e1)
+    try:
+        return playwright_factory()
+    except BrowserSolverUnavailable as e2:
+        raise BrowserSolverUnavailable("no browser solver available: " + first + "; " + str(e2))
+
+
+def solve_clearance(url: str, store, make=None, **kwargs) -> Optional[Clearance]:
+    """Solve a Cloudflare challenge for url in the default browser driver."""
+    make = make or make_driver
+    return solve_in_browser(url, store, make(), **kwargs)
