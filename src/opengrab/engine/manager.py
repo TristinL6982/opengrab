@@ -637,6 +637,7 @@ class DownloadManager:
             finally:
                 with self._lock:
                     self._active.pop(link.id, None)
+            path = self._finish_media(link, Path(path))
             link.path = str(path)
             if self.settings.auto_extract_archives:
                 from .archives import extract_archive, is_supported_archive
@@ -688,6 +689,27 @@ class DownloadManager:
             if link.extra.pop("requeue_on_stop", False) and link.status == LinkStatus.WAITING:
                 self._ready_put(link.id)
             self._persist()
+
+    def _finish_media(self, link: Link, path: Path) -> Path:
+        """M9d: merge a separate audio part into a finished video download."""
+        from ..media.mergejob import audio_part, merge_job
+        if audio_part(link.extra) is None:
+            return Path(path)
+        headers = dict(link.direct_headers or {})
+
+        def fetch(url: str, dest: Path) -> None:
+            self._fetch_media_part(url, Path(dest), headers)
+
+        return merge_job(Path(path), link.extra, fetch,
+                         ffmpeg_path=self.settings.media_ffmpeg_path)
+
+    def _fetch_media_part(self, url: str, dest: Path, headers: dict) -> None:
+        """Download one media part (e.g. the audio track) to dest."""
+        import shutil
+        import urllib.request
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as fh:
+            shutil.copyfileobj(resp, fh, 1024 * 1024)
 
     def _fail(self, link: Link, msg: str, transient: bool) -> None:
         n = self._retries.get(link.id, 0)
