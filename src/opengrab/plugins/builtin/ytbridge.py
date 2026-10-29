@@ -196,9 +196,6 @@ class YtDlpBridgePlugin(BridgePlugin):
                               children=info["_children"],
                               extra={"playlist_truncated": info.get("_children_truncated", False),
                                      "playlist_count": len(info["_children"])})
-        pick = self._pick_url(
-            info, max_height=max(0, min(
-                4320, int(getattr(ctx.settings, "media_max_height", 0)))))
         plan = self._plan(info, ctx.settings)
         if plan is not None:
             main = plan["video"] or plan["audio"]
@@ -218,6 +215,9 @@ class YtDlpBridgePlugin(BridgePlugin):
                 direct_headers={"referer": url, "user-agent": ctx.client._ua()},
                 extra=extra,
             )
+        pick = self._pick_url(
+            info, max_height=max(0, min(
+                4320, int(getattr(ctx.settings, "media_max_height", 0)))))
         ext = pick.get("ext") or "mp4"
         fname = f"{title[:80]}.{ext}"
         return GrabResult(
