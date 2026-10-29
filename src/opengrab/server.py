@@ -132,6 +132,8 @@ class ApiServer:
                 "allow_remote_http": getattr(settings, "allow_remote_http", False),
                 "trusted_proxies": getattr(settings, "trusted_proxies", None) or [],
             }))
+        # -- M12f browser extension interception rules --------------------
+        self.extrules_path = os.path.join(str(app_data_dir()), "extension_rules.json")
         # -- nonce ------------------------------------------------------------
         self.nonce = secrets.token_hex(16)
         # -- SSE fanout ----------------------------------------------------
@@ -956,6 +958,9 @@ def _make_handler(srv: ApiServer):
                     return self._serve_file(file_path, attachment=False)
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
+            if p == "/api/extension/config":
+                from .extrules import load_rules, public_config
+                return self._json(public_config(load_rules(srv.extrules_path)))
             if p == "/api/devices":
                 if self._gate("devices_list") is None:
                     return
@@ -1108,6 +1113,33 @@ def _make_handler(srv: ApiServer):
                 else:
                     return self._err(404, "unknown action")
                 return self._json({"ok": True})
+            if p == "/api/extension/config":
+                from .extrules import public_config, save_rules
+                rules = body.get("rules") if isinstance(body.get("rules"), dict) else body
+                return self._json(public_config(save_rules(srv.extrules_path, rules)))
+            if p == "/api/extension/add":
+                from .extrules import host_of, scope_cookies
+                url_ = str(body.get("url") or "").strip()
+                if not url_.lower().startswith(("http://", "https://")) or not host_of(url_):
+                    return self._err(400, "url must be an http(s) URL")
+                cookies = scope_cookies(body.get("cookies") or [], url_)
+                link = mgr.add_url(
+                    url_,
+                    auto_download=bool(body.get("auto_download", True)),
+                    title=str(body.get("title") or ""),
+                    filename=str(body.get("filename") or ""),
+                )
+                if not isinstance(link.extra, dict):
+                    link.extra = {}
+                link.extra["browser"] = {
+                    "referrer": str(body.get("referrer") or ""),
+                    "user_agent": str(body.get("user_agent") or ""),
+                    "page_url": str(body.get("page_url") or ""),
+                    "cookies": cookies,
+                }
+                return self._json({"ok": True, "id": link.id,
+                                   "cookies": len(cookies),
+                                   "link": link.to_public()})
             if p == "/api/urls":
                 urls = body.get("urls") or []
                 if isinstance(urls, str):
