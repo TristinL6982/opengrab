@@ -60,6 +60,7 @@ class Settings(BaseModel):
     ua_rotation: bool = False
     ua_pool: list[str] = Field(default_factory=list)
     media_max_height: int = 0          # 0 = best progressive format
+    media_preset: str = ""            # "" = old behaviour; else a media.presets name (best, 1080, audio-m4a, ...)
     media_playlist_max_entries: int = 10000
     media_ffmpeg_path: str = ""        # empty = ffmpeg on PATH; used to merge video+audio
 

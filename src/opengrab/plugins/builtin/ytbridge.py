@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 from ..base import (BridgePlugin, GrabResult, ResolveResult, PluginError,
                     PluginContext)
+from ...media import ffmpeg as media_ffmpeg
+from ...media import presets as media_presets
 
 log = logging.getLogger("opengrab.ytbridge")
 
@@ -173,6 +175,18 @@ class YtDlpBridgePlugin(BridgePlugin):
                     "size": best.get("filesize")}
         raise PluginError("no downloadable format")
 
+    @staticmethod
+    def _plan(info: dict, settings) -> dict | None:
+        """Pick formats with the configured preset; None means use _pick_url."""
+        preset = str(getattr(settings, "media_preset", "") or "")
+        if not preset or info.get("url"):
+            return None
+        can_merge = media_ffmpeg.available(str(getattr(settings, "media_ffmpeg_path", "") or ""))
+        try:
+            return media_presets.select_formats(info, preset, can_merge)
+        except (media_presets.NoFormat, ValueError) as e:
+            raise PluginError(str(e))
+
     def grab(self, url: str, ctx: PluginContext) -> GrabResult:
         host = urlparse(url).netloc
         info = self._extract(url, ctx)
@@ -185,6 +199,25 @@ class YtDlpBridgePlugin(BridgePlugin):
         pick = self._pick_url(
             info, max_height=max(0, min(
                 4320, int(getattr(ctx.settings, "media_max_height", 0)))))
+        plan = self._plan(info, ctx.settings)
+        if plan is not None:
+            main = plan["video"] or plan["audio"]
+            extra = {"duration": info.get("duration"), "uploader": info.get("uploader"),
+                     "media_mode": plan["mode"], "media_ext": plan["ext"]}
+            if plan["mode"] == "merge":
+                extra["media_parts"] = [
+                    {"kind": "video", "url": plan["video"]["url"], "ext": plan["video"].get("ext", "")},
+                    {"kind": "audio", "url": plan["audio"]["url"], "ext": plan["audio"].get("ext", "")}]
+            return GrabResult(
+                title=title,
+                filename=f"{title[:80]}.{plan['ext']}",
+                size=main.get("filesize") or main.get("filesize_approx"),
+                site=host,
+                plugin_id=self.id,
+                direct_url=main["url"],
+                direct_headers={"referer": url, "user-agent": ctx.client._ua()},
+                extra=extra,
+            )
         ext = pick.get("ext") or "mp4"
         fname = f"{title[:80]}.{ext}"
         return GrabResult(
