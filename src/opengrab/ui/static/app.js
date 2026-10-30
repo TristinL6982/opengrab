@@ -2113,11 +2113,11 @@ $("#btn-jd2-import")?.addEventListener("click", async () => {
 
 /* ============================================================ M14 updates */
 function showUpdate(u) {
-  $("#upd-current").textContent = u.current;
+  $("#upd-status").textContent = `You have OpenGrab ${u.current}.`;
   $("#btn-upd-rollback").classList.toggle("hidden", !u.rollback);
   $("#btn-upd-install").classList.add("hidden");
   if (u.error) { $("#upd-status").textContent = u.error; return; }
-  if (u.version === undefined) return;
+  if (u.available === undefined) return;  // not checked yet
   if (!u.available) { $("#upd-status").textContent = `OpenGrab ${u.current} is the newest version.`; return; }
   let msg = `OpenGrab ${u.version} is available (you have ${u.current}).`;
   if (!u.frozen) msg += " This copy runs from source, so update it with git.";

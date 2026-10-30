@@ -163,7 +163,8 @@ def _download(url: str, dest: Path, expected_sha256: str, expected_size: int,
             on_bytes(written)
     else:
         req = urllib.request.Request(url, headers={"User-Agent": "OpenGrab addon installer"})
-        with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as out:
+        from .tls import urlopen
+        with urlopen(req, timeout=60) as resp, open(dest, "wb") as out:
             while True:
                 chunk = resp.read(256 * 1024)
                 if not chunk:

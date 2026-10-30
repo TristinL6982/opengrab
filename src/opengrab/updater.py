@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -89,12 +90,19 @@ def _get(url: str, timeout: float = 30) -> bytes:
         raise UpdateError("updates are only downloaded over HTTPS")
     req = urllib.request.Request(url, headers={"User-Agent": f"OpenGrab/{__version__}",
                                                "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    from .tls import urlopen
+    with urlopen(req, timeout=timeout) as r:
         return r.read()
 
 
 def check(fetch: Callable[[str], bytes] = _get) -> dict:
-    rel = parse_release(json.loads(fetch(API)))
+    try:
+        raw = fetch(API)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:  # no release has been published yet
+            return {"current": __version__, "available": False}
+        raise
+    rel = parse_release(json.loads(raw))
     if rel is None:
         return {"current": __version__, "available": False}
     return {"current": __version__, "available": is_newer(rel.version), "version": rel.version,

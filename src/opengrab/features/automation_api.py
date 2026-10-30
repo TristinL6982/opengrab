@@ -34,7 +34,8 @@ class AutomationService:
         self.executor = lambda argv: subprocess.run(argv, check=False,
                                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.exit_app = None  # set by the GUI so "exit" closes OpenGrab
-        self.webhook_opener = urllib.request.urlopen
+        from ..tls import urlopen
+        self.webhook_opener = urlopen
         self._stop = threading.Event()
         threading.Thread(target=self._loop, name="automation", daemon=True).start()
 

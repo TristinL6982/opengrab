@@ -1164,7 +1164,8 @@ class DownloadManager:
         import shutil
         import urllib.request
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as fh:
+        from ..tls import urlopen
+        with urlopen(req, timeout=60) as resp, open(dest, "wb") as fh:
             shutil.copyfileobj(resp, fh, 1024 * 1024)
 
     @staticmethod
@@ -1273,7 +1274,8 @@ class DownloadManager:
         """Fetch one URL (an HLS playlist or segment) into memory."""
         import urllib.request
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        from ..tls import urlopen
+        with urlopen(req, timeout=60) as resp:
             return resp.read()
 
     # ------------------------------------------------------------ W11 reconnect

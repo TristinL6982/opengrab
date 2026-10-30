@@ -720,6 +720,10 @@
     [
       "^Installing (\\S+)\\. OpenGrab restarts in a moment\\.$",
       "正在安装 $1。OpenGrab 即将重启。"
+    ],
+    [
+      "^You have OpenGrab (\\S+)\\.$",
+      "当前版本为 OpenGrab $1。"
     ]
   ]
 }

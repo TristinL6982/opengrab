@@ -178,3 +178,30 @@ def test_release_tools_sign_what_the_updater_accepts(tmp_path, monkeypatch):
     env.pop("RELEASE_SIGNING_KEY")
     assert subprocess.run([sys.executable, str(root / "tools" / "sign_release.py"), str(asset)],
                           capture_output=True, env=env, timeout=60).returncode == 2
+
+
+def test_outgoing_https_trusts_windows_and_certifi_roots():
+    import certifi
+    from opengrab import tls
+    ctx = tls.context()
+    assert ctx.verify_mode.name == "CERT_REQUIRED" and ctx.check_hostname
+    stats = ctx.cert_store_stats()
+    assert stats["x509_ca"] > 100  # certifi's bundle is loaded
+    src = Path(__file__).resolve().parents[2] / "src" / "opengrab"
+    for name in ("updater.py", "addons.py", "engine/manager.py", "features/automation_api.py"):
+        text = (src / name).read_text(encoding="utf-8")
+        assert "urllib.request.urlopen(" not in text, name  # use tls.urlopen
+    assert certifi.where()
+
+
+def test_no_published_release_means_up_to_date():
+    import urllib.error
+
+    def none(url):
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+    assert updater.check(fetch=none) == {"current": updater.__version__, "available": False}
+
+    def down(url):
+        raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)
+    with pytest.raises(urllib.error.HTTPError):
+        updater.check(fetch=down)
