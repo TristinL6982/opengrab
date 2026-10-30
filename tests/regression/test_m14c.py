@@ -168,6 +168,8 @@ def test_dashboard_counts_a_real_download(tmp_path):
         with running_server() as srv:
             link = srv.manager.add_url(url)
             _wait(lambda: srv.manager.get(link.id).status.value == "finished")
+            # the status flips a moment before the "finished" event is counted
+            _wait(lambda: req(srv, "GET", "/api/dashboard")[1]["today"]["finished"] == 1)
             st, dash = req(srv, "GET", "/api/dashboard")
             assert st == 200
             assert dash["today"]["bytes"] == len(data)
