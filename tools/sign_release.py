@@ -1,4 +1,4 @@
-"""Sign a release file with the key in the RELEASE_SIGNING_KEY environment
+r"""Sign a release file with the key in the RELEASE_SIGNING_KEY environment
 variable (PEM). Writes <file>.sig (base64 Ed25519 signature over the bytes).
 
     python tools/sign_release.py build/release/OpenGrab-0.2.0-win64.zip

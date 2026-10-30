@@ -1,4 +1,4 @@
-"""Create the Ed25519 release signing key (run once, by the maintainer).
+r"""Create the Ed25519 release signing key (run once, by the maintainer).
 
     .venv\Scripts\python.exe tools\release_key.py
 

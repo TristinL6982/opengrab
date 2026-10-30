@@ -38,10 +38,12 @@ from . import __version__
 
 REPO = "TristinL6982/opengrab"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
-# Ed25519 public keys (hex) allowed to sign releases. Empty until the
-# maintainer creates the release key (tools/release_key.py); until then the
-# updater reports updates but refuses to install them.
-RELEASE_KEYS: list[str] = []
+# Ed25519 public keys (hex) allowed to sign releases. The private half is
+# the RELEASE_SIGNING_KEY GitHub Actions secret (tools/release_key.py made it).
+# To rotate: add the new key here, ship a release, then remove the old one.
+RELEASE_KEYS: list[str] = [
+    "2f3f2e910fff6849907a2fbb29f46b5c58929216a2450460791d61ca5f79b97d",  # release key, 2026-10-30
+]
 
 
 class UpdateError(Exception):
