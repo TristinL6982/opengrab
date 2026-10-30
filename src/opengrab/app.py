@@ -78,6 +78,11 @@ def start_server(settings: Optional[Settings] = None,
                  host: Optional[str] = None, port: Optional[int] = None):
     """Start the download engine and local API, returning their handles."""
     settings = settings or load_settings()
+    try:  # optional add-ons the user installed (e.g. local OCR)
+        from . import addons
+        addons.activate_installed()
+    except Exception:
+        _log.warning("could not activate add-ons", exc_info=True)
     manager = DownloadManager(settings)
     server = ApiServer(settings, manager, host=host or settings.api_host, port=port if port is not None else settings.api_port)
     fell_back = False
@@ -251,6 +256,15 @@ def run_gui_mode(settings: Optional[Settings] = None,
                 ),
             )
             tray.run_detached()
+            # W1: desktop toasts for notifications go through the tray icon
+            notify = getattr(server, "features", {}).get("notify")
+            if notify is not None and hasattr(tray, "notify"):
+                def _toast(title, message, _tray=tray):
+                    try:
+                        _tray.notify(message or title, title)
+                    except Exception:
+                        _log.debug("tray toast failed", exc_info=True)
+                notify.toaster = _toast
             watcher.start()
             webview.start()
         finally:

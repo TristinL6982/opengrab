@@ -59,8 +59,11 @@ from .engine.manager import DownloadManager
 from .settings import Settings, app_data_dir
 from .access import AccessGate
 from .remote import is_loopback, policy_from_dict
+from .routes import Request, Router
 
 log = __import__("logging").getLogger("opengrab.server")
+# Returned by a route handler that already wrote its own response.
+_HANDLED = object()
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -139,8 +142,10 @@ class ApiServer:
         # -- SSE fanout ----------------------------------------------------
         self._clients: list["queue.Queue"] = []
         self._clients_lock = threading.Lock()
-        self._notifications = deque(maxlen=200)
-        self._notifications_lock = threading.Lock()
+        # SSE tickets: EventSource cannot send an Authorization header, so
+        # the UI trades its token for a short-lived, single-use ticket.
+        self._sse_tickets: dict[str, float] = {}
+        self._sse_tickets_lock = threading.Lock()
         self._terminal_jobs: dict[str, dict] = {}
         self._terminal_lock = threading.Lock()
         self._audio_tickets: dict[str, dict] = {}
@@ -151,25 +156,9 @@ class ApiServer:
         prev = manager.on_change
 
         def fanout(kind: str, payload) -> None:
+            # W1: notifications are recorded by features/notify.py
             msg = json.dumps({"kind": kind, "payload": payload},
                              default=str)
-            status = payload.get("status") if isinstance(payload, dict) else ""
-            if kind in {"finished", "error"} or status in {
-                    "captcha", "login", "paywall"}:
-                title = ""
-                if isinstance(payload, dict):
-                    title = (payload.get("title") or payload.get("filename")
-                             or "").strip()
-                label = kind if kind in {"finished", "error"} else status
-                notice = {
-                    "id": uuid.uuid4().hex,
-                    "kind": label,
-                    "link_id": payload.get("id") if isinstance(payload, dict) else None,
-                    "message": f"{title}: {label}" if title else f"Download {label}",
-                    "timestamp": time.time(),
-                }
-                with self._notifications_lock:
-                    self._notifications.append(notice)
             with self._clients_lock:
                 dead = []
                 for q in self._clients:
@@ -187,6 +176,20 @@ class ApiServer:
         manager.on_change = fanout
         self.httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
+        # -- features wired in after M12 (see routes.py, features/) --------
+        self.router = Router()
+        from .features import install_all
+        self.features = install_all(self)
+
+    def broadcast(self, kind: str, payload) -> None:
+        """Send one event to every live UI/SSE client (not a link event)."""
+        msg = json.dumps({"kind": kind, "payload": payload}, default=str)
+        with self._clients_lock:
+            for q in list(self._clients):
+                try:
+                    q.put_nowait(msg)
+                except Exception:
+                    pass
 
     def capture_clipboard_text(self, text: str) -> int:
         """Queue filtered URL candidates for user review; never auto-add them."""
@@ -928,6 +931,29 @@ def _make_handler(srv: ApiServer):
                 return None
             return l
 
+        def _route(self, method: str, p: str, q: dict, body) -> bool:
+            route, params = srv.router.match(method, p)
+            if route is None:
+                return False
+            scope = None
+            if route.action:
+                scope = self._gate(route.action)
+                if scope is None:
+                    return True
+            req = Request(method=method, path=p, params=params, query=q or {},
+                          body=body if isinstance(body, dict) else {}, srv=srv,
+                          handler=self, scope=scope)
+            try:
+                code, payload = srv.router.call(route, req)
+            except FileNotFoundError as e:
+                code, payload = 404, {"error": str(e)}
+            except (ValueError, KeyError) as e:
+                code, payload = 400, {"error": str(e)}
+            if payload is _HANDLED:
+                return True
+            self._json(payload, code)
+            return True
+
         def _api_get(self, u, p: str, q: dict):
             if p in ("/api/ping", "/api/health"):
                 return self._json({"ok": True, "app": "OpenGrab",
@@ -956,6 +982,12 @@ def _make_handler(srv: ApiServer):
                     if not file_path.is_file():
                         return self._err(404, "audio file not found")
                     return self._serve_file(file_path, attachment=False)
+            if p == "/api/events" and q.get("ticket"):
+                with srv._sse_tickets_lock:
+                    expires = srv._sse_tickets.pop(q["ticket"][0], 0)
+                if expires >= time.time():
+                    return self._sse()
+                return self._err(401, "event ticket expired or unknown")
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
             if p == "/api/extension/config":
@@ -994,9 +1026,6 @@ def _make_handler(srv: ApiServer):
             if p == "/api/linkgrabber":
                 with srv._clipboard_candidates_lock:
                     return self._json(list(srv._clipboard_candidates.values()))
-            if p == "/api/notifications":
-                with srv._notifications_lock:
-                    return self._json(list(srv._notifications))
             if p == "/api/captcha-test":
                 return self._json({
                     "selected": mgr.settings.captcha_provider,
@@ -1050,6 +1079,8 @@ def _make_handler(srv: ApiServer):
                 return self._json({"scanned": n})
             if p == "/api/events":
                 return self._sse()
+            if self._route("GET", p, q, {}):
+                return
             self._err(404, "unknown endpoint")
 
         def _api_post(self, p: str, body: dict):
@@ -1176,11 +1207,15 @@ def _make_handler(srv: ApiServer):
                     return self._err(400, str(e))
             if p == "/api/clear-finished":
                 return self._json({"cleared": mgr.clear_finished()})
-            if p == "/api/notifications/clear":
-                with srv._notifications_lock:
-                    cleared = len(srv._notifications)
-                    srv._notifications.clear()
-                return self._json({"cleared": cleared})
+            if p == "/api/events-ticket":
+                ticket = secrets.token_hex(24)
+                now = time.time()
+                with srv._sse_tickets_lock:
+                    for key, exp in list(srv._sse_tickets.items()):
+                        if exp < now:
+                            del srv._sse_tickets[key]
+                    srv._sse_tickets[ticket] = now + 60
+                return self._json({"ticket": ticket, "expires_in": 60})
             if p == "/api/files":
                 try:
                     return self._files_post(body)
@@ -1232,6 +1267,8 @@ def _make_handler(srv: ApiServer):
                 link = mgr.add_url(candidate["url"])
                 return self._json({"ok": True, "link": link.to_public()}, 201)
             if p == "/api/settings":
+                if self._gate("settings_write") is None:
+                    return
                 if not isinstance(body, dict):
                     return self._json({"error": "settings body must be a JSON object"}, 400)
                 forbidden = {"api_token", "api_host", "api_port", "base_path", "terminal_enabled"}
@@ -1262,6 +1299,8 @@ def _make_handler(srv: ApiServer):
                                     str(body.get("kind", "exclude")),
                                     bool(body.get("use_glob", False)))
                 return self._json(f)
+            if self._route("POST", p, {}, body):
+                return
             self._err(404, "unknown endpoint")
 
         def _api_delete(self, p: str):
@@ -1289,6 +1328,8 @@ def _make_handler(srv: ApiServer):
                     return self._err(404, "Packagizer rule not found")
                 mgr.settings.save()
                 return self._json({"ok": True})
+            if self._route("DELETE", p, {}, {}):
+                return
             self._err(404, "unknown endpoint")
 
         # -- SSE -----------------------------------------------------------

@@ -100,28 +100,73 @@ class ManualSolver(BaseSolver):
 
 
 class DdddOCRSolver(BaseSolver):
-    """Local OCR (ddddocr). Free, offline, fast for classic text captchas."""
+    """Local OCR (ddddocr). Free, offline, CPU-only, for classic text captchas.
+
+    Spec section 2: off by default and only usable after the user installs
+    the "ocr" add-on and turns on ``captcha_ocr_enabled``. Skipped on weak
+    hardware unless ``captcha_ocr_ignore_hardware`` is set, and disabled for
+    the session when a solve is slower than hardware.SLOW_INFERENCE_MS. The
+    model loads on the first captcha and is dropped after IDLE_UNLOAD_S.
+    """
     id = "ddddocr"
     name = "Local OCR (ddddocr)"
     kinds = ("text", "image")
     priority = 10
     needs_key = False
+    IDLE_UNLOAD_S = 600.0
     _ocr = None
+    _last_used = 0.0
+    _too_slow = False
     _lock = __import__("threading").Lock()
+
+    def unavailable_reason(self) -> str:
+        if not getattr(self.settings, "captcha_ocr_enabled", False):
+            return "turned off (opt in under Settings, Captcha)"
+        if DdddOCRSolver._too_slow:
+            return "disabled for this session: OCR was too slow on this PC"
+        if not getattr(self.settings, "captcha_ocr_ignore_hardware", False):
+            from .. import hardware
+            prof = hardware.profile()
+            if prof["weak"]:
+                return "skipped on weak hardware (" + ", ".join(prof["reasons"]) + ")"
+        from .. import addons
+        addons.activate_installed()
+        if not addons.importable("ddddocr"):
+            return "the Local OCR add-on is not installed"
+        return ""
 
     def enabled(self) -> bool:
         try:
-            self._get_ocr()
-            return True
+            return not self.unavailable_reason()
         except Exception:
             return False
 
     def _get_ocr(self):
         with self._lock:
-            if self._ocr is None:
-                import ddddocr  # lazy: heavy import
-                self._ocr = ddddocr.DdddOcr(show_ad=False)
-            return self._ocr
+            if DdddOCRSolver._ocr is None:
+                import ddddocr  # lazy: heavy import, only after opt-in
+                DdddOCRSolver._ocr = ddddocr.DdddOcr(show_ad=False)
+                self._schedule_unload()
+            DdddOCRSolver._last_used = time.time()
+            return DdddOCRSolver._ocr
+
+    @classmethod
+    def _schedule_unload(cls) -> None:
+        import threading
+
+        def check():
+            while True:
+                time.sleep(min(60.0, cls.IDLE_UNLOAD_S))
+                with cls._lock:
+                    if cls._ocr is None:
+                        return
+                    if time.time() - cls._last_used >= cls.IDLE_UNLOAD_S:
+                        cls._ocr = None
+                        import gc
+                        gc.collect()
+                        return
+
+        threading.Thread(target=check, name="ocr-idle-unload", daemon=True).start()
 
     def solve(self, req: CaptchaRequest, timeout_s: float = 90.0) -> CaptchaResult:
         img_b64 = req.image_b64 or (req.extra.get("image_b64") or "")
@@ -133,12 +178,16 @@ class DdddOCRSolver(BaseSolver):
             img = base64.b64decode(img_b64)
             t0 = time.time()
             text = ocr.classification(img)
+            ms = int((time.time() - t0) * 1000)
+            from .. import hardware
+            if ms > hardware.SLOW_INFERENCE_MS:
+                DdddOCRSolver._too_slow = True
             text = (text or "").strip()
             if not text:
                 return CaptchaResult(ok=False, provider=self.id,
                                      error="OCR returned empty")
             return CaptchaResult(ok=True, text=text, provider=self.id,
-                                 raw={"ms": int((time.time() - t0) * 1000)})
+                                 raw={"ms": ms})
         except Exception as e:
             return CaptchaResult(ok=False, provider=self.id, error=str(e))
 

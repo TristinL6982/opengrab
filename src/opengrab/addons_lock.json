@@ -1,0 +1,68 @@
+{
+  "python": "cp312",
+  "platform": "win_amd64",
+  "addons": {
+    "ocr": {
+      "root": "ddddocr",
+      "wheels": [
+        {
+          "name": "ddddocr",
+          "version": "1.6.1",
+          "filename": "ddddocr-1.6.1-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/0e/48/cbaed3981b8d8d51141b9b4779b811f4728e65d952a1e3e2e5e929539183/ddddocr-1.6.1-py3-none-any.whl",
+          "sha256": "c7c70f4ae2d0335440ae8b272eea48c9f6888ecef46785fe2311f0c97a133935",
+          "size": 75983593
+        },
+        {
+          "name": "flatbuffers",
+          "version": "25.12.19",
+          "filename": "flatbuffers-25.12.19-py2.py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/e8/2d/d2a548598be01649e2d46231d151a6c56d10b964d94043a335ae56ea2d92/flatbuffers-25.12.19-py2.py3-none-any.whl",
+          "sha256": "7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4",
+          "size": 26661
+        },
+        {
+          "name": "numpy",
+          "version": "2.5.4",
+          "filename": "numpy-2.5.4-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/12/33/fefe62073dc8acfd0f2b9ed7c003af2f50aa61555e113e6db02b8f79f145/numpy-2.5.4-cp312-cp312-win_amd64.whl",
+          "sha256": "a7b1b6353e36a7e50de2973a38d705c88ee93adcf120673cee7f45a4a3fa223a",
+          "size": 12573091
+        },
+        {
+          "name": "onnxruntime",
+          "version": "1.31.0",
+          "filename": "onnxruntime-1.31.0-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/be/ed/b12cea136ccd7b03d924f46b8393faf7ceac21115c0c50e729faa248cf23/onnxruntime-1.31.0-cp312-cp312-win_amd64.whl",
+          "sha256": "09d56445c1753e66e0912de69d3f0184016ad9a191dcd6925bf5dd570d2bfbe5",
+          "size": 14888841
+        },
+        {
+          "name": "opencv-python",
+          "version": "5.0.0.93",
+          "filename": "opencv_python-5.0.0.93-cp37-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/21/f0/9fa6e85cb10c8eb36a0222d27e50fe381b86ce49a55446bf39f491727564/opencv_python-5.0.0.93-cp37-abi3-win_amd64.whl",
+          "sha256": "f90ba04b8f73bc5c3814037699739f0156f597338a98f05956c684e7c3ca10d2",
+          "size": 44000345
+        },
+        {
+          "name": "packaging",
+          "version": "26.3",
+          "filename": "packaging-26.3-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+          "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+          "size": 129956
+        },
+        {
+          "name": "protobuf",
+          "version": "7.36.2",
+          "filename": "protobuf-7.36.2-cp310-abi3-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/8a/55/b77bda4e5e5f5971fb51b07663694690e9afdb9402136c16a522bd621cad/protobuf-7.36.2-cp310-abi3-win_amd64.whl",
+          "sha256": "a300819d441e078a5608c0d3c709796bb548136058fda017ae51d425b44fd353",
+          "size": 456514
+        }
+      ],
+      "download_bytes": 148059001
+    }
+  }
+}

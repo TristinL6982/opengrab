@@ -249,3 +249,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   .linkrow { grid-template-columns: 1fr auto; grid-template-rows: auto auto; }
   .c-prog { grid-column: 1 / -1; }
 }
+
+/* W1 notifications */
+.badge-count { display:inline-block; min-width:1.4em; padding:0 .35em; margin-left:.3em;
+  border-radius:1em; background:var(--err, #ef4444); color:#fff; font-size:11px; line-height:1.5em; text-align:center; }
+.krow.unread { border-left:3px solid var(--accent, #4f8cff); }

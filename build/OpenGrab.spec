@@ -9,13 +9,13 @@ ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 UI = SRC / "opengrab" / "ui" / "static"
 
-datas = [(str(UI), "ui/static"), (os.path.join(SPECPATH, "..", "src", "opengrab", "assets"), "opengrab/assets"), (os.path.join(SPECPATH, "opengrab.ico"), "opengrab.ico"), (str(SRC / "opengrab" / "plugins" / "templates"), "opengrab/plugins/templates")]
+datas = [(str(UI), "ui/static"), (os.path.join(SPECPATH, "..", "src", "opengrab", "assets"), "opengrab/assets"), (os.path.join(SPECPATH, "opengrab.ico"), "opengrab.ico"), (str(SRC / "opengrab" / "plugins" / "templates"), "opengrab/plugins/templates"), (str(SRC / "opengrab" / "addons_lock.json"), "opengrab")]
 binaries = []
-hiddenimports = ["webview", "pystray", "PIL", "curl_cffi", "yt_dlp", "ddddocr", "py7zr", "rarfile", "opengrab.smoke", "opengrab.engine.archives", "opengrab.engine.packagizer"]
+hiddenimports = ["webview", "pystray", "PIL", "curl_cffi", "yt_dlp", "py7zr", "rarfile", "opengrab.smoke", "opengrab.engine.archives", "opengrab.engine.packagizer"]
 # builtin plugins are discovered with pkgutil at runtime, so PyInstaller cannot see them statically
 sys.path.insert(0, str(SRC))
 hiddenimports += collect_submodules("opengrab.plugins")
-for package in ("yt_dlp", "ddddocr", "curl_cffi", "webview", "pystray", "py7zr"):
+for package in ("yt_dlp", "curl_cffi", "webview", "pystray", "py7zr"):
     pkg_datas, pkg_bins, pkg_hidden = collect_all(package)
     datas += pkg_datas
     binaries += pkg_bins
@@ -27,7 +27,10 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False,
+    hookspath=[], hooksconfig={}, runtime_hooks=[], noarchive=False,
+    # Spec section 2: no ML packages in the base app. Local OCR is an add-on
+    # downloaded on opt-in (src/opengrab/addons.py).
+    excludes=["ddddocr", "onnxruntime", "cv2", "numpy", "torch", "tensorflow"],
 )
 pyz = PYZ(a.pure)
 exe = EXE(

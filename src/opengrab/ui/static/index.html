@@ -30,7 +30,7 @@
       <button data-tab="packagizer" class="tab">Packagizer</button>
       <button data-tab="settings" class="tab">Settings</button>
       <button data-tab="terminal" class="tab">Terminal</button>
-      <button data-tab="notifications" class="tab">Notifications</button>
+      <button data-tab="notifications" class="tab">Notifications <span id="notif-badge" class="badge-count hidden">0</span></button>
       <button data-tab="files" class="tab">Files &amp; Audio</button>
     </nav>
   </header>
@@ -90,7 +90,7 @@
     <section id="tab-notifications" class="tabpane">
       <h2>Notifications</h2>
       <div class="formrow"><span class="hint">Recent completions, errors, and items waiting for action.</span>
-        <span class="grow"></span><button id="btn-notifications-clear">Clear</button></div>
+        <span class="grow"></span><button id="btn-notifications-read">Mark all read</button><button id="btn-notifications-clear">Clear</button></div>
       <div id="notifications-list" class="linklist"></div>
     </section>
 
@@ -235,6 +235,7 @@
         <label class="check"><input id="set-ua_rotation" type="checkbox"> rotate user agents</label>
         <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> auto-start after grab</label>
         <label class="check"><input id="set-clipboard_monitor_enabled" type="checkbox"> monitor copied links (review before adding)</label>
+        <label class="check"><input id="set-toasts_enabled" type="checkbox"> desktop notifications (finished, failed, captcha waiting)</label>
         <label class="check"><input id="set-terminal_enabled" type="checkbox"> enable authenticated web terminal (runs local commands)</label>
         <label class="check"><input id="set-auto_extract_archives" type="checkbox"> extract ZIP/7z/TAR archives after download</label>
         <label>archive extraction file limit
@@ -249,6 +250,20 @@
         <button id="btn-set-reload-plugins">rescan plugins</button>
         <span class="grow"></span>
         <label class="check"><input id="set-confirm_delete" type="checkbox" style="display:inline-block"> confirm deletes</label>
+      </div>
+      <h2>Local OCR captcha solver (optional)</h2>
+      <p class="hint">Solves simple image captchas offline on the CPU. It is not part of the
+      base install: OpenGrab downloads it only when you press Install, checks every file's
+      hash, and keeps it in your data folder. It stays off on weak PCs unless you override that.</p>
+      <div class="formrow">
+        <span id="addon-ocr-status" class="hint">Checking…</span>
+        <span class="grow"></span>
+        <button id="btn-addon-ocr-install">Install</button>
+        <button id="btn-addon-ocr-remove" class="danger" hidden>Remove</button>
+      </div>
+      <div class="formrow">
+        <label class="check"><input id="set-captcha_ocr_enabled" type="checkbox"> use local OCR for captchas</label>
+        <label class="check"><input id="set-captcha_ocr_ignore_hardware" type="checkbox"> also on weak hardware</label>
       </div>
       <h2>Plugin health</h2>
       <table id="plugin-health"><thead><tr><th>Plugin</th><th>OK</th><th>Fail</th><th>Last error</th></tr></thead><tbody id="plugin-health-body"></tbody></table>

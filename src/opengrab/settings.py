@@ -70,6 +70,8 @@ class Settings(BaseModel):
     captcha_capmonster_key: str = ""
     captcha_capsolver_key: str = ""
     captcha_nopecha_key: str = ""
+    captcha_ocr_enabled: bool = False          # opt-in local OCR add-on (ddddocr)
+    captcha_ocr_ignore_hardware: bool = False  # run local OCR even on weak hardware
     captcha_tesseract_enabled: bool = False   # opt-in second local OCR
     captcha_tesseract_path: str = ""          # empty = auto-detect
     captcha_audio_enabled: bool = False      # opt-in offline audio captcha solver
@@ -96,6 +98,7 @@ class Settings(BaseModel):
     base_path: str = ""             # reverse-proxy path prefix, e.g. /opengrab
     terminal_enabled: bool = False  # shell API is opt-in and always token-gated
     clipboard_monitor_enabled: bool = False
+    toasts_enabled: bool = True     # desktop toast for finished/failed/captcha (W1)
 
     # Password search remains opt-in and uses only a user-selected local file.
     auto_extract_archives: bool = True

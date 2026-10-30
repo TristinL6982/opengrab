@@ -77,9 +77,21 @@ function showAuthBanner() {
 
 /* ============================================================ SSE */
 let sseSource = null, sseRetry = 0;
-function connectSSE() {
+async function connectSSE() {
   if (sseSource) sseSource.close();
-  sseSource = new EventSource(withBasePath("/api/events"));
+  // EventSource cannot send the Authorization header: trade the token for a
+  // short-lived single-use ticket first.
+  let url = withBasePath("/api/events");
+  try {
+    const t = await api("/api/events-ticket", "POST", {});
+    url += "?ticket=" + encodeURIComponent(t.ticket);
+  } catch (e) {
+    S.conn = "reconnecting…"; setConnPill();
+    if (e.message === "unauthorized") return;
+    setTimeout(connectSSE, Math.min(15000, 500 * Math.pow(2, ++sseRetry)));
+    return;
+  }
+  sseSource = new EventSource(url);
   sseSource.onopen = () => {
     sseRetry = 0;
     S.conn = "live";
@@ -99,7 +111,22 @@ function connectSSE() {
   };
 }
 
+function setUnread(n) {
+  const b = $("#notif-badge");
+  if (!b) return;
+  b.textContent = n > 99 ? "99+" : String(n || 0);
+  b.classList.toggle("hidden", !n);
+}
+
 function onEvent(kind, payload) {
+  if (kind === "notification") {
+    setUnread(payload.unread || 0);
+    const item = payload.item;
+    if (item && !["finished", "error"].includes(item.kind)) toast(item.title + (item.message ? ": " + item.message : ""), item.level === "failed" ? "err" : "");
+    if ($("#tab-notifications")?.classList.contains("active")) renderNotifications();
+    return;
+  }
+  if (kind === "addon") { loadAddons(); return; }
   if (payload && payload.id && payload.status) {
     const isNew = !S.links.has(payload.id);
     S.links.set(payload.id, payload);
@@ -396,10 +423,14 @@ function refreshData() {
 async function renderNotifications() {
   try {
     const items = await api("/api/notifications");
+    setUnread(items.filter(n => !n.read).length);
     $("#notifications-list").innerHTML = items.length ? items.map(n =>
-      `<div class="krow"><span class="st ${esc(n.kind || "")}">${esc(n.kind || "notice")}</span><span class="grow">${esc(n.message || n.text || JSON.stringify(n))}</span><span class="hint">${n.timestamp ? new Date(n.timestamp * 1000).toLocaleString() : ""}</span></div>`
+      `<div class="krow${n.read ? "" : " unread"}"><span class="st ${esc(n.kind || "")}">${esc(n.kind || "notice")}</span><span class="grow"><b>${esc(n.title || "")}</b> ${esc(n.message || n.text || "")}</span><span class="hint">${n.timestamp ? new Date(n.timestamp * 1000).toLocaleString() : ""}</span>${n.read ? "" : `<button class="sm" data-act="notif-read" data-id="${n.id}">mark read</button>`}</div>`
     ).join("") : '<div class="empty">No recent notifications.</div>';
   } catch {}
+}
+async function refreshUnread() {
+  try { setUnread((await api("/api/notifications/summary")).unread); } catch {}
 }
 
 async function renderFiles() {
@@ -514,6 +545,10 @@ async function act(action, el) {
         refreshData();
         break;
       }
+      case "notif-read":
+        await api(`/api/notifications/${encodeURIComponent(id)}/read`, "POST", {});
+        await renderNotifications();
+        return;
       case "pack-del":
         await api(`/api/packagizer/${encodeURIComponent(id)}`, "DELETE");
         await renderPackagizer();
@@ -656,10 +691,52 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "captcha_2captcha_key", "captcha_capmonster_key", "captcha_capsolver_key",
   "ua_rotation", "auto_start_after_grab", "clipboard_monitor_enabled",
   "terminal_enabled", "auto_extract_archives", "archive_max_files",
-  "archive_max_expanded_gib", "archive_password_file"];
+  "archive_max_expanded_gib", "archive_password_file",
+  "captcha_ocr_enabled", "captcha_ocr_ignore_hardware", "toasts_enabled"];
+
+/* ============================================================ add-ons */
+let addonPoll = null;
+async function loadAddons() {
+  const st = $("#addon-ocr-status");
+  if (!st) return;
+  try {
+    const r = await api("/api/addons");
+    const a = (r.addons || []).find(x => x.name === "ocr");
+    if (!a) return;
+    const hw = r.hardware || {};
+    const job = a.job;
+    let text;
+    if (job && job.running) {
+      const pct = job.total ? Math.round(100 * job.done / job.total) : 0;
+      text = `Installing: ${job.step || ""} (${pct}%)`;
+    } else if (a.installed) {
+      text = `Installed, ${humanBytes(a.disk_bytes)} on disk.`;
+    } else {
+      text = `Not installed. Download size ${humanBytes(a.download_bytes)}.`;
+      if (job && job.error) text += " Last attempt failed: " + job.error;
+    }
+    if (hw.weak) text += " This PC counts as weak hardware (" + (hw.reasons || []).join(", ") + ").";
+    st.textContent = text;
+    $("#btn-addon-ocr-install").hidden = a.installed;
+    $("#btn-addon-ocr-install").disabled = !!(job && job.running);
+    $("#btn-addon-ocr-remove").hidden = !a.installed;
+    clearTimeout(addonPoll);
+    if (job && job.running) addonPoll = setTimeout(loadAddons, 1000);
+  } catch { st.textContent = "Add-on status unavailable."; }
+}
+$("#btn-addon-ocr-install").addEventListener("click", async () => {
+  try { await api("/api/addons/ocr/install", "POST", {}); loadAddons(); }
+  catch (e) { toast("Install failed: " + e.message, "err"); }
+});
+$("#btn-addon-ocr-remove").addEventListener("click", async () => {
+  if (!confirm("Remove the local OCR add-on?")) return;
+  try { await api("/api/addons/ocr/remove", "POST", {}); loadAddons(); }
+  catch (e) { toast("Remove failed: " + e.message, "err"); }
+});
 
 async function loadSettings() {
   loadDevices();
+  loadAddons();
   try {
     const s = await api("/api/settings");
     for (const f of SET_FIELDS) {
@@ -804,6 +881,10 @@ $("#btn-linkgrabber-clear").addEventListener("click", async () => {
   } catch (e) { toast("Could not clear candidates: " + e.message, "err"); }
 });
 
+$("#btn-notifications-read").addEventListener("click", async () => {
+  try { await api("/api/notifications/read-all", "POST", {}); await renderNotifications(); }
+  catch (e) { toast("Could not mark notifications read: " + e.message, "err"); }
+});
 $("#btn-notifications-clear").addEventListener("click", async () => {
   try { await api("/api/notifications/clear", "POST", {}); await renderNotifications(); }
   catch (e) { toast("Could not clear notifications: " + e.message, "err"); }
@@ -881,7 +962,6 @@ async function loadPluginHealth() {
       `<tr><td>${esc(id)}</td><td>${h[id].ok}</td><td>${h[id].fail}</td><td>${esc(h[id].last_error || "")}</td></tr>`).join("");
   } catch (e) { toast("Plugin health failed: " + e.message, "err"); }
 }
-loadPluginHealth();
 
 /* ============================================================ boot */
 (function boot() {
@@ -889,6 +969,8 @@ loadPluginHealth();
   updatePills();
   renderGraph();
   refreshData();
+  refreshUnread();
+  loadPluginHealth();
   connectSSE();
   // PWA service worker (best effort; http contexts only register on https/localhost)
   if ("serviceWorker" in navigator) {

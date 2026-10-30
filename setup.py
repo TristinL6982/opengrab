@@ -6,7 +6,7 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     include_package_data=True,
-    package_data={"opengrab": ["ui/static/*"]},
+    package_data={"opengrab": ["ui/static/*", "addons_lock.json"]},
     entry_points={
         'console_scripts': [
             'opengrab=opengrab.cli:main',
@@ -25,9 +25,9 @@ setup(
         "yt-dlp>=2026.10.21",
         "py7zr>=1.0",
         "rarfile>=4.2",
-        "ddddocr>=1.6.1",
         "pywin32-ctypes",
         "rich"
     ],
+    extras_require={"ocr": ["ddddocr>=1.6.1"]},
     python_requires=">=3.12",
 )

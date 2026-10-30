@@ -121,7 +121,13 @@ class SolverChain:
                 on = s.enabled()
             except Exception:
                 on = False
+            reason = ""
+            if not on and hasattr(s, "unavailable_reason"):
+                try:
+                    reason = s.unavailable_reason()
+                except Exception:
+                    reason = ""
             out.append({"id": s.id, "name": s.name, "enabled": on,
                         "kinds": list(s.kinds), "needs_key": s.needs_key,
-                        "priority": s.priority})
+                        "priority": s.priority, "reason": reason})
         return out

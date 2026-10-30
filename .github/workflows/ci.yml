@@ -17,3 +17,9 @@ jobs:
         run: python -m PyInstaller --clean --noconfirm --distpath release OpenGrab.spec
       - run: build/release/OpenGrab/OpenGrab.exe --version
       - run: build/release/OpenGrab/OpenGrab.exe --smoke-test
+      - name: No ML packages in the base bundle (spec section 2)
+        shell: bash
+        run: |
+          found=$(ls build/release/OpenGrab/_internal | grep -iE '^(onnxruntime|ddddocr|cv2|numpy|torch|tensorflow)' || true)
+          if [ -n "$found" ]; then echo "ML packages bundled: $found"; exit 1; fi
+          du -sh build/release/OpenGrab

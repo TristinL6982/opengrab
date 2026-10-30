@@ -15,8 +15,5 @@ pywebview>=5.1
 pystray>=0.19.5
 Pillow>=10.0
 
-# Local CAPTCHA OCR (lazy-imported; heavy onnxruntime dep)
-ddddocr>=1.4.11
-
 # Build-only
 pyinstaller>=6.10

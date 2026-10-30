@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 KNOWN_ORPHANS = {
     "accountauth", "archives", "avscan", "captcha.harvest", "captcha.inbox",
     "categories", "challenge", "cnl", "cnl_server", "cookies", "debrid",
-    "hashverify", "hostlimits", "linkcheck", "netconfig", "notifications",
+    "hashverify", "hostlimits", "linkcheck", "netconfig",
     "plugins.marketplace", "plugins.permissions", "plugins.sandbox",
     "plugins.sdk", "plugins.updates", "portmap", "premium", "proxies",
     "queues", "reconnect", "recovery", "scheduler", "segments", "siteauth",

@@ -1,0 +1,3 @@
+# Optional local OCR captcha solver (spec section 2: never in the base install).
+# The packaged app downloads pinned wheels instead (src/opengrab/addons_lock.json).
+ddddocr>=1.6.1
