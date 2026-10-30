@@ -46,8 +46,10 @@ def test_hook_gets_event_details_in_its_environment(tmp_path, site):
         srv.manager.add_url(url)
         _wait(lambda: out.exists() and out.read_text())
         assert out.read_text() == "finished|report.pdf"
-        hist = req(srv, "GET", "/api/automation")[1]["history"]
-        assert any(h.get("kind") == "hook" and h["code"] == 0 for h in hist)
+        # the history entry is written after the program exits, a moment
+        # after its output file appears (raced once on CI)
+        _wait(lambda: any(h.get("kind") == "hook" and h["code"] == 0
+                          for h in req(srv, "GET", "/api/automation")[1]["history"]))
 
 
 def test_bad_hooks_and_webhooks_are_reported():

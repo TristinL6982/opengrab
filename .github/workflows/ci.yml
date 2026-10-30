@@ -75,7 +75,13 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m pip install -e .
-      - run: python -m pytest -q -rsxX
+      - name: Virtual display for the tray library (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      - name: Tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a python -m pytest -q -rsxX; else python -m pytest -q -rsxX; fi
 
   docker:
     runs-on: ubuntu-latest

@@ -43,7 +43,8 @@ def test_stop_and_resume_after_splits(tmp_path):
         site.slow_below, site.slow_delay = 4 * MB, 0.08
         site.delay_per_64k = 0.03
         link, dl = _run(url, tmp_path, "r.bin", per_link_chunks=4, segment_min_mb=1)
-        t = threading.Thread(target=lambda: _swallow(dl.run), daemon=True)
+        errors: list = []
+        t = threading.Thread(target=lambda: _swallow(dl.run, errors), daemon=True)
         t.start()
         meta = tmp_path / "r.bin.part.json"
         deadline = time.time() + 30
@@ -53,6 +54,7 @@ def test_stop_and_resume_after_splits(tmp_path):
             time.sleep(0.05)
         dl.stop_event.set()
         t.join(15)
+        assert meta.exists(), f"no checkpoint was written; the download ended with {errors!r}"
         saved = json.loads(meta.read_text())["chunks"]
         assert len(saved) > 4
         # ranges tile the file without gaps or overlaps
@@ -101,8 +103,10 @@ def test_benchmark_multi_connection_beats_single_connection(tmp_path):
         site.close()
 
 
-def _swallow(fn):
+def _swallow(fn, errors=None):
+    """Run fn; a stop raises, so keep the exception for the test's message."""
     try:
         fn()
-    except Exception:
-        pass
+    except Exception as exc:
+        if errors is not None:
+            errors.append(exc)

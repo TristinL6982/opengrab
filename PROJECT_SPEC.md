@@ -119,3 +119,29 @@ Scheduled as M8 sub-tasks.
 - NopeCHA added as a hosted solver option alongside the paid solvers (needs user key).
 - Final auto order: ddddocr -> second OCR / Buster-style audio reCAPTCHA -> Edge (CDP) or Camoufox browser solver -> paid solvers (incl. NopeCHA) by priority -> manual last.
 Scheduled as M8 sub-tasks with 6d.
+
+## 9. Open decisions and known gaps (recorded 2026-10-30)
+Items that need the owner's decision or input, or that are built but not yet verified. None of them is marked complete in PROGRESS.md.
+
+**Needs the owner**
+- **Release signing key.** The in-app updater installs only releases signed with a key listed in `updater.RELEASE_KEYS`, which is empty. Run `tools/release_key.py` once, put the printed public key in `RELEASE_KEYS`, and store the PEM as the GitHub secret `RELEASE_SIGNING_KEY`. Until then the updater reports new releases but refuses to install them.
+- **Windows code signing (Authenticode).** The exe and setup are unsigned, so SmartScreen warns on first run. Needs a code-signing certificate.
+- **Delta updates.** The spec asks for "small delta updates when possible". Updates are the full zip (about 80 MB). Options: binary diff per file against the installed version, or keep full zips.
+- **DLC and CCF containers.** Decrypting DLC needs JDownloader's service keys, which are not public and would conflict with "never port JD2 code". RSDF works. Decision: leave DLC/CCF unsupported (current behaviour: a clear error) or find a licensed route.
+- **Hosted plugin marketplace.** The signed-catalog client exists; no catalog is hosted. Needs a host and a publisher key.
+
+**Decisions taken (change them if you disagree)**
+- **Add-ons live in user data.** The OCR and torrent add-ons install into `%APPDATA%\OpenGrab\addons` so no administrator rights are needed and the updater never has to touch them. The installer creates `models\` and `plugins\` under the install folder for shared files, but nothing uses `models\` yet.
+- **Link handlers are per user (HKCU)**, both in the installer and in Settings, so Settings can switch them off without administrator rights.
+- **Linux and macOS** run the Python core, headless server and web UI (tested in CI). The native window, tray, registry and DPAPI parts are Windows-only and their tests skip there. No Linux or macOS packages are built.
+
+**Built but unverified**
+- RAR extraction (no RAR fixture or unrar on the test machine; 7z and zip are tested).
+- NTLM and Negotiate proxy/server logins (Basic and Digest are tested against local fixtures).
+- UPnP/NAT-PMP port mapping against a real router (tested against a local fake).
+- Docker locally (CI builds the image and waits for its health check).
+
+**Not built**
+- PAC/WPAD automatic proxy configuration.
+- QuickJS or subprocess sandbox for script plugins. Plugins run with the permission and sandbox policy of W12 (declarative templates, approved hosts), not in a separate runtime.
+- Whisper-based audio captcha transcription (Vosk is the offline engine).
