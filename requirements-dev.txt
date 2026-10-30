@@ -1,2 +1,2 @@
 pytest>=8
-pyinstaller>=6.10
+pyinstaller>=6.10libtorrent==2.1.1   # W11 torrent tests (the app gets it as an add-on)
