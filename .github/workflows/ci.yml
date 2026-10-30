@@ -26,12 +26,8 @@ jobs:
       - name: Build the setup wizard (Inno Setup)
         shell: pwsh
         run: |
-          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
-          if (-not $iscc) {
-            $p = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-            if (-not (Test-Path $p)) { choco install innosetup -y --no-progress | Out-Null }
-            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          } else { $iscc = $iscc.Source }
+          choco upgrade innosetup -y --no-progress | Out-Null   # 6.5+ for the Chinese wizard text
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           $ver = python -c "import opengrab; print(opengrab.__version__)"
           & $iscc /Qp "/DAppVersion=$ver" build\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

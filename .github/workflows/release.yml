@@ -39,8 +39,8 @@ jobs:
       - name: Setup wizard
         shell: pwsh
         run: |
+          choco upgrade innosetup -y --no-progress | Out-Null   # 6.5+ for the Chinese wizard text
           $p = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $p)) { choco install innosetup -y --no-progress | Out-Null }
           & $p /Qp "/DAppVersion=$env:VERSION" build\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish

@@ -1,4 +1,4 @@
-; OpenGrab setup (M14). Build after PyInstaller:
+﻿; OpenGrab setup (M14). Build after PyInstaller:
 ;   iscc /DAppVersion=0.1.0 build\installer.iss
 ; Output: build\release\OpenGrab-<version>-setup.exe
 ;
@@ -40,7 +40,8 @@ ChangesAssociations=yes
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; ChineseSimplified.isl is vendored from jrsoftware/issrc (needs Inno Setup 6.5+)
+Name: "zh"; MessagesFile: "ChineseSimplified.isl"
 
 [CustomMessages]
 en.GroupShortcuts=Shortcuts:

@@ -54,7 +54,10 @@ def test_stop_and_resume_after_splits(tmp_path):
             time.sleep(0.05)
         dl.stop_event.set()
         t.join(15)
-        assert meta.exists(), f"no checkpoint was written; the download ended with {errors!r}"
+        final = tmp_path / "r.bin"
+        assert meta.exists(), (f"no checkpoint after {time.time() - deadline + 30:.1f}s; errors={errors!r} "
+                               f"thread alive={t.is_alive()} final file={final.exists() and final.stat().st_size} "
+                               f"files={sorted(p.name for p in tmp_path.iterdir())} requests={len(site.requests)}")
         saved = json.loads(meta.read_text())["chunks"]
         assert len(saved) > 4
         # ranges tile the file without gaps or overlaps
