@@ -63,6 +63,8 @@ def test_magnet_downloads_from_a_peer_and_finishes(seeder):
         assert folder.name == name
         for fname, data in files.items():
             assert hashlib.sha256((folder / fname).read_bytes()).digest() == hashlib.sha256(data).digest()
+        # "finished" is set first; the seeding decision follows on the next poll (raced on CI)
+        _wait(lambda: (srv.manager.get(lid).extra.get("torrent") or {}).get("seeding") == "done")
         st, info = req(srv, "GET", "/api/torrents")
         t = next(x for x in info["torrents"] if x["id"] == lid)
         assert info["installed"] and t["info_hash"] and t["seeding"] == "done"  # no limits: stop at 100%
