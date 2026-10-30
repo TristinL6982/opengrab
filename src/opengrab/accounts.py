@@ -14,10 +14,15 @@ import sys
 from .models import Account
 
 
+# Account.data keys that hold secrets: protected on disk like passwords and
+# never returned by snapshot() (W9).
+SECRET_DATA_KEYS = ("api_token", "cookies_txt", "cookie_header")
+
+
 class AccountManager:
     def __init__(self):
         self.accounts: list[Account] = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # update() saves while holding it
 
     @property
     def _path(self):
@@ -41,6 +46,10 @@ class AccountManager:
                             break
                         password = new_password
                     acc.password = password
+                    for key in SECRET_DATA_KEYS:
+                        value = (acc.data or {}).get(key)
+                        if isinstance(value, str) and value.startswith(("dp:", "ob:")):
+                            acc.data[key] = self._dec(value)
                     self.accounts.append(acc)
             except Exception:
                 self.accounts = []
@@ -54,6 +63,11 @@ class AccountManager:
                 d = a.model_dump()
                 if d.get("password"):
                     d["password"] = self._enc(d["password"])
+                data = dict(d.get("data") or {})
+                for key in SECRET_DATA_KEYS:
+                    if isinstance(data.get(key), str) and data[key]:
+                        data[key] = self._enc(data[key])
+                d["data"] = data
                 payload.append(d)
             tmp_path.write_text(json.dumps(payload, indent=2), "utf-8")
             # Atomic replace
@@ -183,6 +197,11 @@ class AccountManager:
             # Replace password with empty string and add has_password flag
             d["password"] = ""
             d["has_password"] = bool(a.password)
+            data = dict(d.get("data") or {})
+            d["has_token"] = bool(data.pop("api_token", ""))
+            d["has_cookies"] = bool(data.pop("cookies_txt", "") or data.pop("cookie_header", ""))
+            data.pop("cookie_header", None)
+            d["data"] = data
             result.append(d)
         return result
 

@@ -1340,10 +1340,18 @@ def _make_handler(srv: ApiServer):
             if p == "/api/plugins/scan":
                 return self._json({"scanned": mgr.registry.scan(force=True)})
             if p == "/api/accounts":
+                from .features.accounts_api import account_data
+                try:
+                    data = account_data(body)
+                except ValueError as exc:
+                    return self._err(400, str(exc))
                 a = mgr.accounts.add(str(body.get("site", "")),
                                      str(body.get("username", "")),
-                                     str(body.get("password", "")))
-                return self._json(a)
+                                     str(body.get("password", "")),
+                                     premium=bool(body.get("premium", False)),
+                                     data=data)
+                # never echo the password or tokens back
+                return self._json(next(x for x in mgr.accounts.snapshot() if x["id"] == a.id))
             if p == "/api/filters":
                 f = mgr.filters.add(str(body.get("pattern", "")),
                                     str(body.get("kind", "exclude")),

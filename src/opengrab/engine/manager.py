@@ -79,6 +79,10 @@ class DownloadManager:
         self.flow = FlowControl(settings, self.data_dir)
         self.net = NetPolicy(settings)  # W7: proxies and server/proxy logins
         self.client.net = self.net
+        # W9: account choice (premium first, quotas), cookies, debrid
+        from .accounts_flow import AccountPolicy, AccountsView
+        self.account_policy = AccountPolicy(self.accounts, self.client, self.data_dir, settings)
+        self.accounts_view = AccountsView(self.accounts, self.account_policy)
         self._deferred: set[str] = set()
         self._tick_done: dict[str, int] = {}
         self._schedule_paused = False
@@ -219,7 +223,7 @@ class DownloadManager:
 
     def _ctx(self) -> PluginContext:
         return PluginContext(client=self.client, settings=self.settings,
-                             accounts=self.accounts,
+                             accounts=self.accounts_view,
                              captcha_chain=self.captcha_chain,
                              logger=log)
 
@@ -472,6 +476,16 @@ class DownloadManager:
         self._broadcast("grabbed", link)
         return link.extra["hash"]
 
+    def _account_cookies(self, url: str) -> dict:
+        """W9: cookies imported into the account for this host."""
+        header = self.account_policy.cookie_header(url)
+        out = {}
+        for part in header.split(";"):
+            if "=" in part:
+                k, v = part.strip().split("=", 1)
+                out[k] = v
+        return out
+
     def _clearance_extras(self, url: str) -> tuple[dict, dict]:
         host = urlparse(url).hostname or ""
         c = self.clearance.get(host) if host else None
@@ -560,6 +574,8 @@ class DownloadManager:
                            LinkStatus.PAYWALL, LinkStatus.SKIPPED):
             return
         pid = getattr(plugin, "id", "?")
+        if pid != "direct" and self._debrid(link):
+            return  # W9: a debrid account unrestricted the hoster link
         try:
             r = plugin.resolve(link.url, ctx)
         except (CaptchaRequired, LoginRequired, PaywallRequired):
@@ -587,6 +603,20 @@ class DownloadManager:
             self.registry.record_result(pid, False, "no direct url and no children")
             raise PluginError(
                 f"plugin '{pid}' produced no direct url and no children")
+
+    def _debrid(self, link: Link) -> bool:
+        res = self.account_policy.debrid_resolve(link.url)
+        if res is None or not res.url:
+            return False
+        link.direct_url = res.url
+        link.direct_headers = dict(res.headers or {})
+        if res.filename and not link.filename:
+            link.filename = res.filename
+        if res.size:
+            link.size = res.size
+        link.extra.update(res.extra or {})  # account id and service name
+        link.status = LinkStatus.WAITING
+        return True
 
     # ------------------------------------------------------------- download
     def _ready_put(self, link_id: str) -> None:
@@ -913,6 +943,7 @@ class DownloadManager:
                 from ..extrules import browser_request_extras
                 b_headers, b_cookies = browser_request_extras(link.extra, url)
                 c_headers, c_cookies = self._clearance_extras(url)
+                c_cookies.update(self._account_cookies(url))
                 dl = LinkDownload(link, url, dest,
                                   headers={**b_headers, **c_headers,
                                            **(link.direct_headers or {})},
@@ -924,6 +955,9 @@ class DownloadManager:
                                   on_tick=lambda d: self._on_tick(link, d))
                 with self._lock:
                     self._active[link.id] = dl
+                acct = link.extra.get("account")
+                if acct:
+                    self.account_policy.start(acct)
                 try:
                     path = dl.run()
                 finally:
@@ -934,6 +968,8 @@ class DownloadManager:
                     except Exception:
                         pass
                     self._tick_done.pop(link.id, None)
+                    if acct:
+                        self.account_policy.finish(acct)
             path = self._finish_media(link, Path(path))
             link.path = str(path)
             self._verify_hash(link, Path(path))
@@ -1153,6 +1189,9 @@ class DownloadManager:
             prev = int(getattr(dl, "start_done", 0) or 0)
         if done > prev:
             self.flow.record_bytes(done - prev)
+            acct = (dl.link.extra or {}).get("account")
+            if acct:
+                self.account_policy.record(acct, done - prev)  # W9 daily quota
         self._tick_done[link_id] = max(prev, done)
 
     def _on_tick(self, link: Link, dl: LinkDownload) -> None:

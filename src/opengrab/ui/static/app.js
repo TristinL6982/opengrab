@@ -476,17 +476,24 @@ document.addEventListener("paste", (ev) => {
   if (links.length) { ev.preventDefault(); openAddDialog(links.join("\n")); }
 });
 
-let accountsCache = [], filtersCache = [];
+let accountsCache = [], filtersCache = [], usageCache = {}, editingAccount = null;
 async function renderAccounts() {
   if (!accountsCache.length && !$("#tab-accounts").classList.contains("active")) return;
   const el = $("#accounts-list");
   el.innerHTML = accountsCache.length
-    ? accountsCache.map(a => `<div class="krow">
+    ? accountsCache.map(a => {
+        const u = usageCache[a.id] || {};
+        const limit = u.daily_bytes ? ` of ${humanBytes(u.daily_bytes)}` : "";
+        return `<div class="krow">
         <code>${esc(a.site)}</code>
-        <span class="badge">user: ${esc(a.username)}</span>
-        <span class="grow"></span>
-        <button class="sm danger" data-act="acc-del" data-site="${esc(a.site)}">remove</button>
-      </div>`).join("")
+        <span>${esc(a.username)}</span>
+        ${a.premium ? '<span class="badge include">premium</span>' : ""}
+        ${u.service ? `<span class="badge">${esc(u.service === "realdebrid" ? "Real-Debrid" : "AllDebrid")}</span>` : ""}
+        ${a.has_cookies ? '<span class="badge">cookies</span>' : ""}
+        <span class="grow hint">${u.used_today != null ? "Today " + humanBytes(u.used_today) + limit : ""}${u.active ? `, ${u.active} running` : ""}</span>
+        <button class="sm" data-act="acc-edit" data-id="${esc(a.id)}">Edit</button>
+        <button class="sm danger" data-act="acc-del" data-id="${esc(a.id)}">Remove</button>
+      </div>`; }).join("")
     : '<div class="empty">No accounts stored.</div>';
 }
 async function renderFilters() {
@@ -542,6 +549,8 @@ function refreshData() {
   }).catch(() => {});
   api("/api/stats").then(s => { S.stats = s; updatePills(); }).catch(() => {});
   api("/api/accounts").then(a => { accountsCache = a; renderAccounts(); }).catch(() => {});
+  if ($("#tab-accounts")?.classList.contains("active"))
+    api("/api/accounts/usage").then(r => { usageCache = Object.fromEntries(r.accounts.map(u => [u.id, u])); renderAccounts(); }).catch(() => {});
   api("/api/filters").then(f => { filtersCache = f; renderFilters(); }).catch(() => {});
   if ($("#tab-linkgrabber")?.classList.contains("active")) renderLinkGrabber();
   if ($("#tab-notifications")?.classList.contains("active")) renderNotifications();
@@ -694,10 +703,26 @@ async function act(action, el) {
         break;
       }
       case "acc-del": {
-        await api(`/api/accounts/${encodeURIComponent(el.dataset.site)}`, "DELETE");
+        if (!confirm("Remove this account?")) return;
+        await api(`/api/accounts/${encodeURIComponent(id)}`, "DELETE");  // by id (was by site: B6)
         accountsCache = [];
         refreshData();
         break;
+      }
+      case "acc-edit": {
+        const a = accountsCache.find(x => x.id === id);
+        if (!a) return;
+        editingAccount = id;
+        $("#acc-site").value = a.site; $("#acc-site").disabled = true;
+        $("#acc-user").value = a.username; $("#acc-user").disabled = true;
+        $("#acc-pass").value = ""; $("#acc-token").value = ""; $("#acc-cookies").value = "";
+        $("#acc-debrid").value = a.data?.debrid || "";
+        $("#acc-premium").checked = !!a.premium;
+        $("#acc-daily").value = Math.round((a.data?.usage?.daily_bytes || 0) / 1048576);
+        $("#acc-parallel").value = a.data?.usage?.max_parallel || 0;
+        $("#btn-acc-add").textContent = "Save changes";
+        $("#btn-acc-cancel").hidden = false;
+        return;
       }
       case "flt-del": {
         await api(`/api/filters/${encodeURIComponent(el.dataset.id)}`, "DELETE");
@@ -852,17 +877,33 @@ window.addEventListener("drop", async e => {
 });
 
 /* ============================================================ accounts */
+function resetAccountForm() {
+  editingAccount = null;
+  for (const id of ["#acc-site", "#acc-user", "#acc-pass", "#acc-token", "#acc-cookies"]) { $(id).value = ""; $(id).disabled = false; }
+  $("#acc-debrid").value = ""; $("#acc-premium").checked = false;
+  $("#acc-daily").value = 0; $("#acc-parallel").value = 0;
+  $("#btn-acc-add").textContent = "Add account";
+  $("#btn-acc-cancel").hidden = true;
+}
+$("#btn-acc-cancel").addEventListener("click", resetAccountForm);
 $("#btn-acc-add").addEventListener("click", async () => {
   const site = $("#acc-site").value.trim();
   const user = $("#acc-user").value.trim();
-  const pass = $("#acc-pass").value;
-  if (!site || !user) return toast("Site and username required", "err");
+  if (!site || !user) return toast("Site and user name are required", "err");
+  const body = { site, username: user, password: $("#acc-pass").value, premium: $("#acc-premium").checked,
+                 debrid: $("#acc-debrid").value,
+                 usage: { daily_mb: +$("#acc-daily").value || 0, max_parallel: +$("#acc-parallel").value || 0 } };
+  if ($("#acc-token").value) body.api_token = $("#acc-token").value;
+  const cookies = $("#acc-cookies").value.trim();
+  if (cookies) body[cookies.includes("\t") ? "cookies_txt" : "cookie_header"] = cookies;
   try {
-    await api("/api/accounts", "POST", { site, username: user, password: pass });
-    $("#acc-site").value = ""; $("#acc-user").value = ""; $("#acc-pass").value = "";
+    if (editingAccount) await api(`/api/accounts/${encodeURIComponent(editingAccount)}`, "POST", body);
+    else await api("/api/accounts", "POST", body);
+    resetAccountForm();
     toast("Account saved", "ok");
+    accountsCache = [];
     refreshData();
-  } catch (e) { toast("Failed: " + e.message, "err"); }
+  } catch (e) { toast("Could not save the account: " + e.message, "err"); }
 });
 
 /* ============================================================ filters */

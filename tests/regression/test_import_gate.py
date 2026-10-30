@@ -12,11 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 KNOWN_ORPHANS = {
-    "accountauth",
     "archives",
     "avscan",
-    "cookies",
-    "debrid",
     "netconfig",
     "plugins.marketplace",
     "plugins.permissions",
@@ -24,12 +21,10 @@ KNOWN_ORPHANS = {
     "plugins.sdk",
     "plugins.updates",
     "portmap",
-    "premium",
     "reconnect",
 
     "torrent",
     "trackers",
-    "usage",
 }
 
 def _audit():

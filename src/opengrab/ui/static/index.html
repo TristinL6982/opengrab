@@ -188,12 +188,24 @@
       <!-- ============================ ACCOUNTS =========================== -->
       <section id="tab-accounts" class="tabpane pagepane">
         <h2>Site accounts</h2>
-        <p class="hint">Logins for file hosts, kept in your OpenGrab data folder and protected with Windows DPAPI.</p>
-        <div class="formrow">
-          <input id="acc-site" placeholder="Site, e.g. mega.nz">
-          <input id="acc-user" placeholder="User name or email">
-          <input id="acc-pass" type="password" placeholder="Password">
-          <button id="btn-acc-add" class="primary">Add account</button>
+        <p class="hint">Logins for file hosts and debrid services, kept in your OpenGrab data folder and
+        protected with Windows DPAPI. Premium accounts are used first; an account over its daily limit is skipped.
+        With a Real-Debrid or AllDebrid account, hoster links are unlocked through it first.</p>
+        <div class="groupbox">
+          <div class="settings-grid">
+            <label>Site<input id="acc-site" placeholder="e.g. mega.nz or real-debrid.com"></label>
+            <label>User name or email<input id="acc-user"></label>
+            <label>Password<input id="acc-pass" type="password" placeholder="leave blank to keep"></label>
+            <label>Debrid service<select id="acc-debrid"><option value="">none</option><option value="realdebrid">Real-Debrid</option><option value="alldebrid">AllDebrid</option></select></label>
+            <label>API token (debrid)<input id="acc-token" type="password" placeholder="leave blank to keep"></label>
+            <label>Daily limit in MB (0 = none)<input id="acc-daily" type="number" min="0" value="0"></label>
+            <label>Downloads at once (0 = no limit)<input id="acc-parallel" type="number" min="0" value="0"></label>
+            <label class="check"><input id="acc-premium" type="checkbox"> Premium account</label>
+            <label>Cookies (paste a cookies.txt export or name=value; …)
+              <textarea id="acc-cookies" rows="2" placeholder="leave blank to keep"></textarea></label>
+          </div>
+          <div class="formrow"><button id="btn-acc-add" class="primary">Add account</button>
+            <button id="btn-acc-cancel" hidden>Cancel editing</button></div>
         </div>
         <div id="accounts-list" class="linklist boxed"></div>
         <h2>Server and proxy logins</h2>
