@@ -57,7 +57,8 @@ def test_stop_and_resume_after_splits(tmp_path):
         final = tmp_path / "r.bin"
         assert meta.exists(), (f"no checkpoint after {time.time() - deadline + 30:.1f}s; errors={errors!r} "
                                f"thread alive={t.is_alive()} final file={final.exists() and final.stat().st_size} "
-                               f"files={sorted(p.name for p in tmp_path.iterdir())} requests={len(site.requests)}")
+                               f"files={sorted(p.name for p in tmp_path.iterdir())} "
+                               f"requests={[(m, h.get('Range', '')) for m, _p, h in site.requests]}")
         saved = json.loads(meta.read_text())["chunks"]
         assert len(saved) > 4
         # ranges tile the file without gaps or overlaps
@@ -83,7 +84,10 @@ def test_benchmark_multi_connection_beats_single_connection(tmp_path):
     try:
         data = os.urandom(8 * MB)
         url = site.add("/bench.bin", data)
-        site.delay_per_64k = 0.01  # about 6 MB/s per connection
+        # about 1.6 MB/s per connection: the per-connection limit, not the
+        # runner's CPU, must be the bottleneck (at 6 MB/s per connection a
+        # 2-core CI runner ran out of CPU and measured only 1.37x)
+        site.delay_per_64k = 0.04
         # best of two runs each: a shared CI runner can stall one run (seen once
         # on GitHub's 2-core Windows runner); the bar below stays the same
         t_single = t_multi = float("inf")
