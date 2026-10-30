@@ -105,6 +105,13 @@ class Settings(BaseModel):
     base_path: str = ""             # reverse-proxy path prefix, e.g. /opengrab
     terminal_enabled: bool = False  # shell API is opt-in and always token-gated
     clipboard_monitor_enabled: bool = False
+    # W8 LinkGrabber v2
+    linkgrabber_online_check: bool = True
+    spider_max_pages: int = 100
+    spider_delay_s: float = 0.5
+    spider_respect_robots: bool = True
+    cnl_enabled: bool = True         # Click'n'Load listener on 127.0.0.1
+    cnl_port: int = 9666
     toasts_enabled: bool = True     # desktop toast for finished/failed/captcha (W1)
 
     # W3-W5 flow control (engine/flow.py); empty values mean defaults

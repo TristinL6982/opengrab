@@ -225,6 +225,19 @@ class ApiServer:
                 self._clipboard_candidates.pop(next(iter(self._clipboard_candidates)))
         return added
 
+    def add_candidate_link(self, candidate: dict):
+        """Turn a reviewed LinkGrabber entry into a download (W8 keeps the
+        package name and archive passwords from Click'n'Load)."""
+        link = self.manager.add_url(candidate["url"])
+        if candidate.get("package"):
+            link.extra["package"] = candidate["package"]
+        if candidate.get("passwords"):
+            link.extra["archive_passwords"] = list(candidate["passwords"])
+        if candidate.get("source"):
+            link.extra["source"] = candidate["source"]
+        self.manager._persist()
+        return link
+
     # ------------------------------------------------------------------ run
     def start(self) -> int:
         """Non-blocking start; returns the bound port."""
@@ -1293,7 +1306,7 @@ def _make_handler(srv: ApiServer):
                     return self._err(404, "clipboard candidate not found")
                 if action == "dismiss":
                     return self._json({"ok": True, "dismissed": True})
-                link = mgr.add_url(candidate["url"])
+                link = srv.add_candidate_link(candidate)
                 return self._json({"ok": True, "link": link.to_public()}, 201)
             if p == "/api/settings":
                 if self._gate("settings_write") is None:

@@ -129,13 +129,35 @@
       <!-- ============================ LINKGRABBER ======================== -->
       <section id="tab-linkgrabber" class="tabpane pagepane">
         <h2>LinkGrabber</h2>
-        <p class="hint">Links you copy appear here for review when clipboard monitoring is on.
-        Nothing downloads until you choose <em>Add</em>.</p>
+        <p class="hint">Links wait here until you choose <em>Add</em>. They come from pasting, copied links,
+        the site spider and Click'n'Load buttons on web pages. Each link is checked online first.</p>
+        <div class="groupbox">
+          <div class="settings-grid">
+            <label>Paste links for review
+              <textarea id="lg-paste" rows="3" placeholder="https://example.com/file.zip"></textarea></label>
+            <div>
+              <label>Spider a site (start address)<input id="sp-url" type="text" placeholder="https://example.com/downloads/"></label>
+              <div class="formrow">
+                <label>Depth <input id="sp-depth" type="number" min="0" max="5" value="1" style="width:4em"></label>
+                <label>File types <input id="sp-exts" type="text" placeholder=".zip .pdf (blank = common files)" style="width:14em"></label>
+                <label class="check"><input id="sp-same" type="checkbox" checked> Stay on this site</label>
+              </div>
+            </div>
+          </div>
+          <div class="formrow">
+            <button id="btn-lg-paste" class="primary">Add for review</button>
+            <button id="btn-sp-start">Start spider</button><span id="sp-status" class="hint"></span>
+          </div>
+        </div>
         <div class="formrow">
           <span id="clipboard-state" class="hint">Clipboard monitoring is off.</span>
+          <span id="cnl-state" class="hint"></span>
           <span class="grow"></span>
+          <button id="btn-lg-check">Check again</button>
+          <button id="btn-lg-addonline" class="primary">Add all online</button>
           <button id="btn-linkgrabber-clear">Dismiss all</button>
         </div>
+        <div class="listhead lghead"><span>Link</span><span>Size</span><span>State</span><span>From</span><span></span></div>
         <div id="linkgrabber-list" class="linklist boxed"></div>
       </section>
 
@@ -266,6 +288,16 @@
           <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> Start downloads as soon as they are found</label>
           <label class="check"><input id="set-clipboard_monitor_enabled" type="checkbox"> Watch copied links (review before adding)</label>
           <label class="check"><input id="set-toasts_enabled" type="checkbox"> Desktop notifications for finished, failed and waiting downloads</label>
+        </div>
+
+        <h2>LinkGrabber</h2>
+        <div class="settings-grid groupbox">
+          <label class="check"><input id="set-linkgrabber_online_check" type="checkbox"> Check links online before I add them</label>
+          <label class="check"><input id="set-cnl_enabled" type="checkbox"> Accept Click'n'Load buttons from web pages (restart to apply)</label>
+          <label>Click'n'Load port<input id="set-cnl_port" type="number" min="1024" max="65535"></label>
+          <label>Spider: most pages per crawl<input id="set-spider_max_pages" type="number" min="1" max="5000"></label>
+          <label>Spider: seconds between requests<input id="set-spider_delay_s" type="number" min="0" step="0.1"></label>
+          <label class="check"><input id="set-spider_respect_robots" type="checkbox"> Spider: follow robots.txt</label>
         </div>
 
         <h2>Archives</h2>
@@ -461,6 +493,7 @@
     <div class="addrow">
       <label>Priority <input id="url-priority" type="number" value="0" style="width:4.5em"></label>
       <label class="check"><input id="url-auto" type="checkbox" checked> Start now</label>
+      <label class="check"><input id="url-review" type="checkbox"> Review in LinkGrabber first</label>
       <label>Queue <select id="url-queue"></select></label>
       <span class="grow"></span>
       <button type="button" id="add-cancel">Cancel</button>

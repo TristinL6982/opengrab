@@ -105,6 +105,7 @@ def start_server(settings: Optional[Settings] = None,
         if host is None and port is None and not fell_back:
             settings.api_host, settings.api_port = server.host, bound_port
             settings.save()
+        _start_clicknload(settings, server)
         return settings, manager, server, bound_port
     except Exception:
         server.stop()
@@ -113,8 +114,23 @@ def start_server(settings: Optional[Settings] = None,
 
 
 def _close_server(manager: DownloadManager, server: ApiServer) -> None:
+    lg = getattr(server, "features", {}).get("linkgrabber")
+    if lg is not None:
+        lg.shutdown()
     server.stop()
     manager.shutdown()
+
+
+def _start_clicknload(settings: Settings, server: ApiServer) -> None:
+    """W8: Click'n'Load listener; a busy port only produces a warning."""
+    lg = getattr(server, "features", {}).get("linkgrabber")
+    if lg is None or not settings.cnl_enabled:
+        return
+    status = lg.start_cnl()
+    if not status.get("listening"):
+        notify = server.features.get("notify")
+        if notify is not None:
+            notify.add("info", "Click'n'Load is off", status.get("error", ""), label="linkgrabber")
 
 
 def run_gui_mode(settings: Optional[Settings] = None,

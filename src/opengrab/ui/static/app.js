@@ -129,6 +129,17 @@ function onEvent(kind, payload) {
     return;
   }
   if (kind === "addon") { loadAddons(); return; }
+  if (kind === "linkgrabber") {
+    if ($("#tab-linkgrabber")?.classList.contains("active")) renderLinkGrabber();
+    return;
+  }
+  if (kind === "spider") {
+    $("#sp-status").textContent = payload.status === "done"
+      ? `Spider finished: ${payload.pages} page(s), ${payload.files} file link(s), ${payload.added} new.`
+      : "Spider failed: " + (payload.error || "unknown error");
+    renderLinkGrabber();
+    return;
+  }
   if (kind === "flow") { FLOW = payload; renderFlowChrome(); return; }
   if (kind === "captcha") {
     setCaptchaBadge(payload.pending || 0);
@@ -503,14 +514,23 @@ async function renderLinkGrabber() {
       watching: "Clipboard monitoring is on; copied links wait here for your approval.",
       unavailable: "Clipboard monitoring is on, but the desktop clipboard is unavailable.",
     }[status.status] || "Clipboard status unknown.";
+    const STATE = { online: "Online", offline: "Offline", unknown: "Unknown", unchecked: "Checking…" };
+    const FROM = { clipboard: "Copied", paste: "Pasted", spider: "Spider", clicknload: "Click'n'Load" };
     el.innerHTML = candidates.length
-      ? candidates.map(item => `<div class="krow">
-          <code style="overflow-wrap:anywhere">${esc(item.url)}</code>
-          <span class="grow"></span>
-          <button class="sm primary" data-act="candidate-add" data-id="${esc(item.id)}">Add</button>
-          <button class="sm" data-act="candidate-dismiss" data-id="${esc(item.id)}">Dismiss</button>
+      ? candidates.map(item => `<div class="lgrow">
+          <span title="${esc(item.url)}">${esc(item.filename || item.url.split("/").pop() || item.url)}<div class="u">${esc(item.url)}</div></span>
+          <span>${item.size != null ? humanBytes(item.size) : "—"}</span>
+          <span class="lgstate ${esc(item.state || "unchecked")}">${STATE[item.state] || "Not checked"}</span>
+          <span>${esc(FROM[item.source] || "Copied")}${item.package ? `<div class="u">${esc(item.package)}</div>` : ""}${(item.passwords || []).length ? `<div class="u">${item.passwords.length} password(s)</div>` : ""}</span>
+          <span><button class="sm primary" data-act="candidate-add" data-id="${esc(item.id)}">Add</button>
+          <button class="sm" data-act="candidate-dismiss" data-id="${esc(item.id)}">Dismiss</button></span>
         </div>`).join("")
-      : '<div class="empty">No copied links waiting for review.</div>';
+      : '<div class="empty">Nothing waiting for review. Paste links above, start the spider, or copy links with monitoring on.</div>';
+    try {
+      const cnl = await api("/api/cnl/status");
+      $("#cnl-state").textContent = cnl.listening ? `Click'n'Load is listening on port ${cnl.port}.`
+        : cnl.error ? "Click'n'Load is off: " + cnl.error : "Click'n'Load is off.";
+    } catch {}
   } catch { /* api() handles authorization feedback */ }
 }
 
@@ -764,6 +784,16 @@ async function addUrls() {
   const ta = $("#url-input");
   const urls = ta.value.split("\n").map(s => s.trim()).filter(Boolean);
   if (!urls.length) return;
+  if ($("#url-review")?.checked) {
+    try {
+      const r = await api("/api/linkgrabber", "POST", { urls, source: "paste" });
+      toast(`${r.added} link(s) wait in the LinkGrabber`, "ok");
+      ta.value = "";
+      if ($("#add-dialog").open) $("#add-dialog").close();
+      $('.tab[data-tab="linkgrabber"]').click();
+    } catch (e) { toast("Add failed: " + e.message, "err"); }
+    return;
+  }
   try {
     const out = await api("/api/urls", "POST", {
       urls,
@@ -870,7 +900,8 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "archive_max_expanded_gib", "archive_password_file",
   "captcha_ocr_enabled", "captcha_ocr_ignore_hardware", "toasts_enabled",
   "scheduler_enabled", "max_per_host", "categories_enabled", "hash_checksum_files",
-  "proxy_use_system"];
+  "proxy_use_system", "linkgrabber_online_check", "cnl_enabled", "cnl_port",
+  "spider_max_pages", "spider_delay_s", "spider_respect_robots"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1181,7 +1212,8 @@ $("#btn-set-save").addEventListener("click", async () => {
     body[f] = el.type === "checkbox" ? el.checked
       : ["max_parallel", "per_link_chunks", "speed_limit_kbps", "retry_max",
         "archive_max_files", "archive_max_expanded_gib", "media_max_height",
-        "media_playlist_max_entries", "max_per_host"].includes(f)
+        "media_playlist_max_entries", "max_per_host", "cnl_port", "spider_max_pages",
+        "spider_delay_s"].includes(f)
         ? +el.value : el.value;
   }
   body.confirm_delete = $("#set-confirm_delete").checked;
@@ -1300,6 +1332,37 @@ $("#btn-terminal-stop").addEventListener("click", async () => {
   } catch (e) { toast("Could not stop command: " + e.message, "err"); }
 });
 
+$("#btn-lg-paste").addEventListener("click", async () => {
+  const urls = $("#lg-paste").value.split(/\s+/).filter(Boolean);
+  if (!urls.length) return toast("Paste one or more links first", "err");
+  try {
+    const r = await api("/api/linkgrabber", "POST", { urls, source: "paste" });
+    $("#lg-paste").value = "";
+    toast(`${r.added} link(s) added for review`, "ok");
+    renderLinkGrabber();
+  } catch (e) { toast("Could not add links: " + e.message, "err"); }
+});
+$("#btn-sp-start").addEventListener("click", async () => {
+  const url = $("#sp-url").value.trim();
+  if (!url) return toast("Enter the address the spider starts from", "err");
+  try {
+    await api("/api/linkgrab/spider", "POST", {
+      url, depth: +$("#sp-depth").value || 0, same_domain: $("#sp-same").checked,
+      extensions: $("#sp-exts").value.trim(),
+    });
+    $("#sp-status").textContent = "Spider running…";
+  } catch (e) { toast("Spider failed: " + e.message, "err"); }
+});
+$("#btn-lg-check").addEventListener("click", async () => {
+  try { await api("/api/linkgrabber/check", "POST", {}); renderLinkGrabber(); } catch {}
+});
+$("#btn-lg-addonline").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/linkgrabber/add-all", "POST", { only_online: true });
+    toast(`Added ${r.added} online link(s)`, "ok");
+    renderLinkGrabber(); refreshData();
+  } catch (e) { toast("Could not add links: " + e.message, "err"); }
+});
 $("#btn-linkgrabber-clear").addEventListener("click", async () => {
   try {
     await api("/api/linkgrabber/clear", "POST", {});

@@ -25,6 +25,7 @@ setup(
         "yt-dlp>=2026.10.21",
         "py7zr>=1.0",
         "rarfile>=4.2",
+        "pycryptodomex>=3.20",
         "pywin32-ctypes",
         "rich"
     ],

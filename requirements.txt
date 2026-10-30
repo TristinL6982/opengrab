@@ -9,6 +9,7 @@ rich>=13.7
 yt-dlp>=2024.10.0
 py7zr>=1.0
 rarfile>=4.2
+pycryptodomex>=3.20     # Click'n'Load 2 (cnl.py) AES decoding
 
 # GUI / windowing
 pywebview>=5.1
