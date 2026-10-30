@@ -30,7 +30,7 @@ KNOWN_ORPHANS = {
     "premium",
     "proxies",
     "reconnect",
-    "segments",
+
     "siteauth",
     "spider",
     "torrent",
@@ -38,19 +38,16 @@ KNOWN_ORPHANS = {
     "usage",
 }
 
-
 def _audit():
     spec = importlib.util.spec_from_file_location("import_audit", ROOT / "tools" / "import_audit.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.audit(ROOT)
 
-
 def test_no_new_unreachable_modules():
     unreachable = set(_audit()["unreachable"])
     new = sorted(unreachable - KNOWN_ORPHANS)
     assert not new, f"modules not imported by any entry point: {new}"
-
 
 def test_known_orphan_list_only_shrinks():
     unreachable = set(_audit()["unreachable"])

@@ -13,6 +13,8 @@ class FileSite:
         self.files: dict[str, bytes] = {}
         self.etags: dict[str, str] = {}
         self.delay_per_64k = 0.0  # seconds slept per 64 KiB sent
+        self.slow_below = 0       # bytes [0, slow_below) are served slower ...
+        self.slow_delay = 0.0     # ... with this delay per 64 KiB
         self.requests: list[tuple[str, str, dict]] = []
         site = self
 
@@ -59,7 +61,9 @@ class FileSite:
                         chunk = data[pos:min(end + 1, pos + 65536)]
                         self.wfile.write(chunk)
                         pos += len(chunk)
-                        if site.delay_per_64k:
+                        if site.slow_delay and pos <= site.slow_below:
+                            time.sleep(site.slow_delay)
+                        elif site.delay_per_64k:
                             time.sleep(site.delay_per_64k)
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass

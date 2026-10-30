@@ -44,7 +44,8 @@ class Settings(BaseModel):
     # downloads
     download_dir: str = str(Path.home() / "Downloads")
     max_parallel: int = 3              # concurrent links
-    per_link_chunks: int = 2           # parallel range-chunks per link (1 = single)
+    per_link_chunks: int = 2           # connections per download (1-16); W6 splits the slowest range when one frees up
+    segment_min_mb: int = 1            # never split a range below this size
     speed_limit_kbps: int = 0          # 0 = unlimited
     retry_max: int = 3
     chunk_size_kb: int = 256

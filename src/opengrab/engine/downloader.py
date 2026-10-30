@@ -3,7 +3,7 @@
 Design (mirrors JD2's downloader internals, modernized):
   * HEAD (or Range: bytes=0-0) probe  -> total size + accept-ranges
   * if the server accepts ranges:  the remaining byte range is split into
-    N chunks (settings.per_link_chunks);  each chunk is fetched by its own
+    up to 16 segments (settings.per_link_chunks, W6 dynamic);  each is fetched by its own
     thread with a Range header and written at its offset into the .part file
   * if not: single streaming append
   * token-bucket speed limit shared by all chunks
@@ -326,6 +326,7 @@ class LinkDownload:
                 pass
 
     def _save_meta(self) -> None:
+        self._sync_chunks()
         if self._chunks is None:
             return
         # Chunk threads checkpoint concurrently: serialize the snapshot,
@@ -413,6 +414,7 @@ class LinkDownload:
                 # Resume a multi-chunk download from its sidecar map. The
                 # .part size is meaningless here (it was pre-allocated).
                 self._chunks = chunks_meta
+                self._planner = self._new_planner(self._total, chunks_meta)
                 with self._state_lock:
                     self._done = sum(ch[2] for ch in chunks_meta)
                     self.start_done = self._done
@@ -435,10 +437,8 @@ class LinkDownload:
                 elif (probe.accept_ranges and self._total and part_size == 0
                         and self._total >= CHUNK_MIN
                         and (getattr(self.settings, "per_link_chunks", 2) or 1) > 1):
-                    n = max(2, min(getattr(self.settings, "per_link_chunks", 2), 8))
-                    size = self._total // n
-                    self._chunks = [[i * size, self._total if i == n - 1 else (i + 1) * size, 0]
-                                    for i in range(n)]
+                    self._planner = self._new_planner(self._total, None)
+                    self._sync_chunks()
                     self._save_meta()
                     try:
                         self._parallel(self._total, self._chunks)
@@ -446,6 +446,7 @@ class LinkDownload:
                         # A probe header is only a hint: restart sequentially.
                         self._drop_meta()
                         self._chunks = None
+                        self._planner = None
                         self._abort.clear()  # siblings aborted; start clean
                         with self._file_lock:
                             with self.part.open("wb"):
@@ -473,21 +474,32 @@ class LinkDownload:
         return self.final_path
 
     # -- single stream -----------------------------------------------------
-    def _stream(self, start: int, end: Optional[int], idx: int = None) -> None:
-        """(Re)fetch [start, end) appending into the part file."""
+    def _stream(self, start: int, end: Optional[int], idx: int = None, seg=None) -> None:
+        """(Re)fetch [start, end) appending into the part file.
+
+        With ``seg`` (a segments.Segment) the range is live: another worker may
+        split it, shrinking ``seg.end``, and this stream then stops early.
+        """
         backoff = 1.0
         attempts = 0
         
         # The caller passes the real resume offset; pos tracks every byte
         # written so retries continue from where the data actually ends.
         pos = start
-        track = idx is not None and self._chunks is not None
-        chunk_start = self._chunks[idx][0] if track else 0
+        track = seg is not None
+
+        def seg_end() -> int:
+            with self._state_lock:
+                return seg.end + 1
 
         while True:
             self._stop_check()
             self._sleep_paused()
             
+            if track:
+                end = seg_end()
+                if pos >= end:
+                    return  # the remaining range was handed to another worker
             sess = _open_session(self.settings)
             try:
                 headers = dict(self.headers)
@@ -553,33 +565,53 @@ class LinkDownload:
                         f.seek(pos)
                     last_save = time.monotonic()
 
+                    seg_mark = (time.monotonic(), pos)
+
                     def checkpoint() -> None:
                         # The sidecar may only claim bytes that are on disk.
                         f.flush()
                         os.fsync(f.fileno())
                         if track:
-                            with self._state_lock:
-                                self._chunks[idx][2] = pos - chunk_start
+                            self._sync_chunks()
                             self._save_meta()
 
+                    shrunk = False
                     try:
                         for piece in r.iter_content(READ_CHUNK):
                             if not piece:
                                 continue
                             self._stop_check()
                             self._sleep_paused()
+                            if track:
+                                limit = seg_end()
+                                if pos >= limit:
+                                    shrunk = True
+                                    break
+                                if pos + len(piece) > limit:
+                                    piece = piece[:limit - pos]
                             self._limiter.consume(len(piece))
                             f.write(piece)
                             pos += len(piece)
                             received += len(piece)
                             self._update_speed(len(piece))
                             now = time.monotonic()
+                            if track:
+                                with self._state_lock:
+                                    seg.done = max(seg.done, min(pos - seg.start, seg.length))
+                                    if now - seg_mark[0] >= 0.5:
+                                        seg.speed = (pos - seg_mark[1]) / (now - seg_mark[0])
+                                        seg_mark = (now, pos)
                             if track and now - last_save >= 1.0:
                                 checkpoint()
                                 last_save = now
                     finally:
                         checkpoint()
 
+                if track:
+                    if shrunk or pos >= seg_end():
+                        return
+                    raise DownloadError(
+                        f"range ended early: stopped at {pos} of {seg_end()}", transient=True)
                 if expected_bytes is not None and received != expected_bytes:
                     raise DownloadError(
                         f"range ended early: received {received} of {expected_bytes} bytes",
@@ -611,80 +643,83 @@ class LinkDownload:
                 except Exception:
                     pass
 
-    # -- parallel chunks ------------------------------------------------------
+    # -- parallel segments (W6: dynamic segmentation) -----------------------
+    def _new_planner(self, total: int, chunks):
+        from ..segments import Segment, SegmentPlanner, clamp_connections
+        conns = clamp_connections(getattr(self.settings, "per_link_chunks", 2) or 2)
+        min_mb = max(1, int(getattr(self.settings, "segment_min_mb", 1) or 1))
+        planner = SegmentPlanner(total, max_connections=conns, min_size=min_mb * 1024 * 1024)
+        if chunks is not None:  # resume: the saved map is the plan
+            planner.segments = [Segment(int(s0), int(e0) - 1, int(d0)) for s0, e0, d0 in chunks]
+        return planner
+
+    def _sync_chunks(self) -> None:
+        """Mirror the planner's segments into the sidecar triples."""
+        planner = getattr(self, "_planner", None)
+        if planner is None:
+            return
+        with self._state_lock:
+            self._chunks = [[seg.start, seg.end + 1, min(seg.done, seg.length)]
+                            for seg in planner.segments]
+
     def _parallel(self, total: int, chunks: list[list[int]]) -> None:
         # Prepare the file before workers open independent handles at offsets.
-        # Holding one lock around an entire stream would serialize the chunks.
         self.part.parent.mkdir(parents=True, exist_ok=True)
-        
         with self._file_lock:
-            if not self.part.exists():
-                mode = "w+b"
-            else:
-                stat = self.part.stat()
-                if stat.st_size < total:
-                    mode = "r+b"  # Open and truncate to desired size
-                else:
-                    mode = "r+b"  # File exists at full size, open for read-write
-                
+            mode = "r+b" if self.part.exists() else "w+b"
             with open(self.part, mode) as f:
                 f.truncate(total)
-        
+
+        planner = getattr(self, "_planner", None)
+        if planner is None:
+            planner = self._planner = self._new_planner(total, chunks)
         errors: list[Exception] = []
         err_lock = threading.Lock()
-        threads = []
 
-        def worker(rng: tuple[int, int], idx: int) -> None:
-            try:
-                # Start at the correct position based on chunk progress
-                start, end, written = rng
-                if self._chunks is None:
-                    self._chunks = chunks
-                _start = start + written
-                self._stream(_start, end, idx)
-            except DownloadError as e:
-                if e.cancelled or self.stop_event.is_set():
-                    # cancelled chunk: do not record it and do not abort the
-                    # siblings — a stop is a clean request, not a failure (B9)
+        def worker() -> None:
+            while not self._abort.is_set() and not self.stop_event.is_set():
+                with self._state_lock:
+                    seg = planner.next_segment()
+                if seg is None:
                     return
-                with err_lock:
-                    errors.append(e)
-                self._abort.set()
-            except Exception as e:
-                with err_lock:
-                    errors.append(e)
-                self._abort.set()
+                try:
+                    self._stream(seg.next_offset, seg.end + 1, seg=seg)
+                except DownloadError as e:
+                    if e.cancelled or self.stop_event.is_set():
+                        return  # a stop is a clean request, not a failure (B9)
+                    with err_lock:
+                        errors.append(e)
+                    self._abort.set()
+                    return
+                except Exception as e:
+                    with err_lock:
+                        errors.append(e)
+                    self._abort.set()
+                    return
+                finally:
+                    with self._state_lock:
+                        planner.release(seg)
 
-        for i, rng in enumerate(chunks):
-            s, e, written = rng
-            if written < (e - s):  # Only start chunks that are not already completed
-                t = threading.Thread(target=worker, args=(rng, i), daemon=True,
-                                     name=f"dl-{self.link.id[:8]}")
-                threads.append(t)
-                t.start()
-                
+        threads = [threading.Thread(target=worker, daemon=True, name=f"dl-{self.link.id[:8]}-{i}")
+                   for i in range(planner.max_connections)]
+        for t in threads:
+            t.start()
         for t in threads:
             t.join()
+        self._sync_chunks()
 
         if self.stop_event.is_set():
-            # Save metadata before raising cancellation
             self._save_meta()
             raise _cancelled()
-        elif any(isinstance(error, RangeUnsupported) for error in errors):
-            raise RangeUnsupported(str(next(e for e in errors
-                                           if isinstance(e, RangeUnsupported))))
-        elif errors:
-            # Save metadata on error
+        if any(isinstance(error, RangeUnsupported) for error in errors):
+            raise RangeUnsupported(str(next(e for e in errors if isinstance(e, RangeUnsupported))))
+        if errors:
             self._save_meta()
-            raise DownloadError(f"chunk failed: {errors[0]}",
-                                transient=_is_transient(errors[0]))
-        
-        # Make sure all chunks are completed properly
-        for i, ch in enumerate(self._chunks):
-            start, end, written = ch
-            if written != (end - start):
-                self._save_meta()
-                raise DownloadError("incomplete chunks", transient=True)
+            raise DownloadError(f"chunk failed: {errors[0]}", transient=_is_transient(errors[0]))
+        if not planner.complete():
+            self._save_meta()
+            raise DownloadError("incomplete chunks", transient=True)
+        self.link.extra["segments"] = len(planner.segments)
 
     # -- finalize -------------------------------------------------------------
     def _finalize(self) -> None:
