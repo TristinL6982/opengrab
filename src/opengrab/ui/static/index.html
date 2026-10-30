@@ -309,6 +309,22 @@
 
       <!-- ============================ SETTINGS =========================== -->
       <section id="tab-settings" class="tabpane pagepane settingspane">
+        <h2>Appearance</h2>
+        <div class="settings-grid groupbox">
+          <label>Theme<select id="set-ui_theme"><option value="classic">Classic (light)</option><option value="classic-dark">Classic dark</option><option value="system">Follow Windows</option></select></label>
+          <label>Accent colour<input id="set-ui_accent" type="color" value="#1c5db8"></label>
+          <label>Rows<select id="set-ui_density"><option value="compact">Compact</option><option value="normal">Normal</option><option value="comfortable">Comfortable</option></select></label>
+          <label class="check"><input id="set-ui_toolbar_labels" type="checkbox"> Show labels under the toolbar buttons</label>
+          <fieldset class="cols"><legend>Columns in the download list</legend>
+            <label class="check"><input type="checkbox" data-col="size" checked> Size</label>
+            <label class="check"><input type="checkbox" data-col="status" checked> Status</label>
+            <label class="check"><input type="checkbox" data-col="eta" checked> Time left</label>
+            <label class="check"><input type="checkbox" data-col="speed" checked> Transfer rate</label>
+            <label class="check"><input type="checkbox" data-col="progress" checked> Progress</label>
+          </fieldset>
+          <button id="btn-accent-reset" type="button">Default accent colour</button>
+        </div>
+
         <h2>Downloads</h2>
         <div class="settings-grid groupbox">
           <label>Download folder
@@ -576,7 +592,17 @@
         <div class="settings-grid groupbox">
           <label class="check"><input id="set-terminal_enabled" type="checkbox"> Allow the web terminal (runs local commands)</label>
           <label class="check"><input id="set-confirm_delete" type="checkbox"> Ask before removing downloads</label>
+          <label class="check"><input id="set-allow_remote_http" type="checkbox"> Allow plain HTTP from my network (token still required; restart to apply)</label>
+          <label>Trusted reverse proxies (comma-separated)<input id="adv-proxies" type="text" placeholder="172.18.0.1"></label>
         </div>
+        <details class="groupbox advanced-editor">
+          <summary>Edit every setting as JSON</summary>
+          <p class="hint">For settings without a control on this page. Passwords, tokens and logins are not shown here.
+          Changes are checked before they are saved.</p>
+          <textarea id="adv-json" rows="16" spellcheck="false"></textarea>
+          <div class="formrow"><button id="btn-adv-load">Reload</button><button id="btn-adv-save" class="primary">Save JSON</button>
+            <span id="adv-result" class="hint"></span></div>
+        </details>
 
         <div class="formrow savebar">
           <button id="btn-set-save" class="primary">Save settings</button>

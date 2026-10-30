@@ -19,6 +19,8 @@
   --err: #c42b1c;
   --paused: #8a95a8;
   --font: "Segoe UI", Tahoma, "Noto Sans", system-ui, sans-serif;
+  --w-size: 76px; --w-status: 116px; --w-eta: 70px; --w-speed: 92px; --w-progress: 140px;
+  --row-h: 25px;
   color-scheme: light;
 }
 * { box-sizing: border-box; }
@@ -115,7 +117,8 @@ code { background: var(--stripe); border: 1px solid var(--line-soft); padding: 0
 /* ---------- download grid ---------- */
 .listhead, .linkrow {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) 76px 116px 70px 92px 140px 128px;
+  grid-template-columns: minmax(200px, 1fr) var(--w-size) var(--w-status) var(--w-eta)
+                         var(--w-speed) var(--w-progress) 128px;
   align-items: center;
 }
 .listhead {
@@ -126,7 +129,7 @@ code { background: var(--stripe); border: 1px solid var(--line-soft); padding: 0
 .listhead > span { padding: 4px 8px; border-right: 1px solid var(--line-soft); white-space: nowrap; }
 .listhead > span:last-child { border-right: 0; }
 .linkrow {
-  min-height: 25px; border-bottom: 1px solid var(--line-soft); cursor: default;
+  min-height: var(--row-h); border-bottom: 1px solid var(--line-soft); cursor: default;
   user-select: none;
 }
 .linklist .linkrow:nth-child(even) { background: var(--stripe); }
@@ -340,3 +343,50 @@ table.grid td.days label { display: inline-flex; flex-direction: column; align-i
 .hashok { color: var(--ok-dark); }
 .hashbad { color: var(--err); }
 .settings-grid textarea { width: 100%; resize: vertical; font: 12.5px Consolas, "Cascadia Mono", monospace; }
+
+/* ---------- M14a settings controls ---------- */
+fieldset.cols { border: 1px solid var(--line-soft); padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+fieldset.cols legend { font-size: 12px; color: var(--text-dim); }
+input[type=color] { width: 60px; height: 26px; padding: 1px; }
+.advanced-editor summary { cursor: pointer; font-weight: 600; }
+#adv-json { width: 100%; font: 12px/1.45 Consolas, "Cascadia Mono", monospace; }
+
+/* ---------- M14a themes, density, columns ---------- */
+:root[data-theme="dark"] {
+  --window: #2a2e35; --window-hi: #30353d; --list: #1f2228; --stripe: #24282f;
+  --line: #4a5160; --line-soft: #363b45; --select: #2c4566; --select-line: #4f7bb5; --hover: #283244;
+  --accent: #6aa6ff; --text: #e3e7ee; --text-dim: #9aa3b2; --ok-dark: #5fcf68; --warn: #f0b04a; --err: #ff6b5e;
+  color-scheme: dark;
+}
+:root[data-theme="dark"] .toolbar { background: linear-gradient(#3a3f48, #30353d 55%, #2a2e35); box-shadow: inset 0 1px 0 #454b55; }
+:root[data-theme="dark"] .tb:hover:not(:disabled) { background: linear-gradient(#36485f, #2c3d52); }
+:root[data-theme="dark"] .listhead, :root[data-theme="dark"] table.grid th { background: linear-gradient(#30353d, #2a2e35); color: var(--text); }
+:root[data-theme="dark"] button, :root[data-theme="dark"] .buttonlike { background: linear-gradient(#3a3f48, #31363e); color: var(--text); }
+:root[data-theme="dark"] .tab, :root[data-theme="dark"] .tb { background: transparent; border-color: transparent; }
+:root[data-theme="dark"] .tab:hover { background: var(--hover); }
+:root[data-theme="dark"] .tab.active { background: var(--select); border-color: var(--select-line); }
+:root[data-theme="dark"] .tb:hover:not(:disabled) { border-color: var(--select-line); }
+:root[data-theme="dark"] button.primary { background: linear-gradient(#35537d, #2c4566); border-color: #4f7bb5; }
+:root[data-theme="dark"] input[type=text], :root[data-theme="dark"] input[type=password], :root[data-theme="dark"] input[type=number],
+:root[data-theme="dark"] select, :root[data-theme="dark"] textarea { background: #1a1d22; color: var(--text); }
+:root[data-theme="dark"] .bar { background: linear-gradient(#2b2f36, #23272d); border-color: #4a5160; }
+:root[data-theme="dark"] .bar .pct { color: var(--text); text-shadow: 0 0 2px #000; }
+:root[data-theme="dark"] .groupbox { box-shadow: none; }
+:root[data-theme="dark"] .statusbar { background: linear-gradient(#30353d, #2a2e35); }
+:root[data-theme="dark"] .titlebar { background: #262a30; }
+:root[data-theme="dark"] .toast { background: #30353d; border-color: #4a5160; color: var(--text); }
+:root[data-theme="dark"] #auth-banner, :root[data-theme="dark"] #whendone-banner { background: #33402a; color: var(--text); }
+:root[data-theme="dark"] code { background: #24282f; border-color: #363b45; }
+:root[data-theme="dark"] dialog.win { background: var(--window-hi); }
+
+.density-compact { --row-h: 21px; }
+.density-compact .linkrow > div { padding-top: 0; padding-bottom: 0; }
+.density-compact .c-title .u { display: none; }
+.density-comfortable { --row-h: 34px; }
+.density-comfortable .linkrow > div { padding-top: 5px; padding-bottom: 5px; }
+.no-tb-labels .tb span { display: none; }
+.no-tb-labels .tb { min-width: 40px; }
+.hide-col-size { --w-size: 0px; } .hide-col-status { --w-status: 0px; } .hide-col-eta { --w-eta: 0px; }
+.hide-col-speed { --w-speed: 0px; } .hide-col-progress { --w-progress: 0px; }
+.hide-col-size .c-size, .hide-col-status .c-status, .hide-col-eta .c-eta, .hide-col-speed .c-speed,
+.hide-col-progress .c-prog { padding: 0 !important; overflow: hidden; visibility: hidden; border: 0 !important; }

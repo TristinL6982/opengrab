@@ -132,8 +132,8 @@ class ApiServer:
         self.access = AccessGate.load(
             app_data_dir(), self.token,
             policy=policy_from_dict({
-                "allow_remote_http": getattr(settings, "allow_remote_http", False),
-                "trusted_proxies": getattr(settings, "trusted_proxies", None) or [],
+                "allow_remote_http": bool(settings.allow_remote_http),
+                "trusted_proxies": list(settings.trusted_proxies or []),
             }))
         # -- M12f browser extension interception rules --------------------
         self.extrules_path = os.path.join(str(app_data_dir()), "extension_rules.json")
@@ -1318,7 +1318,8 @@ def _make_handler(srv: ApiServer):
                 # settings that make OpenGrab run programs are only accepted from
                 # this computer, never from LAN/remote clients (C4 lesson)
                 runs_programs = {"event_hooks", "reconnect", "avscan", "archive_7zip_path",
-                                 "media_ffmpeg_path", "captcha_ffmpeg_path", "captcha_tesseract_path"}
+                                 "media_ffmpeg_path", "captcha_ffmpeg_path", "captcha_tesseract_path",
+                                 "allow_remote_http", "trusted_proxies"}
                 if not is_loopback(srv.access.client_ip(self.client_address[0], self.headers)):
                     forbidden = forbidden | runs_programs
                 known = set(type(mgr.settings).model_fields)

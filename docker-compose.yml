@@ -13,6 +13,10 @@ services:
       OPENGRAB_DOWNLOAD_DIR: /downloads
       OPENGRAB_BASE_PATH: ${OPENGRAB_BASE_PATH:-}
       OPENGRAB_PAIR_ON_START: ${OPENGRAB_PAIR_ON_START:-1}
+      # Plain HTTP from your LAN (the token is still required). Leave at 0 behind
+      # an HTTPS reverse proxy and list the proxy in OPENGRAB_TRUSTED_PROXIES.
+      OPENGRAB_ALLOW_REMOTE_HTTP: ${OPENGRAB_ALLOW_REMOTE_HTTP:-0}
+      OPENGRAB_TRUSTED_PROXIES: ${OPENGRAB_TRUSTED_PROXIES:-}
       TZ: ${TZ:-UTC}
     volumes:
       - ./config:/config

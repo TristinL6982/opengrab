@@ -95,7 +95,18 @@ class Settings(BaseModel):
     grab_timeout_s: float = 45.0
 
     # ui
-    theme: str = "dark"
+    theme: str = "dark"                 # legacy, unused; see ui_theme
+    # M14a appearance
+    ui_theme: str = "classic"           # classic (light) | classic-dark | system
+    ui_accent: str = ""                 # CSS colour, "" = theme default
+    ui_density: str = "normal"          # compact | normal | comfortable
+    ui_hidden_columns: list[str] = Field(default_factory=list)  # size status eta speed progress
+    ui_toolbar_labels: bool = True
+    ui_language: str = "auto"           # auto (follow Windows) | en | zh-CN
+    onboarding_done: bool = False
+    # remote access (M12b policy; restart to apply)
+    allow_remote_http: bool = False     # plain HTTP from the LAN (Docker); token still required
+    trusted_proxies: list[str] = Field(default_factory=list)  # reverse proxies that set X-Forwarded-*
     poll_ms: int = 1000
 
     # local api server
@@ -180,9 +191,7 @@ def load_settings() -> Settings:
     if p.exists():
         try:
             settings = Settings.model_validate(json.loads(p.read_text(encoding="utf-8")))
-            if os.environ.get("OPENGRAB_DOWNLOAD_DIR"):
-                settings.download_dir = os.environ["OPENGRAB_DOWNLOAD_DIR"]
-            return settings
+            return _apply_env(settings)
         except Exception:
             # Backup the corrupt file before falling back to defaults
             from datetime import datetime
@@ -195,4 +204,16 @@ def load_settings() -> Settings:
     s = Settings(download_dir=os.environ.get(
         "OPENGRAB_DOWNLOAD_DIR", str(Path.home() / "Downloads")))
     s.save()
-    return s
+    return _apply_env(s)
+
+
+def _apply_env(settings: "Settings") -> "Settings":
+    """Environment overrides for Docker and services (not saved)."""
+    env = os.environ
+    if env.get("OPENGRAB_DOWNLOAD_DIR"):
+        settings.download_dir = env["OPENGRAB_DOWNLOAD_DIR"]
+    if env.get("OPENGRAB_ALLOW_REMOTE_HTTP") is not None:
+        settings.allow_remote_http = env["OPENGRAB_ALLOW_REMOTE_HTTP"].strip().lower() in ("1", "true", "yes", "on")
+    if env.get("OPENGRAB_TRUSTED_PROXIES"):
+        settings.trusted_proxies = [p.strip() for p in env["OPENGRAB_TRUSTED_PROXIES"].split(",") if p.strip()]
+    return settings

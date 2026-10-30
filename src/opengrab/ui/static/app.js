@@ -957,7 +957,7 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "torrent_listen_port", "torrent_open_files", "tracker_list_url",
   "plugin_sandbox_enabled", "plugin_index_url", "plugin_auto_update", "marketplace_url",
   "marketplace_require_signature", "anti_standby", "when_done", "when_done_delay_s", "when_done_once",
-  "hooks_enabled"];
+  "hooks_enabled", "ui_theme", "ui_density", "ui_toolbar_labels", "allow_remote_http"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1421,6 +1421,67 @@ setInterval(async () => {
   try { showWhenDone((await api("/api/automation")).when_done); } catch {}
 }, 1000);
 
+/* ============================================================ M14a appearance */
+const systemDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+let UI = { ui_theme: "classic", ui_accent: "", ui_density: "normal", ui_hidden_columns: [], ui_toolbar_labels: true };
+function applyUi(prefs) {
+  UI = Object.assign(UI, prefs || {});
+  const dark = UI.ui_theme === "classic-dark" || (UI.ui_theme === "system" && systemDark && systemDark.matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  if (UI.ui_accent) document.documentElement.style.setProperty("--accent", UI.ui_accent);
+  else document.documentElement.style.removeProperty("--accent");
+  const b = document.body;
+  b.classList.remove("density-compact", "density-comfortable");
+  if (UI.ui_density !== "normal") b.classList.add("density-" + UI.ui_density);
+  b.classList.toggle("no-tb-labels", !UI.ui_toolbar_labels);
+  for (const c of ["size", "status", "eta", "speed", "progress"]) b.classList.toggle("hide-col-" + c, (UI.ui_hidden_columns || []).includes(c));
+  try { localStorage.setItem("og_ui", JSON.stringify(UI)); } catch {}
+}
+try { applyUi(JSON.parse(localStorage.getItem("og_ui") || "{}")); } catch { applyUi({}); }
+systemDark?.addEventListener?.("change", () => applyUi({}));
+function loadAppearance(s) {
+  $("#set-ui_accent").value = s.ui_accent || "#1c5db8";
+  $$("fieldset.cols [data-col]").forEach(c => c.checked = !(s.ui_hidden_columns || []).includes(c.dataset.col));
+  $("#adv-proxies").value = (s.trusted_proxies || []).join(", ");
+  applyUi({ ui_theme: s.ui_theme, ui_accent: s.ui_accent, ui_density: s.ui_density,
+            ui_hidden_columns: s.ui_hidden_columns, ui_toolbar_labels: s.ui_toolbar_labels });
+}
+function collectAppearance(body) {
+  body.ui_accent = UI.ui_accent || "";
+  body.ui_hidden_columns = $$("fieldset.cols [data-col]").filter(c => !c.checked).map(c => c.dataset.col);
+  body.trusted_proxies = $("#adv-proxies").value.split(",").map(x => x.trim()).filter(Boolean);
+}
+// preview appearance changes immediately
+for (const id of ["#set-ui_theme", "#set-ui_density", "#set-ui_toolbar_labels"]) {
+  $(id).addEventListener("change", () => applyUi({ ui_theme: $("#set-ui_theme").value, ui_density: $("#set-ui_density").value,
+                                                    ui_toolbar_labels: $("#set-ui_toolbar_labels").checked }));
+}
+$("#set-ui_accent").addEventListener("input", (ev) => applyUi({ ui_accent: ev.target.value }));
+$("#btn-accent-reset").addEventListener("click", () => { applyUi({ ui_accent: "" }); $("#set-ui_accent").value = "#1c5db8"; });
+$$("fieldset.cols [data-col]").forEach(c => c.addEventListener("change", () =>
+  applyUi({ ui_hidden_columns: $$("fieldset.cols [data-col]").filter(x => !x.checked).map(x => x.dataset.col) })));
+async function loadAdvanced() {
+  try {
+    const s = await api("/api/settings");
+    $("#adv-json").value = JSON.stringify(s, null, 2);
+    $("#adv-result").textContent = "";
+  } catch (e) { $("#adv-result").textContent = e.message; }
+}
+$("#btn-adv-load").addEventListener("click", loadAdvanced);
+document.querySelector(".advanced-editor")?.addEventListener("toggle", (ev) => { if (ev.target.open) loadAdvanced(); });
+$("#btn-adv-save").addEventListener("click", async () => {
+  let body;
+  try { body = JSON.parse($("#adv-json").value); } catch (e) { $("#adv-result").textContent = "Not valid JSON: " + e.message; return; }
+  try {
+    const r = await api("/api/settings", "POST", body);
+    const parts = [`Saved ${r.applied.length} setting(s).`];
+    if (r.ignored.length) parts.push("Not changeable here: " + r.ignored.join(", ") + ".");
+    (r.warnings || []).forEach(w => parts.push(w));
+    $("#adv-result").textContent = parts.join(" ");
+    loadSettings();
+  } catch (e) { $("#adv-result").textContent = "Not saved: " + e.message; }
+});
+
 /* ============================================================ add-ons */
 let addonPoll = null;
 async function loadAddons() {
@@ -1486,6 +1547,7 @@ async function loadSettings() {
     loadTorrentSettings(s);
     $("#mk-keys").value = (s.marketplace_keys || []).join("\n");
     loadAutomationSettings(s);
+    loadAppearance(s);
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -1512,6 +1574,7 @@ $("#btn-set-save").addEventListener("click", async () => {
   collectFlowSettings(body);
   collectNetSettings(body);
   collectAutomationSettings(body);
+  collectAppearance(body);
   body.marketplace_keys = $("#mk-keys").value.split("\n").map(x => x.trim()).filter(Boolean);
   const tor = window.__torrentRaw || {};
   body.torrent = Object.assign({}, tor, {
@@ -1773,7 +1836,7 @@ async function loadPluginHealth() {
   renderCaptchas();
   loadFlow();
   api("/api/automation").then(r => showWhenDone(r.when_done)).catch(() => {});
-  api("/api/settings").then(s => setFolderPill(s.download_dir)).catch(() => {});
+  api("/api/settings").then(s => { setFolderPill(s.download_dir); loadAppearance(s); }).catch(() => {});
   loadPluginHealth();
   connectSSE();
   // PWA service worker (best effort; http contexts only register on https/localhost)
