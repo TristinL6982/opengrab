@@ -124,6 +124,7 @@
     "Check a template before you add it": "添加前检查模板",
     "Check again": "重新检查",
     "Check for template updates": "检查模板更新",
+    "Check for updates": "检查更新",
     "Check links online before I add them": "添加前检查链接是否在线",
     "Check my IP at": "IP 检测地址",
     "Checking link": "正在检查链接",
@@ -201,6 +202,7 @@
     "Downloaded files": "已下载的文件",
     "Downloaded per day, last 14 days": "每日下载量（最近 14 天）",
     "Downloading": "正在下载",
+    "Downloading and testing the update…": "正在下载并测试更新…",
     "Downloading now": "正在下载",
     "Downloading the local OCR solver in the background": "正在后台下载本地 OCR 识别组件",
     "Downloads": "下载",
@@ -258,6 +260,9 @@
     "From": "开始",
     "Give the queue a name": "请为队列命名",
     "Give up after (seconds)": "超时时间（秒）",
+    "Go back to the previous version": "回到上一个版本",
+    "Go back to the previous version? OpenGrab restarts.": "要回到上一个版本吗？OpenGrab 将会重启。",
+    "Going back to the previous version. OpenGrab restarts in a moment.": "正在回到上一个版本。OpenGrab 即将重启。",
     "hibernate": "休眠",
     "Highest video resolution (0 = best)": "最高视频分辨率（0 = 最佳）",
     "Ignored:": "已忽略：",
@@ -266,6 +271,7 @@
     "In use:": "正在使用：",
     "include": "包含",
     "Install": "安装",
+    "Install and restart": "安装并重启",
     "Install failed:": "安装失败：",
     "Install only signed plugins": "只安装已签名的插件",
     "Install the local OCR captcha solver now (optional)": "现在安装本地 OCR 验证码识别（可选）",
@@ -568,6 +574,8 @@
     "Update now": "立即更新",
     "Update templates when OpenGrab starts": "OpenGrab 启动时更新模板",
     "Updated:": "已更新：",
+    "Updates": "更新",
+    "Updates come from OpenGrab's GitHub releases. They are installed only when their signature checks out, and the version you have now is kept so you can go back to it.": "更新来自 OpenGrab 的 GitHub 发布页。只有签名验证通过的更新才会安装，并会保留当前版本，以便随时回退。",
     "Upload": "上传",
     "Upload failed:": "上传失败：",
     "Uploaded": "已上传",
@@ -601,6 +609,7 @@
     "Worked": "成功",
     "Works": "可用",
     "You can also paste a checksum in the Add links dialog. A file that fails its check is deleted and marked as an error so a retry downloads it again.": "也可以在“添加链接”对话框中粘贴校验值。校验失败的文件会被删除并标记为错误，重试时会重新下载。",
+    "You have OpenGrab": "当前版本 OpenGrab",
     "Your own plugins and templates run in a sandbox: they can reach only the sites you allow. Built-in plugins are trusted.": "你自己的插件和模板在沙箱中运行：只能访问你允许的网站。内置插件受信任。"
   },
   "patterns": [
@@ -699,6 +708,18 @@
     [
       "^(.+) checksum OK$",
       "$1 校验通过"
+    ],
+    [
+      "^OpenGrab (\\S+) is the newest version\\.$",
+      "OpenGrab $1 已是最新版本。"
+    ],
+    [
+      "^OpenGrab (\\S+) is available \\(you have (\\S+)\\)\\.",
+      "OpenGrab $1 可用（当前为 $2）。"
+    ],
+    [
+      "^Installing (\\S+)\\. OpenGrab restarts in a moment\\.$",
+      "正在安装 $1。OpenGrab 即将重启。"
     ]
   ]
 }

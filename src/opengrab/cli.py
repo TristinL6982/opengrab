@@ -46,6 +46,10 @@ def _parser() -> argparse.ArgumentParser:
                         help="run the OpenGrab smoke check and exit")
     parser.add_argument("--validate-template", metavar="FILE", default=None,
                         help="check a plugin template (.json) and exit 1 if it has errors")
+    parser.add_argument("--install-addon", metavar="NAME", default=None, choices=("ocr", "torrent"),
+                        help="download and install an optional add-on (ocr, torrent) and exit")
+    parser.add_argument("--enable-ocr", action="store_true",
+                        help="with --install-addon ocr, also turn on the local OCR captcha solver")
     parser.add_argument("--minimized", action="store_true",
                         help="start in the tray without showing the window (used by autostart)")
     parser.add_argument("targets", nargs="*", metavar="LINK_OR_FILE",
@@ -62,7 +66,7 @@ def main(argv=None) -> int:
     _ensure_stdio()
     raw = list(sys.argv[1:] if argv is None else argv)
     launcher_only = {"--gui", "--headless", "--smoke-test", "--list-plugins", "--validate-template",
-                     "--version", "--pair", "--minimized"}
+                     "--version", "--pair", "--minimized", "--install-addon"}
     if any(a in _client_commands() for a in raw) and not launcher_only & set(raw):
         # M13: opengrab add|list|status|pause|resume|start|stop|remove|notifications
         from .client_cli import run as run_client
@@ -78,6 +82,18 @@ def main(argv=None) -> int:
     if args.data_dir:
         os.environ["OPENGRAB_DATA_DIR"] = args.data_dir
     settings = load_settings()
+    if args.install_addon:  # M14: offered by the installer
+        from . import addons
+        try:
+            addons.install(args.install_addon)
+        except Exception as exc:
+            print(f"could not install the {args.install_addon} add-on: {exc}", file=sys.stderr)
+            return 1
+        if args.install_addon == "ocr" and args.enable_ocr:
+            settings.captcha_ocr_enabled = True
+            settings.save()
+        print(f"{args.install_addon} add-on installed")
+        return 0
     if os.environ.get("OPENGRAB_BASE_PATH") is not None:
         settings.base_path = os.environ["OPENGRAB_BASE_PATH"]
     host = (args.bind or os.environ.get("OPENGRAB_BIND")

@@ -672,6 +672,15 @@
         <div class="groupbox">
           <p class="hint">OpenGrab is a free, open-source download manager. To add a plugin, put its
           <code>.py</code> file in the <code>plugins</code> folder of your data folder and choose Rescan plugins.</p>
+          <h2>Updates</h2>
+          <p id="upd-status" class="hint">You have OpenGrab <span id="upd-current"></span>.</p>
+          <div class="formrow">
+            <button id="btn-upd-check" type="button">Check for updates</button>
+            <button id="btn-upd-install" type="button" class="primary hidden">Install and restart</button>
+            <button id="btn-upd-rollback" type="button" class="hidden">Go back to the previous version</button>
+          </div>
+          <p class="hint">Updates come from OpenGrab's GitHub releases. They are installed only when their signature checks out,
+          and the version you have now is kept so you can go back to it.</p>
         </div>
       </section>
       <div id="drop-hint" class="drophp hidden">Drop to add these links</div>

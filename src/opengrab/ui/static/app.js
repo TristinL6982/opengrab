@@ -1612,6 +1612,7 @@ async function loadSettings() {
   loadDevices();
   loadAddons();
   loadIntegration();
+  loadUpdate(false);
   try {
     const s = await api("/api/settings");
     for (const f of SET_FIELDS) {
@@ -2107,4 +2108,34 @@ $("#btn-jd2-import")?.addEventListener("click", async () => {
     refreshData();
     if (r.settings.length) loadSettings();
   } catch (e) { $("#jd2-result").textContent = e.message; }
+});
+
+
+/* ============================================================ M14 updates */
+function showUpdate(u) {
+  $("#upd-current").textContent = u.current;
+  $("#btn-upd-rollback").classList.toggle("hidden", !u.rollback);
+  $("#btn-upd-install").classList.add("hidden");
+  if (u.error) { $("#upd-status").textContent = u.error; return; }
+  if (u.version === undefined) return;
+  if (!u.available) { $("#upd-status").textContent = `OpenGrab ${u.current} is the newest version.`; return; }
+  let msg = `OpenGrab ${u.version} is available (you have ${u.current}).`;
+  if (!u.frozen) msg += " This copy runs from source, so update it with git.";
+  else if (!u.signing_ready) msg += " This build cannot verify updates, so download it from the releases page.";
+  $("#upd-status").textContent = msg;
+  $("#btn-upd-install").classList.toggle("hidden", !u.installable);
+}
+async function loadUpdate(check) {
+  try { showUpdate(await api("/api/update" + (check ? "?check=1" : ""))); } catch (e) { $("#upd-status").textContent = e.message; }
+}
+$("#btn-upd-check")?.addEventListener("click", () => { $("#upd-status").textContent = "Checking…"; loadUpdate(true); });
+$("#btn-upd-install")?.addEventListener("click", async () => {
+  $("#upd-status").textContent = "Downloading and testing the update…";
+  try { const r = await api("/api/update/install", "POST", {}); $("#upd-status").textContent = `Installing ${r.version}. OpenGrab restarts in a moment.`; }
+  catch (e) { $("#upd-status").textContent = e.message; }
+});
+$("#btn-upd-rollback")?.addEventListener("click", async () => {
+  if (!confirm("Go back to the previous version? OpenGrab restarts.")) return;
+  try { await api("/api/update/rollback", "POST", {}); $("#upd-status").textContent = "Going back to the previous version. OpenGrab restarts in a moment."; }
+  catch (e) { $("#upd-status").textContent = e.message; }
 });

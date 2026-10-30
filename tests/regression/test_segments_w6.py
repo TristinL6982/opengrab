@@ -79,17 +79,21 @@ def test_benchmark_multi_connection_beats_single_connection(tmp_path):
         data = os.urandom(8 * MB)
         url = site.add("/bench.bin", data)
         site.delay_per_64k = 0.01  # about 6 MB/s per connection
-        t0 = time.monotonic()
-        _, single = _run(url, tmp_path / "one", "bench.bin", per_link_chunks=1)
-        (tmp_path / "one").mkdir()
-        single.run()
-        t_single = time.monotonic() - t0
-        (tmp_path / "eight").mkdir()
-        t0 = time.monotonic()
-        link, multi = _run(url, tmp_path / "eight", "bench.bin", per_link_chunks=8, segment_min_mb=1)
-        path = multi.run()
-        t_multi = time.monotonic() - t0
-        assert hashlib.sha256(open(path, "rb").read()).digest() == hashlib.sha256(data).digest()
+        # best of two runs each: a shared CI runner can stall one run (seen once
+        # on GitHub's 2-core Windows runner); the bar below stays the same
+        t_single = t_multi = float("inf")
+        for i in range(2):
+            (tmp_path / f"one{i}").mkdir()
+            t0 = time.monotonic()
+            _, single = _run(url, tmp_path / f"one{i}", "bench.bin", per_link_chunks=1)
+            single.run()
+            t_single = min(t_single, time.monotonic() - t0)
+            (tmp_path / f"eight{i}").mkdir()
+            t0 = time.monotonic()
+            link, multi = _run(url, tmp_path / f"eight{i}", "bench.bin", per_link_chunks=8, segment_min_mb=1)
+            path = multi.run()
+            t_multi = min(t_multi, time.monotonic() - t0)
+            assert hashlib.sha256(open(path, "rb").read()).digest() == hashlib.sha256(data).digest()
         print(f"single connection {t_single:.2f}s, 8 connections {t_multi:.2f}s, speed-up {t_single / t_multi:.1f}x")
         # 4.3x on an 28-core PC, 2.2x on a 2-core CI runner: require a clear win
         assert t_multi < t_single / 1.5
