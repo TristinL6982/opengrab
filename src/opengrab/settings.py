@@ -104,6 +104,7 @@ class Settings(BaseModel):
     ui_toolbar_labels: bool = True
     ui_language: str = "auto"           # auto (follow Windows) | en | zh-CN
     onboarding_done: bool = False
+    dashboard_tiles: list[str] = Field(default_factory=lambda: ["today", "speed", "active", "days", "sites"])
     # remote access (M12b policy; restart to apply)
     allow_remote_http: bool = False     # plain HTTP from the LAN (Docker); token still required
     trusted_proxies: list[str] = Field(default_factory=list)  # reverse proxies that set X-Forwarded-*

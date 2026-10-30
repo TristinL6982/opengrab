@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 
-from . import (accounts_api, addons_api, automation_api, captcha, flow_api, linkgrabber, net_api, notify,
-               plugins_api, scan_api, torrent_api)
+from . import (accounts_api, addons_api, automation_api, captcha, dashboard_api, flow_api, jd2_api, linkgrabber,
+               net_api, notify, plugins_api, scan_api, system_api, torrent_api)
 
 log = logging.getLogger("opengrab.features")
 
@@ -28,6 +28,9 @@ FEATURES = (
     ("plugins", plugins_api),
     ("automation", automation_api),
     ("addons", addons_api),
+    ("dashboard", dashboard_api),
+    ("jd2", jd2_api),
+    ("system", system_api),
 )
 
 

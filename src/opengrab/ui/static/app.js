@@ -1611,6 +1611,7 @@ for (const name of ["ocr", "torrent"]) {
 async function loadSettings() {
   loadDevices();
   loadAddons();
+  loadIntegration();
   try {
     const s = await api("/api/settings");
     for (const f of SET_FIELDS) {
@@ -1931,3 +1932,179 @@ async function loadPluginHealth() {
     if ($("#tab-linkgrabber")?.classList.contains("active")) renderLinkGrabber();
   }, 2000);
 })();
+
+
+/* ============================================================ M14 dashboard */
+const DASH_TILES = {
+  today: { title: "Today" },
+  speed: { title: "Transfer rate, last 5 minutes", wide: true },
+  active: { title: "Downloading now" },
+  days: { title: "Downloaded per day, last 14 days", wide: true },
+  sites: { title: "Busiest sites" },
+};
+let dashData = null, dashTimer = null;
+function dashOrder() {
+  const saved = (dashData?.tiles || []).filter(k => DASH_TILES[k]);
+  return saved.concat(Object.keys(DASH_TILES).filter(k => !saved.includes(k)));
+}
+function dashTileBody(key, d) {
+  if (key === "today") {
+    return `<div class="dash-big">${humanBytes(d.today.bytes)}</div>
+      <div class="dash-kv"><span>Finished</span><b>${d.today.finished}</b><span>Failed</span><b>${d.today.failed}</b>
+      <span>Last 90 days</span><b>${humanBytes(d.total_bytes)}</b><span>Waiting</span><b>${(d.counts.waiting || 0) + (d.counts.queued || 0)}</b></div>`;
+  }
+  if (key === "speed") return `<canvas class="dash-meter" id="dash-speed" aria-label="Transfer rate over the last 5 minutes"></canvas>`;
+  if (key === "active") {
+    if (!d.active.length) return `<p class="dash-empty">Nothing is downloading.</p>`;
+    return `<div class="dash-rows">${d.active.map(a => `<div class="dash-row"><span class="name" title="${esc(a.name)}">${esc(a.name)}</span>
+      <span>${humanBytes(a.speed || 0)}/s</span><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round((a.progress || 0) * 100)}"><i style="width:${Math.round((a.progress || 0) * 100)}%"></i></span></div>`).join("")}</div>`;
+  }
+  if (key === "days") {
+    const max = Math.max(1, ...d.days.map(x => x.bytes));
+    return `<div class="dash-bars">${d.days.map((x, i) => `<div class="${i === d.days.length - 1 ? "today" : ""}" style="height:${Math.max(1, Math.round(x.bytes / max * 100))}%" title="${x.day}: ${humanBytes(x.bytes)}, ${x.finished} finished"></div>`).join("")}</div>
+      <div class="dash-axis"><span>${d.days[0].day.slice(5)}</span><span>${humanBytes(max)} highest</span><span>today</span></div>`;
+  }
+  if (key === "sites") {
+    if (!d.top_hosts.length) return `<p class="dash-empty">No downloads counted yet.</p>`;
+    const max = d.top_hosts[0].bytes || 1;
+    return `<div class="dash-rows">${d.top_hosts.map(h => `<div class="dash-row"><span class="name">${esc(h.host)}</span><span>${humanBytes(h.bytes)}</span>
+      <span class="bar"><i style="width:${Math.round(h.bytes / max * 100)}%"></i></span></div>`).join("")}</div>`;
+  }
+  return "";
+}
+function renderDashboard() {
+  const grid = $("#dash-grid");
+  if (!grid || !dashData) return;
+  const order = dashOrder();
+  grid.innerHTML = order.map((k, i) => `<section class="dash-tile${DASH_TILES[k].wide ? " wide" : ""}" data-tile="${k}" draggable="true" aria-label="${esc(DASH_TILES[k].title)}">
+    <div class="dash-title"><span class="grow">${esc(DASH_TILES[k].title)}</span>
+      <button type="button" class="sm" data-move="-1" aria-label="Move earlier" title="Move earlier" ${i === 0 ? "disabled" : ""}>&#9664;</button>
+      <button type="button" class="sm" data-move="1" aria-label="Move later" title="Move later" ${i === order.length - 1 ? "disabled" : ""}>&#9654;</button></div>
+    <div class="dash-body">${dashTileBody(k, dashData)}</div></section>`).join("");
+  drawDashSpeed();
+}
+function drawDashSpeed() {
+  const cv = $("#dash-speed");
+  if (!cv || !dashData) return;
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.strokeStyle = "rgba(120,170,230,.18)"; ctx.lineWidth = 1;
+  for (let x = w; x > 0; x -= 16) { ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, h); ctx.stroke(); }
+  for (let y = h; y > 0; y -= 20) { ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke(); }
+  const pts = dashData.speed_history;
+  if (pts.length < 2) return;
+  const max = Math.max(64 * 1024, ...pts.map(p => p[1])) * 1.1, now = pts[pts.length - 1][0];
+  const x = p => w - ((now - p[0]) / 300) * w, y = b => h - 1 - (b / max) * (h - 4);
+  ctx.beginPath(); ctx.moveTo(x(pts[0]), h);
+  for (const p of pts) ctx.lineTo(x(p), y(p[1]));
+  ctx.lineTo(x(pts[pts.length - 1]), h); ctx.closePath();
+  ctx.fillStyle = "rgba(38,160,51,.35)"; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x(pts[0]), y(pts[0][1]));
+  for (const p of pts) ctx.lineTo(x(p), y(p[1]));
+  ctx.strokeStyle = "#5fe05f"; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.fillStyle = "#9fd0ff"; ctx.font = "11px Segoe UI, sans-serif";
+  ctx.fillText(`${humanBytes(max / 1.1)}/s`, 4, 12);
+}
+async function loadDashboard() {
+  try { dashData = await api("/api/dashboard"); renderDashboard(); } catch { /* banner shown on 401 */ }
+}
+async function saveDashOrder(order) {
+  dashData.tiles = order;
+  renderDashboard();
+  try { await api("/api/settings", "POST", { dashboard_tiles: order }); } catch (e) { toast("Could not save: " + e.message, "err"); }
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("#dash-grid [data-move]");
+  if (!b) return;
+  const order = dashOrder(), k = b.closest(".dash-tile").dataset.tile, i = order.indexOf(k), j = i + Number(b.dataset.move);
+  if (j < 0 || j >= order.length) return;
+  [order[i], order[j]] = [order[j], order[i]];
+  saveDashOrder(order).then(() => $(`#dash-grid [data-tile="${k}"] [data-move="${b.dataset.move}"]`)?.focus());
+});
+let dashDrag = null;
+document.addEventListener("dragstart", (ev) => {
+  const t = ev.target.closest?.(".dash-tile");
+  if (!t) return;
+  dashDrag = t.dataset.tile; t.classList.add("dragging");
+  ev.dataTransfer.effectAllowed = "move";
+  ev.dataTransfer.setData("text/x-opengrab-tile", dashDrag);
+});
+document.addEventListener("dragover", (ev) => {
+  const t = ev.target.closest?.(".dash-tile");
+  if (!t || !dashDrag) return;
+  ev.preventDefault(); ev.stopPropagation();
+  $$(".dash-tile").forEach(x => x.classList.toggle("drop-before", x === t && x.dataset.tile !== dashDrag));
+});
+document.addEventListener("drop", (ev) => {
+  const t = ev.target.closest?.(".dash-tile");
+  if (!t || !dashDrag) return;
+  ev.preventDefault(); ev.stopPropagation();
+  const order = dashOrder().filter(k => k !== dashDrag);
+  order.splice(order.indexOf(t.dataset.tile), 0, dashDrag);
+  dashDrag = null;
+  saveDashOrder(order);
+});
+document.addEventListener("dragend", () => { dashDrag = null; $$(".dash-tile").forEach(x => x.classList.remove("dragging", "drop-before")); });
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest(".tab[data-tab]");
+  if (!t) return;
+  clearInterval(dashTimer);
+  if (t.dataset.tab === "dashboard") { loadDashboard(); dashTimer = setInterval(loadDashboard, 3000); }
+});
+window.addEventListener("resize", drawDashSpeed);
+
+/* ============================================================ M14 Windows integration */
+async function loadIntegration() {
+  const box = $("#win-integration");
+  if (!box) return;
+  try {
+    const st = await api("/api/system/integration");
+    const inputs = $$("input", box);
+    if (!st.available) {
+      inputs.forEach(i => { i.disabled = true; });
+      $("#win-int-note").textContent = "Link handlers and autostart are only available in the Windows app.";
+      return;
+    }
+    $$("[data-proto]", box).forEach(i => { i.checked = !!st.protocols[i.dataset.proto]; });
+    $$("[data-ftype]", box).forEach(i => { i.checked = !!st.files[i.dataset.ftype]; });
+    $("#win-autostart").checked = !!st.autostart;
+  } catch { /* banner shown on 401 */ }
+}
+$("#win-integration")?.addEventListener("change", async (ev) => {
+  const i = ev.target;
+  const body = i.dataset.proto ? { protocols: { [i.dataset.proto]: i.checked } }
+    : i.dataset.ftype ? { files: { [i.dataset.ftype]: i.checked } } : { autostart: i.checked };
+  try { await api("/api/system/integration", "POST", body); toast("Windows settings updated", "ok"); }
+  catch (e) { i.checked = !i.checked; toast("Could not change it: " + e.message, "err"); }
+});
+
+/* ============================================================ M14 JDownloader 2 import */
+function jd2Describe(f) {
+  const parts = [`${f.unfinished} unfinished and ${f.downloads - f.unfinished} finished downloads`, `${f.linkgrabber} LinkGrabber links`];
+  if (Object.keys(f.settings || {}).length) parts.push("settings");
+  return `Found in ${f.folder}: ${parts.join(", ")}.` + (f.errors.length ? " " + f.errors.join(" ") : "");
+}
+$("#btn-jd2-find")?.addEventListener("click", async () => {
+  const path = $("#jd2-path").value.trim();
+  try {
+    const r = await api("/api/import/jd2" + (path ? "?path=" + encodeURIComponent(path) : ""));
+    if (!r.found.length) { $("#jd2-found").textContent = "JDownloader 2 was not found. Enter its folder above."; return; }
+    if (!path) $("#jd2-path").value = r.found[0].folder;
+    $("#jd2-found").textContent = jd2Describe(r.found[0]);
+  } catch (e) { $("#jd2-found").textContent = e.message; }
+});
+$("#btn-jd2-import")?.addEventListener("click", async () => {
+  const body = { path: $("#jd2-path").value.trim(), downloads: $("#jd2-downloads").checked, finished: $("#jd2-finished").checked,
+    linkgrabber: $("#jd2-linkgrabber").checked, settings: $("#jd2-settings").checked };
+  try {
+    const r = await api("/api/import/jd2", "POST", body);
+    $("#jd2-result").textContent = `Imported ${r.downloads} downloads and ${r.linkgrabber} LinkGrabber links; ${r.skipped} were already here or finished.`
+      + (r.settings.length ? " Settings were updated." : "");
+    toast("JDownloader 2 import finished", "ok");
+    refreshData();
+    if (r.settings.length) loadSettings();
+  } catch (e) { $("#jd2-result").textContent = e.message; }
+});

@@ -75,7 +75,8 @@ def release(handle: Optional[object]) -> None:
             pass
 
 
-def forward_to_running(urls: list[str], host: str, port: int, token: str, base_path: str = "") -> bool:
+def forward_to_running(urls: list[str], host: str, port: int, token: str, base_path: str = "",
+                       files: Optional[list] = None) -> bool:
     """
     Forward URLs to a running OpenGrab instance.
     
@@ -100,8 +101,17 @@ def forward_to_running(urls: list[str], host: str, port: int, token: str, base_p
     except Exception:
         return False
     
-    # Now add the URLs
+    # Now add the URLs (and, M14, files Windows handed to this launch)
     try:
+        if files:
+            req = urllib.request.Request(f"http://{host}:{port}{base_path}/api/open")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Authorization", f"Bearer {token}")
+            req.data = json.dumps({"targets": list(files)}).encode("utf-8")
+            if urllib.request.urlopen(req, timeout=10).getcode() // 100 != 2:
+                return False
+        if not urls:
+            return True
         api_url = f"http://{host}:{port}{base_path}/api/urls"
         data = {"urls": urls}
         req = urllib.request.Request(api_url)

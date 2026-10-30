@@ -70,6 +70,7 @@
     <!-- ============================ category tree ====================== -->
     <nav id="tabs" class="tree" aria-label="Views">
       <div class="tree-group">Downloads</div>
+      <button data-tab="dashboard" class="tab"><i class="ti ti-chart"></i>Dashboard</button>
       <button data-tab="all" data-filter="all" class="tab active"><i class="ti ti-all"></i>All downloads<span class="count" id="cnt-all"></span></button>
       <button data-tab="queue" class="tab"><i class="ti ti-active"></i>Queue<span class="count" id="cnt-queue"></span></button>
       <button data-tab="all" data-filter="finished" class="tab"><i class="ti ti-finished"></i>Finished<span class="count" id="cnt-finished"></span></button>
@@ -119,6 +120,13 @@
         </div>
         <div id="queue-list" class="linklist"></div>
         <div id="queue-empty" class="empty hidden">The queue is empty. Choose <b>Add links</b> to start a download.</div>
+      </section>
+
+      <!-- ============================ DASHBOARD ========================== -->
+      <section id="tab-dashboard" class="tabpane pagepane">
+        <h2>Dashboard</h2>
+        <p class="hint">Drag a panel by its title bar to change the order, or use its arrow buttons.</p>
+        <div id="dash-grid" class="dash-grid"></div>
       </section>
 
       <!-- ============================ CAPTCHAS =========================== -->
@@ -577,6 +585,35 @@
           then moves them to an "added" subfolder.</p>
           <table class="grid"><thead><tr><th>Folder</th><th>New links</th><th>On</th><th></th></tr></thead><tbody id="watch-body"></tbody></table>
           <div class="formrow"><button id="btn-watch-add">Add folder</button></div>
+        </div>
+
+        <h2>Windows integration</h2>
+        <div class="groupbox" id="win-integration">
+          <p class="hint" id="win-int-note">Let Windows hand these links and files to OpenGrab. This changes only your own Windows account and can be undone here.</p>
+          <div class="settings-grid">
+            <label class="check"><input type="checkbox" data-proto="magnet"> Open magnet: links</label>
+            <label class="check"><input type="checkbox" data-proto="opengrab"> Open opengrab:// links (from web pages and the browser extension)</label>
+            <label class="check"><input type="checkbox" data-ftype=".torrent"> Open .torrent files</label>
+            <label class="check"><input type="checkbox" data-ftype=".crawljob"> Open .crawljob files</label>
+            <label class="check"><input type="checkbox" data-ftype=".dlc"> Open .dlc files</label>
+            <label class="check"><input type="checkbox" id="win-autostart"> Start OpenGrab in the tray when I sign in to Windows</label>
+          </div>
+        </div>
+
+        <h2>Import from JDownloader 2</h2>
+        <div class="groupbox">
+          <p class="hint">OpenGrab reads JDownloader 2's download list, LinkGrabber and main settings. JDownloader 2's files are not changed.
+          Account passwords are stored encrypted by JDownloader 2, so add your accounts again under Accounts.</p>
+          <div class="formrow"><label class="grow">JDownloader 2 folder<input id="jd2-path" type="text" placeholder="C:\Users\you\AppData\Local\JDownloader 2"></label>
+            <button id="btn-jd2-find" type="button">Look for it</button></div>
+          <p id="jd2-found" class="hint"></p>
+          <div class="settings-grid">
+            <label class="check"><input id="jd2-downloads" type="checkbox" checked> Unfinished downloads (added stopped)</label>
+            <label class="check"><input id="jd2-finished" type="checkbox"> Also finished downloads</label>
+            <label class="check"><input id="jd2-linkgrabber" type="checkbox" checked> LinkGrabber links (wait for review)</label>
+            <label class="check"><input id="jd2-settings" type="checkbox" checked> Settings: download folder, parallel downloads, connections, speed limit</label>
+          </div>
+          <div class="formrow"><button id="btn-jd2-import" type="button" class="primary">Import</button><span id="jd2-result" class="hint"></span></div>
         </div>
 
         <h2>Plugins</h2>

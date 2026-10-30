@@ -46,6 +46,10 @@ def _parser() -> argparse.ArgumentParser:
                         help="run the OpenGrab smoke check and exit")
     parser.add_argument("--validate-template", metavar="FILE", default=None,
                         help="check a plugin template (.json) and exit 1 if it has errors")
+    parser.add_argument("--minimized", action="store_true",
+                        help="start in the tray without showing the window (used by autostart)")
+    parser.add_argument("targets", nargs="*", metavar="LINK_OR_FILE",
+                        help="links, magnet:/opengrab:// links or .torrent/.crawljob files to add")
     return parser
 
 
@@ -58,7 +62,7 @@ def main(argv=None) -> int:
     _ensure_stdio()
     raw = list(sys.argv[1:] if argv is None else argv)
     launcher_only = {"--gui", "--headless", "--smoke-test", "--list-plugins", "--validate-template",
-                     "--version", "--pair"}
+                     "--version", "--pair", "--minimized"}
     if any(a in _client_commands() for a in raw) and not launcher_only & set(raw):
         # M13: opengrab add|list|status|pause|resume|start|stop|remove|notifications
         from .client_cli import run as run_client
@@ -113,11 +117,17 @@ def main(argv=None) -> int:
                 manager.shutdown()
 
         from .app import run_gui_mode, run_headless_mode
+        from .winintegration import split_targets
+        urls, files = split_targets(args.targets)
+        urls = list(args.grab) + urls
+        extra = {"files": files} if files else {}
         if args.headless:
-            run_headless_mode(settings, host=host, port=port, urls=args.grab,
-                              pair=args.pair)
+            run_headless_mode(settings, host=host, port=port, urls=urls,
+                              pair=args.pair, **extra)
         else:
-            run_gui_mode(settings, host=host, port=port, urls=args.grab)
+            if args.minimized:
+                extra["minimized"] = True
+            run_gui_mode(settings, host=host, port=port, urls=urls, **extra)
         return 0
     except KeyboardInterrupt:
         return 130

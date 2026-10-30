@@ -101,6 +101,7 @@ body {
 .ti-parked { background: linear-gradient(#ffd27a, #e08a00); }
 .ti-grab, .ti-captcha, .ti-bell, .ti-folder { background: linear-gradient(#fdfdfe, #c3ccda); }
 .ti-folder { background: linear-gradient(#ffe48a, #e6b422); border-radius: 1px 4px 2px 2px; }
+.ti-chart { background: linear-gradient(90deg, #26a033 0 30%, transparent 30% 40%, #1c5db8 40% 70%, transparent 70% 80%, #e6b422 80%); }
 .ti-key, .ti-filter, .ti-box, .ti-gear, .ti-term { background: linear-gradient(#e9edf3, #9aa6b9); }
 
 main { flex: 1; min-width: 0; overflow: auto; position: relative; background: var(--window); }
@@ -390,3 +391,32 @@ input[type=color] { width: 60px; height: 26px; padding: 1px; }
 .hide-col-speed { --w-speed: 0px; } .hide-col-progress { --w-progress: 0px; }
 .hide-col-size .c-size, .hide-col-status .c-status, .hide-col-eta .c-eta, .hide-col-speed .c-speed,
 .hide-col-progress .c-prog { padding: 0 !important; overflow: hidden; visibility: hidden; border: 0 !important; }
+
+/* ---------- M14 dashboard: classic panels, meter-style charts ---------- */
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); grid-auto-flow: row dense; gap: 10px; }
+.dash-tile { border: 1px solid var(--line); border-radius: 3px; background: var(--window-hi); display: flex; flex-direction: column; min-height: 170px; }
+.dash-tile.wide { grid-column: span 2; }
+@media (max-width: 760px) { .dash-tile.wide { grid-column: auto; } }
+.dash-tile.dragging { opacity: .5; }
+.dash-tile.drop-before { box-shadow: -3px 0 0 var(--accent); }
+.dash-title { display: flex; align-items: center; gap: 4px; padding: 3px 6px; cursor: grab; font-weight: 600;
+  background: linear-gradient(#f9fbfd, #dfe5ee); border-bottom: 1px solid var(--line); border-radius: 3px 3px 0 0; }
+.dash-title button { min-width: 0; padding: 0 5px; line-height: 16px; }
+.dash-body { padding: 8px 10px; flex: 1; position: relative; }
+.dash-big { font-size: 26px; font-weight: 600; letter-spacing: -.5px; }
+.dash-kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 6px; color: var(--text-dim); }
+.dash-kv b { color: var(--text); font-weight: 600; }
+.dash-meter { width: 100%; height: 120px; display: block; background: #0c1a2b; border: 1px solid var(--line); }
+.dash-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; border-bottom: 1px solid var(--line); }
+.dash-bars div { flex: 1; background: linear-gradient(#5fd06a, var(--ok-dark)); min-height: 1px; border: 1px solid var(--ok-dark); border-bottom: 0; }
+.dash-bars div.today { background: linear-gradient(#6ea8f0, var(--accent)); border-color: var(--accent); }
+.dash-axis { display: flex; justify-content: space-between; color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+.dash-rows { display: grid; gap: 5px; }
+.dash-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.dash-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-row .bar { grid-column: 1 / -1; height: 7px; border: 1px solid var(--line); background: var(--list); }
+.dash-row .bar i { display: block; height: 100%; background: var(--ok); }
+.dash-empty { color: var(--text-dim); }
+:root[data-theme="dark"] .dash-title { background: linear-gradient(#2c3442, #222935); }
+.formrow label.grow { display: flex; align-items: center; gap: 6px; }
+.formrow label.grow input { flex: 1; min-width: 0; }

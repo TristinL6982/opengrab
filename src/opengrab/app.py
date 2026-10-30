@@ -114,7 +114,7 @@ def start_server(settings: Optional[Settings] = None,
 
 
 def _close_server(manager: DownloadManager, server: ApiServer) -> None:
-    for name in ("linkgrabber", "automation"):
+    for name in ("linkgrabber", "automation", "dashboard"):
         feature = getattr(server, "features", {}).get(name)
         if feature is not None:
             try:
@@ -123,6 +123,15 @@ def _close_server(manager: DownloadManager, server: ApiServer) -> None:
                 _log.debug("%s shutdown failed", name, exc_info=True)
     server.stop()
     manager.shutdown()
+
+
+def _open_startup(server: ApiServer, urls, files) -> None:
+    """Links and files given on the command line (M14: Windows hands over
+    magnet:/opengrab:// links and .torrent/.crawljob files this way)."""
+    from .features.system_api import open_targets
+    res = open_targets(server, list(urls) + list(files))
+    for err in res["errors"]:
+        _log.warning("could not open %s", err)
 
 
 def _start_clicknload(settings: Settings, server: ApiServer) -> None:
@@ -139,7 +148,7 @@ def _start_clicknload(settings: Settings, server: ApiServer) -> None:
 
 def run_gui_mode(settings: Optional[Settings] = None,
                  host: Optional[str] = None, port: Optional[int] = None,
-                 urls=()) -> None:
+                 urls=(), files=(), minimized: bool = False) -> None:
     """Run the local web UI in a native pywebview window."""
     import webview
     import pystray
@@ -152,8 +161,9 @@ def run_gui_mode(settings: Optional[Settings] = None,
         try:
             from .settings import load_settings
             settings = load_settings()
-            if forward_to_running(urls, settings.api_host, settings.api_port, settings.api_token, settings.base_path):
-                print(f"Opened {len(urls)} URL(s) in existing OpenGrab instance")
+            if forward_to_running(list(urls), settings.api_host, settings.api_port, settings.api_token,
+                                  settings.base_path, files=list(files)):
+                print(f"Opened {len(urls) + len(files)} item(s) in existing OpenGrab instance")
             else:
                 print("Failed to forward URLs to existing OpenGrab instance")
         except Exception:
@@ -174,8 +184,7 @@ def run_gui_mode(settings: Optional[Settings] = None,
         # Before creating the window, verify it's our own server instance
         verify_own_server(bound_port, server.nonce, settings.base_path)
         
-        for url in urls:
-            manager.add_url(url)
+        _open_startup(server, urls, files)
         stop_watcher = threading.Event()
         exiting = threading.Event()
         tray = None
@@ -213,7 +222,7 @@ def run_gui_mode(settings: Optional[Settings] = None,
         try:
             window = webview.create_window(
                 "OpenGrab", f"http://127.0.0.1:{bound_port}{settings.base_path}/#token={server.token}",
-                min_size=(900, 600)
+                min_size=(900, 600), hidden=minimized  # autostart: tray only
             )
             
             def on_closing():
@@ -349,11 +358,10 @@ def headless_pairing_banner(server) -> str:
 
 def run_headless_mode(settings: Optional[Settings] = None,
                       host: Optional[str] = None, port: Optional[int] = None,
-                      urls=(), pair: bool = False) -> None:
+                      urls=(), pair: bool = False, files=()) -> None:
     """Run the API and web UI until interrupted."""
     settings, manager, server, bound_port = start_server(settings, host, port)
-    for url in urls:
-        manager.add_url(url)
+    _open_startup(server, urls, files)
     print(f"OpenGrab API -> http://{server.host}:{bound_port}")
     if pair_on_start_requested(pair):
         print(headless_pairing_banner(server), flush=True)
