@@ -9,294 +9,377 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true">
+  <defs>
+    <linearGradient id="g-green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6fd36f"/><stop offset="1" stop-color="#249a31"/></linearGradient>
+    <linearGradient id="g-blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6aa6ee"/><stop offset="1" stop-color="#1c5db8"/></linearGradient>
+    <linearGradient id="g-amber" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffcf5a"/><stop offset="1" stop-color="#e08a00"/></linearGradient>
+    <linearGradient id="g-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f07a6c"/><stop offset="1" stop-color="#c42b1c"/></linearGradient>
+    <linearGradient id="g-steel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f5f9"/><stop offset="1" stop-color="#a9b4c6"/></linearGradient>
+  </defs>
+  <symbol id="i-add" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-green)" stroke="#1e7a2a"/><path d="M16 9v14M9 16h14" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></symbol>
+  <symbol id="i-resume" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-blue)" stroke="#164a94"/><path d="M13 10.5v11l9-5.5z" fill="#fff"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-amber)" stroke="#a45f00"/><path d="M12.5 10.5v11M19.5 10.5v11" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-red)" stroke="#8f1d14"/><rect x="11" y="11" width="10" height="10" rx="1.5" fill="#fff"/></symbol>
+  <symbol id="i-delete" viewBox="0 0 32 32"><path d="M9 10h14l-1.3 16H10.3z" fill="url(#g-steel)" stroke="#55627a"/><path d="M7 9.5h18M13 9V6.5h6V9" stroke="#55627a" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M13.5 14v8M18.5 14v8" stroke="#55627a" stroke-width="1.6"/></symbol>
+  <symbol id="i-startall" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-blue)" stroke="#164a94"/><path d="M9.5 11v10l6-5zM16 11v10l6-5z" fill="#fff"/></symbol>
+  <symbol id="i-pauseall" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-steel)" stroke="#55627a"/><path d="M11 10.5v11M16 10.5v11M21 10.5v11" stroke="#55627a" stroke-width="2.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-clear" viewBox="0 0 32 32"><rect x="6" y="7" width="20" height="19" rx="2" fill="#fff" stroke="#55627a"/><path d="M10 13l2.5 2.5L17 11M10 20.5l2.5 2.5L17 18.5" stroke="#26a033" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 13.5h4M19 21h4" stroke="#55627a" stroke-width="1.6"/></symbol>
+  <symbol id="i-captcha" viewBox="0 0 32 32"><path d="M16 4l10 4v7c0 6.5-4.3 11-10 13C10.3 26 6 21.5 6 15V8z" fill="url(#g-amber)" stroke="#a45f00"/><path d="M11.5 16l3 3 6-6.5" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 32 32"><circle cx="16" cy="16" r="10.5" fill="url(#g-steel)" stroke="#55627a" stroke-width="5" stroke-dasharray="4.2 4"/><circle cx="16" cy="16" r="9" fill="url(#g-steel)" stroke="#55627a"/><circle cx="16" cy="16" r="3.6" fill="#fff" stroke="#55627a"/></symbol>
+</svg>
+
 <div id="app">
-  <header>
-    <div class="brand">
-      <img src="opengrab.svg" alt="" class="logo">
-      <h1>OpenGrab <span class="ver">0.1</span></h1>
-    </div>
-    <div class="statusline">
-      <span id="speed-pill" class="pill">0 B/s</span>
-      <span id="active-pill" class="pill">0 active</span>
-      <span id="conn-pill" class="pill warn">connecting…</span>
-      <span id="token-pill" class="pill hidden"></span>
-    </div>
-    <nav id="tabs">
-      <button data-tab="queue" class="tab active">Queue</button>
-      <button data-tab="all" class="tab">All Links</button>
-      <button data-tab="linkgrabber" class="tab">LinkGrabber</button>
-      <button data-tab="captchas" class="tab">Captchas <span id="captcha-badge" class="badge-count hidden">0</span></button>
-      <button data-tab="accounts" class="tab">Accounts</button>
-      <button data-tab="filters" class="tab">Filters</button>
-      <button data-tab="packagizer" class="tab">Packagizer</button>
-      <button data-tab="settings" class="tab">Settings</button>
-      <button data-tab="terminal" class="tab">Terminal</button>
-      <button data-tab="notifications" class="tab">Notifications <span id="notif-badge" class="badge-count hidden">0</span></button>
-      <button data-tab="files" class="tab">Files &amp; Audio</button>
-    </nav>
+  <!-- ============================ title bar ============================ -->
+  <header class="titlebar">
+    <img src="opengrab.svg" alt="" class="logo">
+    <h1>OpenGrab <span class="ver">0.1</span></h1>
+    <span class="grow"></span>
+    <span id="token-pill" class="pill hidden"></span>
   </header>
 
-  <div id="auth-banner" class="hidden">
-    <span>Remote session — enter the access token from the OpenGrab console:</span>
-    <input id="auth-token" type="password" placeholder="access token">
-    <button id="auth-save">Save</button>
+  <!-- ============================ toolbar =============================== -->
+  <div class="toolbar" role="toolbar" aria-label="Download actions">
+    <button class="tb" id="tb-add" title="Add links (Ctrl+N)"><svg aria-hidden="true"><use href="#i-add"/></svg><span>Add links</span></button>
+    <span class="tb-sep"></span>
+    <button class="tb" id="tb-resume" title="Start or resume the selected downloads" disabled><svg aria-hidden="true"><use href="#i-resume"/></svg><span>Resume</span></button>
+    <button class="tb" id="tb-pause" title="Pause the selected downloads" disabled><svg aria-hidden="true"><use href="#i-pause"/></svg><span>Pause</span></button>
+    <button class="tb" id="tb-stop" title="Stop the selected downloads" disabled><svg aria-hidden="true"><use href="#i-stop"/></svg><span>Stop</span></button>
+    <button class="tb" id="tb-delete" title="Remove the selected downloads from the list (Del)" disabled><svg aria-hidden="true"><use href="#i-delete"/></svg><span>Remove</span></button>
+    <span class="tb-sep"></span>
+    <button class="tb" id="tb-startall" title="Start every waiting or paused download"><svg aria-hidden="true"><use href="#i-startall"/></svg><span>Start all</span></button>
+    <button class="tb" id="tb-pauseall" title="Pause every running download"><svg aria-hidden="true"><use href="#i-pauseall"/></svg><span>Pause all</span></button>
+    <button class="tb" id="btn-clear-finished" title="Remove finished downloads from the list"><svg aria-hidden="true"><use href="#i-clear"/></svg><span>Clear finished</span></button>
+    <span class="tb-sep"></span>
+    <button class="tb" id="tb-captchas" title="Captchas waiting for you"><svg aria-hidden="true"><use href="#i-captcha"/></svg><span>Captchas</span></button>
+    <button class="tb" id="tb-settings" title="Settings"><svg aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
   </div>
 
-  <main>
-    <!-- ============================ QUEUE TAB ============================ -->
-    <section id="tab-queue" class="tabpane active">
-      <div class="addbox" id="dropzone">
-        <textarea id="url-input" rows="3"
-          placeholder="Drop links here or paste one per line…&#10;https://example.com/video&#10;https://example.com/file.zip"></textarea>
-        <div class="addrow">
-          <label>priority
-            <input id="url-priority" type="number" value="0" style="width:4.5em">
-          </label>
-          <label><input id="url-auto" type="checkbox" checked> auto-start</label>
-          <button id="btn-add" class="primary">Add &amp; download</button>
+  <div id="auth-banner" class="hidden">
+    <span>This OpenGrab needs its access token. Paste it from the OpenGrab console:</span>
+    <input id="auth-token" type="password" placeholder="Access token">
+    <button id="auth-save">Connect</button>
+  </div>
+
+  <div class="workspace">
+    <!-- ============================ category tree ====================== -->
+    <nav id="tabs" class="tree" aria-label="Views">
+      <div class="tree-group">Downloads</div>
+      <button data-tab="all" data-filter="all" class="tab active"><i class="ti ti-all"></i>All downloads<span class="count" id="cnt-all"></span></button>
+      <button data-tab="queue" class="tab"><i class="ti ti-active"></i>Queue<span class="count" id="cnt-queue"></span></button>
+      <button data-tab="all" data-filter="finished" class="tab"><i class="ti ti-finished"></i>Finished<span class="count" id="cnt-finished"></span></button>
+      <button data-tab="all" data-filter="failed" class="tab"><i class="ti ti-failed"></i>Failed<span class="count" id="cnt-failed"></span></button>
+      <button data-tab="all" data-filter="parked" class="tab"><i class="ti ti-parked"></i>Needs you<span class="count" id="cnt-parked"></span></button>
+      <div class="tree-group">Collect</div>
+      <button data-tab="linkgrabber" class="tab"><i class="ti ti-grab"></i>LinkGrabber</button>
+      <button data-tab="captchas" class="tab"><i class="ti ti-captcha"></i>Captchas <span id="captcha-badge" class="badge-count hidden">0</span></button>
+      <button data-tab="notifications" class="tab"><i class="ti ti-bell"></i>Notifications <span id="notif-badge" class="badge-count hidden">0</span></button>
+      <button data-tab="files" class="tab"><i class="ti ti-folder"></i>Files &amp; audio</button>
+      <div class="tree-group">Rules</div>
+      <button data-tab="accounts" class="tab"><i class="ti ti-key"></i>Accounts</button>
+      <button data-tab="filters" class="tab"><i class="ti ti-filter"></i>Filters</button>
+      <button data-tab="packagizer" class="tab"><i class="ti ti-box"></i>Packagizer</button>
+      <div class="tree-group">Tools</div>
+      <button data-tab="settings" class="tab"><i class="ti ti-gear"></i>Settings</button>
+      <button data-tab="terminal" class="tab"><i class="ti ti-term"></i>Terminal</button>
+    </nav>
+
+    <main id="dropzone">
+      <!-- ============================ DOWNLOAD LISTS ===================== -->
+      <section id="tab-all" class="tabpane active listpane">
+        <div class="listhead">
+          <span class="c-title">File name</span>
+          <span class="c-size">Size</span>
+          <span class="c-status">Status</span>
+          <span class="c-eta">Time left</span>
+          <span class="c-speed">Transfer rate</span>
+          <span class="c-prog">Progress</span>
+          <span class="c-actions"></span>
         </div>
-        <div id="drop-hint" class="drophint hidden">release to add</div>
-      </div>
+        <div id="all-list" class="linklist"></div>
+        <div id="all-empty" class="empty hidden">Nothing here yet. Choose <b>Add links</b>, press Ctrl+V with a link copied, or drop links onto this window.</div>
+      </section>
 
-      <div class="graphwrap">
-        <canvas id="speed-graph" height="72"></canvas>
-      </div>
+      <section id="tab-queue" class="tabpane listpane">
+        <div class="listhead">
+          <span class="c-title">File name</span>
+          <span class="c-size">Size</span>
+          <span class="c-status">Status</span>
+          <span class="c-eta">Time left</span>
+          <span class="c-speed">Transfer rate</span>
+          <span class="c-prog">Progress</span>
+          <span class="c-actions"></span>
+        </div>
+        <div id="queue-list" class="linklist"></div>
+        <div id="queue-empty" class="empty hidden">The queue is empty. Choose <b>Add links</b> to start a download.</div>
+      </section>
 
-      <div class="listhead">
-        <span class="c-title">Title</span>
-        <span class="c-size">Size</span>
-        <span class="c-speed">Speed</span>
-        <span class="c-eta">ETA</span>
-        <span class="c-prog">Progress</span>
-        <span class="c-actions"></span>
-      </div>
-      <div id="queue-list" class="linklist"></div>
-      <div id="queue-empty" class="empty hidden">Queue is empty — add a link above.</div>
-    </section>
+      <!-- ============================ CAPTCHAS =========================== -->
+      <section id="tab-captchas" class="tabpane pagepane">
+        <h2>Captchas and site checks</h2>
+        <p class="hint">Cloudflare, DDoS-Guard and captcha widgets that need a person. One entry covers
+        every download from the same site. <em>Solve in browser</em> opens the site in Edge; once the
+        check passes, the waiting downloads continue. Image captchas are answered in the download's row.</p>
+        <div id="captcha-list" class="linklist boxed"></div>
+        <h2>Saved site clearances</h2>
+        <div id="clearance-list" class="linklist boxed"></div>
+      </section>
 
-    <!-- ============================ TERMINAL =========================== -->
-    <section id="tab-terminal" class="tabpane">
-      <h2>Web terminal</h2>
-      <p class="hint">Runs commands as the OpenGrab user in the download directory.
-      Disabled by default; enabling it allows authenticated users to execute commands.</p>
-      <div class="formrow">
-        <input id="terminal-command" type="text" placeholder="Command" style="flex:1">
-        <button id="btn-terminal-run" class="primary">Run</button>
-        <button id="btn-terminal-stop" class="danger" disabled>Stop</button>
-      </div>
-      <pre id="terminal-output" class="terminal-output" aria-live="polite"></pre>
-    </section>
+      <!-- ============================ LINKGRABBER ======================== -->
+      <section id="tab-linkgrabber" class="tabpane pagepane">
+        <h2>LinkGrabber</h2>
+        <p class="hint">Links you copy appear here for review when clipboard monitoring is on.
+        Nothing downloads until you choose <em>Add</em>.</p>
+        <div class="formrow">
+          <span id="clipboard-state" class="hint">Clipboard monitoring is off.</span>
+          <span class="grow"></span>
+          <button id="btn-linkgrabber-clear">Dismiss all</button>
+        </div>
+        <div id="linkgrabber-list" class="linklist boxed"></div>
+      </section>
 
-    <!-- ============================ NOTIFICATIONS ====================== -->
-    <section id="tab-notifications" class="tabpane">
-      <h2>Notifications</h2>
-      <div class="formrow"><span class="hint">Recent completions, errors, and items waiting for action.</span>
-        <span class="grow"></span><button id="btn-notifications-read">Mark all read</button><button id="btn-notifications-clear">Clear</button></div>
-      <div id="notifications-list" class="linklist"></div>
-    </section>
+      <!-- ============================ NOTIFICATIONS ====================== -->
+      <section id="tab-notifications" class="tabpane pagepane">
+        <h2>Notifications</h2>
+        <div class="formrow"><span class="hint">Finished and failed downloads, and anything waiting for you.</span>
+          <span class="grow"></span><button id="btn-notifications-read">Mark all read</button><button id="btn-notifications-clear">Clear</button></div>
+        <div id="notifications-list" class="linklist boxed"></div>
+      </section>
 
-    <!-- ============================ FILES & AUDIO ====================== -->
-    <section id="tab-files" class="tabpane">
-      <h2>Download files</h2>
-      <p class="hint">This file manager is limited to the configured download directory.</p>
-      <div class="formrow">
-        <code id="files-path">/</code>
-        <button id="btn-files-up">Up</button>
-        <button id="btn-files-mkdir">New folder</button>
-        <label class="buttonlike">Upload<input id="file-upload" type="file" hidden></label>
-        <button id="btn-files-refresh">Refresh</button>
-      </div>
-      <div id="files-list" class="linklist"></div>
-      <h2>Audio player</h2>
-      <audio id="audio-player" controls hidden></audio>
-    </section>
+      <!-- ============================ FILES & AUDIO ====================== -->
+      <section id="tab-files" class="tabpane pagepane">
+        <h2>Downloaded files</h2>
+        <p class="hint">Browse the download folder. Nothing outside it is reachable here.</p>
+        <div class="formrow">
+          <code id="files-path">/</code>
+          <button id="btn-files-up">Up</button>
+          <button id="btn-files-mkdir">New folder</button>
+          <label class="buttonlike">Upload<input id="file-upload" type="file" hidden></label>
+          <button id="btn-files-refresh">Refresh</button>
+        </div>
+        <div id="files-list" class="linklist boxed"></div>
+        <h2>Audio player</h2>
+        <audio id="audio-player" controls hidden></audio>
+      </section>
 
-    <!-- ============================ CAPTCHAS =========================== -->
-    <section id="tab-captchas" class="tabpane">
-      <h2>Captchas and site challenges</h2>
-      <p class="hint">Cloudflare, DDoS-Guard and captcha widgets that need a human. One entry covers
-      every download from the same site. <em>Solve in browser</em> opens the site in Edge; once the
-      check passes, the waiting downloads continue. Image captchas are answered in the download's row.</p>
-      <div id="captcha-list" class="linklist"></div>
-      <h2>Saved site clearances</h2>
-      <div id="clearance-list" class="linklist"></div>
-    </section>
+      <!-- ============================ ACCOUNTS =========================== -->
+      <section id="tab-accounts" class="tabpane pagepane">
+        <h2>Site accounts</h2>
+        <p class="hint">Logins for file hosts, kept in your OpenGrab data folder and protected with Windows DPAPI.</p>
+        <div class="formrow">
+          <input id="acc-site" placeholder="Site, e.g. mega.nz">
+          <input id="acc-user" placeholder="User name or email">
+          <input id="acc-pass" type="password" placeholder="Password">
+          <button id="btn-acc-add" class="primary">Add account</button>
+        </div>
+        <div id="accounts-list" class="linklist boxed"></div>
+      </section>
 
-    <!-- ============================ LINKGRABBER ======================== -->
-    <section id="tab-linkgrabber" class="tabpane">
-      <h2>LinkGrabber</h2>
-      <p class="hint">Copied URLs appear here for review when clipboard monitoring is enabled.
-      Nothing is queued until you choose <em>Add</em>.</p>
-      <div class="formrow">
-        <span id="clipboard-state" class="hint">Clipboard monitoring is off.</span>
-        <span class="grow"></span>
-        <button id="btn-linkgrabber-clear">Dismiss all</button>
-      </div>
-      <div id="linkgrabber-list" class="linklist"></div>
-    </section>
+      <!-- ============================ FILTERS ============================ -->
+      <section id="tab-filters" class="tabpane pagepane">
+        <h2>Link filters</h2>
+        <p class="hint">Regex or glob. Exclude rules always win. Once any include rule exists,
+        only links that match an include rule get through.</p>
+        <div class="formrow">
+          <select id="flt-kind">
+            <option value="exclude">exclude</option>
+            <option value="include">include</option>
+          </select>
+          <select id="flt-type">
+            <option value="regex">regex</option>
+            <option value="glob">glob</option>
+          </select>
+          <input id="flt-pattern" placeholder="Pattern, e.g. *.exe">
+          <button id="btn-flt-add" class="primary">Add filter</button>
+        </div>
+        <div id="filters-list" class="linklist boxed"></div>
+      </section>
 
-    <!-- ============================ ALL LINKS ============================ -->
-    <section id="tab-all" class="tabpane">
-      <div class="filterrow">
-        <button class="chip active" data-f="all">all</button>
-        <button class="chip" data-f="active">active</button>
-        <button class="chip" data-f="finished">finished</button>
-        <button class="chip" data-f="failed">failed / error</button>
-        <button class="chip" data-f="parked">parked (captcha/login/paywall)</button>
-        <span class="grow"></span>
-        <button id="btn-clear-finished">clear finished</button>
-      </div>
-      <div id="all-list" class="linklist"></div>
-    </section>
+      <!-- ============================ PACKAGIZER ========================== -->
+      <section id="tab-packagizer" class="tabpane pagepane">
+        <h2>Packagizer rules</h2>
+        <p class="hint">The first matching rule decides where a file goes and what it is called.
+        Templates support <code>{name}</code>, <code>{stem}</code>, <code>{ext}</code> and <code>{host}</code>.
+        Folders stay inside the download folder, and existing files are never overwritten.</p>
+        <div class="formrow">
+          <input id="pack-name" type="text" placeholder="Rule name">
+          <input id="pack-pattern" type="text" placeholder="Match, e.g. *.zip">
+          <select id="pack-pattern-type"><option value="glob">glob</option><option value="regex">regex</option></select>
+          <input id="pack-subdir" type="text" placeholder="Folder (optional)">
+          <input id="pack-template" type="text" placeholder="File name template (optional)">
+          <button id="btn-pack-add" class="primary">Add rule</button>
+        </div>
+        <div id="packagizer-list" class="linklist boxed"></div>
+        <h2>Try a rule</h2>
+        <div class="formrow">
+          <input id="pack-preview-url" type="text" placeholder="Link">
+          <input id="pack-preview-name" type="text" placeholder="File name">
+          <button id="btn-pack-preview">Preview</button>
+        </div>
+        <pre id="pack-preview-result" class="terminal-output" style="min-height:5em"></pre>
+      </section>
 
-    <!-- ============================ ACCOUNTS =========================== -->
-    <section id="tab-accounts" class="tabpane">
-      <h2>Site accounts</h2>
-      <p class="hint">Stored locally in <code>accounts.json</code> in your OpenGrab data dir.
-      Plugins receive credentials via <code>ctx.account_for(site, url)</code>.</p>
-      <div class="formrow">
-        <input id="acc-site" placeholder="site domain, e.g. mega.co.nz">
-        <input id="acc-user" placeholder="username / email">
-        <input id="acc-pass" type="password" placeholder="password / password2">
-        <button id="btn-acc-add" class="primary">Add account</button>
-      </div>
-      <div id="accounts-list" class="linklist"></div>
-    </section>
+      <!-- ============================ TERMINAL =========================== -->
+      <section id="tab-terminal" class="tabpane pagepane">
+        <h2>Web terminal</h2>
+        <p class="hint">Runs commands as the OpenGrab user in the download folder.
+        It is off until you allow it in Settings, and it only accepts the console token.</p>
+        <div class="formrow">
+          <input id="terminal-command" type="text" placeholder="Command" style="flex:1">
+          <button id="btn-terminal-run" class="primary">Run</button>
+          <button id="btn-terminal-stop" class="danger" disabled>Stop</button>
+        </div>
+        <pre id="terminal-output" class="terminal-output" aria-live="polite"></pre>
+      </section>
 
-    <!-- ============================ FILTERS ============================ -->
-    <section id="tab-filters" class="tabpane">
-      <h2>Link filters</h2>
-      <p class="hint">Regex or glob. Exclude rules always win. If any <em>include</em>
-      rule exists, only links matching an include rule pass.</p>
-      <div class="formrow">
-        <select id="flt-kind">
-          <option value="exclude">exclude</option>
-          <option value="include">include</option>
-        </select>
-        <select id="flt-type">
-          <option value="regex">regex</option>
-          <option value="glob">glob</option>
-        </select>
-        <input id="flt-pattern" placeholder="pattern, e.g. .*\.exe$ or *.exe">
-        <button id="btn-flt-add" class="primary">Add filter</button>
-      </div>
-      <div id="filters-list" class="linklist"></div>
-    </section>
+      <!-- ============================ SETTINGS =========================== -->
+      <section id="tab-settings" class="tabpane pagepane settingspane">
+        <h2>Downloads</h2>
+        <div class="settings-grid groupbox">
+          <label>Download folder
+            <input id="set-download_dir" type="text"></label>
+          <label>Downloads at the same time
+            <input id="set-max_parallel" type="number" min="1" max="32"></label>
+          <label>Connections per download
+            <input id="set-per_link_chunks" type="number" min="1" max="16"></label>
+          <label>Speed limit in kB/s (0 = none)
+            <input id="set-speed_limit_kbps" type="number" min="0"></label>
+          <label>Retries
+            <input id="set-retry_max" type="number" min="0" max="10"></label>
+          <label>Highest video resolution (0 = best)
+            <input id="set-media_max_height" type="number" min="0" max="4320" step="120"></label>
+          <label>Playlist items to list (max 50000)
+            <input id="set-media_playlist_max_entries" type="number" min="1" max="50000"></label>
+          <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> Start downloads as soon as they are found</label>
+          <label class="check"><input id="set-clipboard_monitor_enabled" type="checkbox"> Watch copied links (review before adding)</label>
+          <label class="check"><input id="set-toasts_enabled" type="checkbox"> Desktop notifications for finished, failed and waiting downloads</label>
+        </div>
 
-    <!-- ============================ PACKAGIZER ========================== -->
-    <section id="tab-packagizer" class="tabpane">
-      <h2>Packagizer rules</h2>
-      <p class="hint">The first matching rule wins. Match a URL or filename with a glob or regex.
-      Templates support <code>{name}</code>, <code>{stem}</code>, <code>{ext}</code>, and <code>{host}</code>.
-      Subfolders stay inside the download directory. Existing files are kept and get a numbered filename.</p>
-      <div class="formrow">
-        <input id="pack-name" type="text" placeholder="rule name">
-        <input id="pack-pattern" type="text" placeholder="match, e.g. *.zip">
-        <select id="pack-pattern-type"><option value="glob">glob</option><option value="regex">regex</option></select>
-        <input id="pack-subdir" type="text" placeholder="target subfolder (optional)">
-        <input id="pack-template" type="text" placeholder="filename template (optional)">
-        <button id="btn-pack-add" class="primary">Add rule</button>
-      </div>
-      <div id="packagizer-list" class="linklist"></div>
-      <h2>Preview rule result</h2>
-      <div class="formrow">
-        <input id="pack-preview-url" type="text" placeholder="source URL">
-        <input id="pack-preview-name" type="text" placeholder="filename">
-        <button id="btn-pack-preview">Preview</button>
-      </div>
-      <pre id="pack-preview-result" class="terminal-output" style="min-height:5em"></pre>
-    </section>
+        <h2>Archives</h2>
+        <div class="settings-grid groupbox">
+          <label class="check"><input id="set-auto_extract_archives" type="checkbox"> Extract ZIP, 7z and TAR archives after download</label>
+          <label>Most files per archive
+            <input id="set-archive_max_files" type="number" min="1" max="100000"></label>
+          <label>Largest extracted size in GiB
+            <input id="set-archive_max_expanded_gib" type="number" min="1" max="1024"></label>
+          <label>Password list file (one password per line)
+            <input id="set-archive_password_file" type="text"></label>
+        </div>
 
-    <!-- ============================ SETTINGS =========================== -->
-    <section id="tab-settings" class="tabpane">
-      <h2>Settings</h2>
-      <div class="settings-grid">
-        <label>download directory
-          <input id="set-download_dir" type="text"></label>
-        <label>max parallel links
-          <input id="set-max_parallel" type="number" min="1" max="32"></label>
-        <label>chunked ranges per link
-          <input id="set-per_link_chunks" type="number" min="1" max="16"></label>
-        <label>speed limit (kB/s, 0 = off)
-          <input id="set-speed_limit_kbps" type="number" min="0"></label>
-        <label>media max resolution (0 = best progressive)
-          <input id="set-media_max_height" type="number" min="0" max="4320" step="120"></label>
-        <label>playlist items to enumerate (max 50000)
-          <input id="set-media_playlist_max_entries" type="number" min="1" max="50000"></label>
-        <p class="hint">Media downloads use a single progressive stream. Separate video/audio tracks need merging, which this build does not yet provide. Playlists stay as reviewable packages until you queue selected items or choose “queue all”.</p>
-        <label>retries
-          <input id="set-retry_max" type="number" min="0" max="10"></label>
-        <label>TLS impersonation
-          <select id="set-impersonate">
-            <option>chrome</option><option>chrome124</option><option>firefox</option>
-            <option>safari</option><option>edge</option>
-          </select></label>
-        <label>proxy (blank = none)
-          <input id="set-proxy" type="text" placeholder="http://user:pass@host:port"></label>
-        <label>captcha provider
-          <select id="set-captcha_provider">
-            <option>auto</option><option>manual</option><option>2captcha</option>
-            <option>capmonster</option><option>capsolver</option><option>ddddocr</option>
-          </select></label>
-        <label>2Captcha API key (BYO)
-          <input id="set-captcha_2captcha_key" type="password"></label>
-        <label>CapMonster API key (BYO)
-          <input id="set-captcha_capmonster_key" type="password"></label>
-        <label>CapSolver API key (BYO)
-          <input id="set-captcha_capsolver_key" type="password"></label>
-        <label class="check"><input id="set-ua_rotation" type="checkbox"> rotate user agents</label>
-        <label class="check"><input id="set-auto_start_after_grab" type="checkbox"> auto-start after grab</label>
-        <label class="check"><input id="set-clipboard_monitor_enabled" type="checkbox"> monitor copied links (review before adding)</label>
-        <label class="check"><input id="set-toasts_enabled" type="checkbox"> desktop notifications (finished, failed, captcha waiting)</label>
-        <label class="check"><input id="set-terminal_enabled" type="checkbox"> enable authenticated web terminal (runs local commands)</label>
-        <label class="check"><input id="set-auto_extract_archives" type="checkbox"> extract ZIP/7z/TAR archives after download</label>
-        <label>archive extraction file limit
-          <input id="set-archive_max_files" type="number" min="1" max="100000"></label>
-        <label>archive expanded-size limit (GiB)
-          <input id="set-archive_max_expanded_gib" type="number" min="1" max="1024"></label>
-        <label>optional archive password list file (ZIP/7z/RAR; one per line)
-          <input id="set-archive_password_file" type="text"></label>
-      </div>
-      <div class="formrow">
-        <button id="btn-set-save" class="primary">Save settings</button>
-        <button id="btn-set-reload-plugins">rescan plugins</button>
-        <span class="grow"></span>
-        <label class="check"><input id="set-confirm_delete" type="checkbox" style="display:inline-block"> confirm deletes</label>
-      </div>
-      <h2>Local OCR captcha solver (optional)</h2>
-      <p class="hint">Solves simple image captchas offline on the CPU. It is not part of the
-      base install: OpenGrab downloads it only when you press Install, checks every file's
-      hash, and keeps it in your data folder. It stays off on weak PCs unless you override that.</p>
-      <div class="formrow">
-        <span id="addon-ocr-status" class="hint">Checking…</span>
-        <span class="grow"></span>
-        <button id="btn-addon-ocr-install">Install</button>
-        <button id="btn-addon-ocr-remove" class="danger" hidden>Remove</button>
-      </div>
-      <div class="formrow">
-        <label class="check"><input id="set-captcha_ocr_enabled" type="checkbox"> use local OCR for captchas</label>
-        <label class="check"><input id="set-captcha_ocr_ignore_hardware" type="checkbox"> also on weak hardware</label>
-      </div>
-      <h2>Plugin health</h2>
-      <table id="plugin-health"><thead><tr><th>Plugin</th><th>OK</th><th>Fail</th><th>Last error</th></tr></thead><tbody id="plugin-health-body"></tbody></table>
-      <h2>Paired devices</h2>
-      <p class="hint">Phones and browser extensions paired with this OpenGrab. Revoke one to sign it out.</p>
-      <div class="formrow"><button id="btn-pair-new">Pair new device</button>
-        <code id="pair-code"></code> <span id="pair-expiry" class="hint"></span></div>
-      <table id="devices"><thead><tr><th>Name</th><th>Paired</th><th>Last seen</th><th></th></tr></thead><tbody id="devices-body"></tbody></table>
-      <h2>Local API</h2>
-      <p class="hint">Console token (for LAN / browser access): <code id="token-display"></code>
-      LAN URL: <code id="lan-url"></code></p>
-      <h2>Diagnostics</h2>
-      <p class="hint">Export a support snapshot. It excludes URLs, credentials, API tokens, cookies, and proxy settings.</p>
-      <button id="btn-diagnostics-export">Download diagnostics JSON</button>
-      <h2>About</h2>
-      <p class="hint">OpenGrab — unpaywalled, modifiable link grabber &amp; downloader.
-      Plugins: drop a <code>.py</code> file into your OpenGrab <code>plugins</code> folder
-      and press <em>rescan plugins</em>.</p>
-    </section>
-  </main>
+        <h2>Connection</h2>
+        <div class="settings-grid groupbox">
+          <label>Browser fingerprint
+            <select id="set-impersonate">
+              <option>chrome</option><option>chrome124</option><option>firefox</option>
+              <option>safari</option><option>edge</option>
+            </select></label>
+          <label>Proxy (blank = none)
+            <input id="set-proxy" type="text" placeholder="http://user:pass@host:port"></label>
+          <label class="check"><input id="set-ua_rotation" type="checkbox"> Rotate user agents</label>
+        </div>
+
+        <h2>Captcha</h2>
+        <div class="settings-grid groupbox">
+          <label>Captcha solver
+            <select id="set-captcha_provider">
+              <option>auto</option><option>manual</option><option>2captcha</option>
+              <option>capmonster</option><option>capsolver</option><option>ddddocr</option>
+            </select></label>
+          <label>2Captcha API key
+            <input id="set-captcha_2captcha_key" type="password"></label>
+          <label>CapMonster API key
+            <input id="set-captcha_capmonster_key" type="password"></label>
+          <label>CapSolver API key
+            <input id="set-captcha_capsolver_key" type="password"></label>
+        </div>
+
+        <h2>Local OCR captcha solver (optional)</h2>
+        <div class="groupbox">
+          <p class="hint">Solves simple image captchas offline on the CPU. It is not part of the
+          base install: OpenGrab downloads it only when you choose Install, checks every file's
+          hash, and keeps it in your data folder. It stays off on weak PCs unless you allow it.</p>
+          <div class="formrow">
+            <span id="addon-ocr-status" class="hint">Checking…</span>
+            <span class="grow"></span>
+            <button id="btn-addon-ocr-install">Install</button>
+            <button id="btn-addon-ocr-remove" class="danger" hidden>Remove</button>
+          </div>
+          <div class="formrow">
+            <label class="check"><input id="set-captcha_ocr_enabled" type="checkbox"> Use local OCR for captchas</label>
+            <label class="check"><input id="set-captcha_ocr_ignore_hardware" type="checkbox"> Also on weak hardware</label>
+          </div>
+        </div>
+
+        <h2>Advanced</h2>
+        <div class="settings-grid groupbox">
+          <label class="check"><input id="set-terminal_enabled" type="checkbox"> Allow the web terminal (runs local commands)</label>
+          <label class="check"><input id="set-confirm_delete" type="checkbox"> Ask before removing downloads</label>
+        </div>
+
+        <div class="formrow savebar">
+          <button id="btn-set-save" class="primary">Save settings</button>
+          <button id="btn-set-reload-plugins">Rescan plugins</button>
+        </div>
+
+        <h2>Plugin health</h2>
+        <div class="groupbox">
+          <table id="plugin-health" class="grid"><thead><tr><th>Plugin</th><th>Worked</th><th>Failed</th><th>Last error</th></tr></thead><tbody id="plugin-health-body"></tbody></table>
+        </div>
+        <h2>Paired devices</h2>
+        <div class="groupbox">
+          <p class="hint">Phones and browser extensions paired with this OpenGrab. Revoke one to sign it out.</p>
+          <div class="formrow"><button id="btn-pair-new">Pair a new device</button>
+            <code id="pair-code"></code> <span id="pair-expiry" class="hint"></span></div>
+          <table id="devices" class="grid"><thead><tr><th>Name</th><th>Paired</th><th>Last seen</th><th></th></tr></thead><tbody id="devices-body"></tbody></table>
+        </div>
+        <h2>Local API</h2>
+        <div class="groupbox">
+          <p class="hint">Console token for LAN or browser access: <code id="token-display"></code><br>
+          LAN address: <code id="lan-url"></code></p>
+        </div>
+        <h2>Diagnostics</h2>
+        <div class="groupbox">
+          <p class="hint">Saves a support snapshot without links, logins, tokens, cookies or proxy settings.</p>
+          <button id="btn-diagnostics-export">Save diagnostics</button>
+        </div>
+        <h2>About</h2>
+        <div class="groupbox">
+          <p class="hint">OpenGrab is a free, open-source download manager. To add a plugin, put its
+          <code>.py</code> file in the <code>plugins</code> folder of your data folder and choose Rescan plugins.</p>
+        </div>
+      </section>
+      <div id="drop-hint" class="drophp hidden">Drop to add these links</div>
+    </main>
+  </div>
+
+  <!-- ============================ status bar ============================ -->
+  <footer class="statusbar">
+    <span id="conn-pill" class="pill warn">connecting…</span>
+    <span id="active-pill" class="pill">0 active</span>
+    <span id="speed-pill" class="pill">0 B/s</span>
+    <canvas id="speed-graph" height="18" aria-label="Transfer rate over the last minute"></canvas>
+    <span class="grow"></span>
+    <span id="folder-pill" class="pill"></span>
+  </footer>
 </div>
+
+<!-- ============================ add links dialog ============================ -->
+<dialog id="add-dialog" class="win" aria-labelledby="add-title">
+  <div class="win-title" id="add-title">Add links<button type="button" class="win-x" id="add-close" aria-label="Close">×</button></div>
+  <div class="win-body">
+    <label for="url-input" class="win-label">Links, one per line</label>
+    <textarea id="url-input" rows="7"
+      placeholder="https://example.com/video&#10;https://example.com/file.zip"></textarea>
+    <div class="addrow">
+      <label>Priority <input id="url-priority" type="number" value="0" style="width:4.5em"></label>
+      <label class="check"><input id="url-auto" type="checkbox" checked> Start now</label>
+      <span class="grow"></span>
+      <button type="button" id="add-cancel">Cancel</button>
+      <button type="button" id="btn-add" class="primary">Add links</button>
+    </div>
+  </div>
+</dialog>
+
 <div id="toasts"></div>
 <script src="app.js"></script>
 <div id="palette" class="hidden" role="dialog" aria-label="Command palette"><input id="palette-input" type="text" placeholder="Search features, settings, downloads, actions… (Ctrl+K)" autocomplete="off"><ul id="palette-list"></ul></div>

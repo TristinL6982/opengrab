@@ -10,6 +10,8 @@ const S = {
   expanded: new Set(),     // link ids with expanded children
   graph: [],               // [{t, bps}] last 60 s of aggregate speed
   conn: "connecting…",
+  selected: new Set(),     // selected link ids (toolbar acts on these)
+  lastClicked: null,
 };
 let terminalJobId = null;
 let terminalPollTimer = null;
@@ -175,44 +177,29 @@ function renderGraph() {
   if (!cv) return;
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
   if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
   const ctx = cv.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const maxBps = Math.max(1e6, ...S.graph.map(p => p.bps)) * 1.15;
-  const now = Date.now();
-  // grid: 4 lines
-  ctx.strokeStyle = "#2c3140"; ctx.lineWidth = 1;
-  for (let i = 1; i <= 3; i++) {
-    const y = h - (h * i) / 4;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-  }
-  // label of max
-  ctx.fillStyle = "#8b93a7"; ctx.font = "10px monospace";
-  ctx.fillText(humanBytes(maxBps) + "/s", 4, 10);
+  // classic meter: dark field, faint grid, green trace
+  ctx.strokeStyle = "rgba(120,170,230,.18)"; ctx.lineWidth = 1;
+  for (let x = w; x > 0; x -= 10) { ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, h); ctx.stroke(); }
   if (S.graph.length < 2) return;
+  const maxBps = Math.max(64 * 1024, ...S.graph.map(p => p.bps)) * 1.1;
+  const now = Date.now();
   const x = p => w - ((now - p.t) / 60000) * w;
-  const y = b => h - (b / maxBps) * (h - 14);
-  // area
+  const y = b => h - 1 - (b / maxBps) * (h - 3);
+  ctx.beginPath();
+  ctx.moveTo(x(S.graph[0]), h);
+  for (const p of S.graph) ctx.lineTo(x(p), y(p.bps));
+  ctx.lineTo(x(S.graph[S.graph.length - 1]), h);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(38,160,51,.35)"; ctx.fill();
   ctx.beginPath();
   ctx.moveTo(x(S.graph[0]), y(S.graph[0].bps));
   for (const p of S.graph) ctx.lineTo(x(p), y(p.bps));
-  ctx.lineTo(x(S.graph[S.graph.length - 1]), h);
-  ctx.lineTo(x(S.graph[0]), h);
-  ctx.closePath();
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, "rgba(79,140,255,.35)");
-  grad.addColorStop(1, "rgba(79,140,255,.02)");
-  ctx.fillStyle = grad; ctx.fill();
-  // line
-  ctx.beginPath();
-  ctx.moveTo(x(S.graph[0]), y(S.graph[0].bps));
-  for (const p of S.graph) ctx.lineTo(x(p), y(p));
-  ctx.strokeStyle = "#4f8cff"; ctx.lineWidth = 1.6; ctx.stroke();
-  // current dot
-  const last = S.graph[S.graph.length - 1];
-  ctx.beginPath(); ctx.arc(x(last), y(last.bps), 2.5, 0, Math.PI * 2);
-  ctx.fillStyle = "#38bdf8"; ctx.fill();
+  ctx.strokeStyle = "#5fe05f"; ctx.lineWidth = 1.4; ctx.stroke();
 }
 setInterval(renderGraph, 1000);
 
@@ -221,46 +208,21 @@ const ACTIVE = ["waiting", "resolving", "grabbing", "downloading", "paused",
                 "captcha", "login", "paywall", "error"];
 
 function rowActions(l) {
+  // The toolbar acts on selected rows (IDM / JD2 style); rows only carry
+  // buttons for states that need your input.
   const b = [];
   const sm = (txt, act, cls = "") =>
     `<button class="sm ${cls}" data-act="${act}" data-id="${l.id}">${txt}</button>`;
   switch (l.status) {
-    case "waiting":
-      b.push(sm("start", "start"), sm("remove", "remove", "danger"));
-      break;
-    case "downloading":
-      b.push(sm("pause", "pause"), sm("stop", "stop", "danger"));
-      break;
-    case "paused":
-      b.push(sm("resume", "resume"), sm("stop", "stop", "danger"));
-      break;
     case "error":
-      b.push(sm("retry", "start"), sm("remove", "remove", "danger"));
-      break;
-    case "resolving":
-    case "grabbing":
-      b.push(sm("stop", "stop", "danger"));
+      b.push(sm("Retry", "start"));
       break;
     case "captcha":
-      if (l.extra?.captcha_request_id) {
-        b.push(sm("solve in browser", "captcha-browser-link"), sm("retry", "captcha-retry"),
-               sm("remove", "remove", "danger"));
-      } else {
-        b.push(`<span class="inlineform" data-for="${l.id}"></span>`);
-      }
-      break;
-    case "login":
-      b.push(`<span class="inlineform" data-for="${l.id}"></span>`);
+      if (l.extra?.captcha_request_id) b.push(sm("Solve in browser", "captcha-browser-link"), sm("Retry", "captcha-retry"));
       break;
     case "paywall":
-      b.push(sm("try anyway", "paywall"));
-      b.push(sm("remove", "remove", "danger"));
+      b.push(sm("Try anyway", "paywall"));
       break;
-    case "finished":
-      b.push(sm("remove", "remove", "danger"));
-      break;
-    default:
-      b.push(sm("remove", "remove", "danger"));
   }
   return b.join("");
 }
@@ -285,25 +247,39 @@ function childrenBlock(l) {
   </div>`;
 }
 
-function linkRow(l, showStatus = true) {
+const STATUS_TEXT = {
+  waiting: "Queued", resolving: "Checking link", grabbing: "Checking link",
+  downloading: "Downloading", paused: "Paused", finished: "Complete", error: "Error",
+  captcha: "Needs captcha", login: "Needs login", paywall: "Paywall", skipped: "Skipped",
+};
+
+function statusText(l) {
+  if (l.status === "downloading" && l.size) return "Downloading " + Math.round((l.progress || 0) * 100) + "%";
+  if (l.status === "error" && /^retry \d+\/\d+/.test(l.error || "")) return "Retrying";
+  return STATUS_TEXT[l.status] || l.status;
+}
+
+function linkRow(l) {
   const pct = Math.round((l.progress || 0) * 100);
-  const barCls = l.status === "error" ? "bar err" : l.status === "paused" ? "bar paused" : "bar";
-  return `<div class="linkrow" data-lid="${l.id}">
-    <div class="c-title">
-      ${showStatus ? `<span class="st ${l.status}">${l.status}</span>` : ""}
+  const barCls = (l.status === "error" ? "bar err" : l.status === "paused" ? "bar paused" : "bar") + (pct >= 55 ? " hi" : "");
+  const sel = S.selected.has(l.id) ? " selected" : "";
+  const notes = [];
+  if (l.status === "error" && l.error) notes.push(`<div class="u" style="color:var(--err)">${esc(l.error)}</div>`);
+  if (l.status === "captcha" && l.extra?.captcha_request_id) notes.push(`<div class="u" style="color:var(--warn)">Waiting for a ${esc(l.captcha_kind)} check on ${esc((l.extra.captcha_site_url || l.url).split("/")[2] || "")}${l.extra.captcha_ray_id ? ", Ray ID " + esc(l.extra.captcha_ray_id) : ""}. Open Captchas to solve it.</div>`);
+  if (l.status === "paywall" && l.paywall_note) notes.push(`<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>`);
+  if (l.extra?.archive_extraction) notes.push(`<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok-dark)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>`);
+  const sub = l.status === "finished" && l.path ? l.path : (l.url + (l.plugin ? " · " + l.plugin : ""));
+  return `<div class="linkrow${sel}" data-lid="${l.id}" data-status="${esc(l.status)}" title="${esc(l.url)}">
+    <div class="c-title"><span class="sg ${esc(l.status)}"></span><span class="names">
       <div class="t">${esc(l.title || l.filename || l.url)}</div>
-      <div class="u">${esc(l.url)}${l.plugin ? " · " + esc(l.plugin) : ""}</div>
-      ${l.status === "error" && l.error ? `<div class="u" style="color:var(--err)">${esc(l.error)}</div>` : ""}
-      ${l.status === "captcha" && l.extra?.captcha_request_id ? `<div class="u" style="color:var(--warn)">Waiting for a ${esc(l.captcha_kind)} check on ${esc((l.extra.captcha_site_url || l.url).split("/")[2] || "")}${l.extra.captcha_ray_id ? " · Ray ID " + esc(l.extra.captcha_ray_id) : ""}. See the Captchas tab.</div>` : ""}
-      ${l.status === "paywall" && l.paywall_note ? `<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>` : ""}
-      ${l.status === "finished" && l.path ? `<div class="u" style="color:var(--ok)">${esc(l.path)}</div>` : ""}
-      ${l.extra?.archive_extraction ? `<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>` : ""}
-    </div>
-    <div class="c-size">${l.size ? humanBytes(l.size) : (l.filename ? "" : "—")}</div>
-    <div class="c-speed">${l.status === "downloading" ? humanBytes(l.speed) + "/s" : "—"}</div>
-    <div class="c-eta">${l.status === "downloading" ? humanEta(l.eta) : (l.status === "finished" ? humanTime(l.finished) : "—")}</div>
-    <div class="c-prog"><div class="${barCls}"><i style="width:${pct}%"></i></div><span class="pct">${pct}%</span></div>
+      <div class="u">${esc(sub)}</div>${notes.join("")}</span></div>
+    <div class="c-size">${l.size ? humanBytes(l.size) : "—"}</div>
+    <div class="c-status"><span class="st ${esc(l.status)}">${esc(statusText(l))}</span></div>
+    <div class="c-eta">${l.status === "downloading" ? humanEta(l.eta) : (l.status === "finished" ? humanTime(l.finished) : "")}</div>
+    <div class="c-speed">${l.status === "downloading" ? humanBytes(l.speed) + "/s" : ""}</div>
+    <div class="c-prog"><div class="${barCls}"><i style="width:${pct}%"></i><span class="pct">${pct}%</span></div></div>
     <div class="c-actions">${rowActions(l)}</div>
+    ${(l.status === "captcha" && !l.extra?.captcha_request_id) || l.status === "login" ? `<span class="inlineform" data-for="${l.id}"></span>` : ""}
     ${childrenBlock(l)}
   </div>`;
 }
@@ -356,16 +332,133 @@ function allLinksFiltered() {
 }
 
 function renderLists() {
+  // drop selections for links that are gone
+  for (const id of [...S.selected]) if (!S.links.has(id)) S.selected.delete(id);
   const q = $("#queue-list");
   const ql = queueLinks();
   q.innerHTML = ql.map(l => linkRow(l)).join("");
   $("#queue-empty").classList.toggle("hidden", ql.length > 0);
   const a = $("#all-list");
-  a.innerHTML = allLinksFiltered().map(l => linkRow(l, false)).join("");
+  const al = allLinksFiltered();
+  a.innerHTML = al.map(l => linkRow(l)).join("");
+  $("#all-empty").classList.toggle("hidden", al.length > 0);
   renderInlineForms(document);
   renderAccounts();
   renderFilters();
+  renderCounts();
+  updateToolbar();
 }
+
+function renderCounts() {
+  const arr = Array.from(S.links.values());
+  const n = (pred) => arr.filter(pred).length;
+  const set = (id, v) => { const el = $("#" + id); if (el) el.textContent = v ? String(v) : ""; };
+  set("cnt-all", arr.length);
+  set("cnt-queue", n(l => ACTIVE.includes(l.status)));
+  set("cnt-finished", n(l => l.status === "finished"));
+  set("cnt-failed", n(l => ["error", "skipped"].includes(l.status)));
+  set("cnt-parked", n(l => ["captcha", "login", "paywall"].includes(l.status)));
+}
+
+/* ============================================================ selection + toolbar */
+function selectedLinks() {
+  return [...S.selected].map(id => S.links.get(id)).filter(Boolean);
+}
+
+function updateToolbar() {
+  const sel = selectedLinks();
+  const any = (st) => sel.some(l => st.includes(l.status));
+  $("#tb-resume").disabled = !any(["paused", "waiting", "error"]);
+  $("#tb-pause").disabled = !any(["downloading", "waiting"]);
+  $("#tb-stop").disabled = !any(["downloading", "waiting", "resolving", "grabbing"]);
+  $("#tb-delete").disabled = sel.length === 0;
+}
+
+function visibleRowIds(row) {
+  const list = row.closest(".linklist");
+  return list ? $$(".linkrow", list).map(r => r.dataset.lid) : [];
+}
+
+document.addEventListener("click", (ev) => {
+  const row = ev.target.closest(".linkrow");
+  if (!row || ev.target.closest("button, input, a, select, textarea, .kids")) return;
+  const id = row.dataset.lid;
+  if (ev.shiftKey && S.lastClicked) {
+    const ids = visibleRowIds(row);
+    const [a, b] = [ids.indexOf(S.lastClicked), ids.indexOf(id)].sort((x, y) => x - y);
+    if (a >= 0 && b >= 0) { if (!ev.ctrlKey) S.selected.clear(); ids.slice(a, b + 1).forEach(i => S.selected.add(i)); }
+  } else if (ev.ctrlKey || ev.metaKey) {
+    S.selected.has(id) ? S.selected.delete(id) : S.selected.add(id);
+    S.lastClicked = id;
+  } else {
+    S.selected.clear(); S.selected.add(id); S.lastClicked = id;
+  }
+  renderLists();
+});
+
+async function forEachLink(links, path) {
+  for (const l of links) {
+    try { await api(`/api/links/${l.id}/${path}`, "POST"); } catch (e) { if (e.message === "unauthorized") return; }
+  }
+  refreshData();
+}
+
+$("#tb-add").addEventListener("click", () => openAddDialog());
+$("#tb-resume").addEventListener("click", async () => {
+  const sel = selectedLinks();
+  await forEachLink(sel.filter(l => l.status === "paused"), "resume");
+  await forEachLink(sel.filter(l => ["waiting", "error"].includes(l.status)), "start");
+});
+$("#tb-pause").addEventListener("click", () =>
+  forEachLink(selectedLinks().filter(l => ["downloading", "waiting"].includes(l.status)), "pause"));
+$("#tb-stop").addEventListener("click", () =>
+  forEachLink(selectedLinks().filter(l => ["downloading", "waiting", "resolving", "grabbing"].includes(l.status)), "stop"));
+$("#tb-delete").addEventListener("click", () => removeSelected());
+$("#tb-startall").addEventListener("click", async () => {
+  const all = Array.from(S.links.values());
+  await forEachLink(all.filter(l => l.status === "paused"), "resume");
+  await forEachLink(all.filter(l => l.status === "waiting"), "start");
+});
+$("#tb-pauseall").addEventListener("click", () =>
+  forEachLink(Array.from(S.links.values()).filter(l => ["downloading", "waiting"].includes(l.status)), "pause"));
+$("#tb-captchas").addEventListener("click", () => $('.tab[data-tab="captchas"]').click());
+$("#tb-settings").addEventListener("click", () => $('.tab[data-tab="settings"]').click());
+
+async function removeSelected() {
+  const sel = selectedLinks();
+  if (!sel.length) return;
+  if (!confirm(sel.length === 1 ? "Remove this download from the list? The file stays on disk."
+                                        : `Remove ${sel.length} downloads from the list? Files stay on disk.`)) return;
+  await forEachLink(sel, "remove");
+  S.selected.clear();
+}
+
+/* ============================================================ add links dialog */
+function openAddDialog(text = "") {
+  const d = $("#add-dialog");
+  if (text) $("#url-input").value = ($("#url-input").value ? $("#url-input").value + "\n" : "") + text;
+  if (!d.open) d.showModal();
+  $("#url-input").focus();
+}
+$("#add-close").addEventListener("click", () => $("#add-dialog").close());
+$("#add-cancel").addEventListener("click", () => $("#add-dialog").close());
+
+document.addEventListener("keydown", (ev) => {
+  const typing = ev.target.closest("input, textarea, select, [contenteditable]");
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "n") { ev.preventDefault(); openAddDialog(); }
+  else if (ev.key === "Delete" && !typing && S.selected.size) { ev.preventDefault(); removeSelected(); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a" && !typing && $(".listpane.active")) {
+    ev.preventDefault();
+    $$(".listpane.active .linkrow").forEach(r => S.selected.add(r.dataset.lid));
+    renderLists();
+  }
+});
+document.addEventListener("paste", (ev) => {
+  if (ev.target.closest("input, textarea, [contenteditable]")) return;
+  const text = ev.clipboardData?.getData("text/plain") || "";
+  const links = text.split(/\s+/).filter(t => /^(https?:\/\/|magnet:\?)/i.test(t));
+  if (links.length) { ev.preventDefault(); openAddDialog(links.join("\n")); }
+});
 
 let accountsCache = [], filtersCache = [];
 async function renderAccounts() {
@@ -640,6 +733,7 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   $$(".tabpane").forEach(x => x.classList.remove("active"));
   t.classList.add("active");
   $("#tab-" + t.dataset.tab).classList.add("active");
+  if (t.dataset.filter) { S.filter = t.dataset.filter; renderLists(); }
   if (t.dataset.tab === "settings") loadSettings();
   if (t.dataset.tab === "linkgrabber") renderLinkGrabber();
   if (t.dataset.tab === "notifications") renderNotifications();
@@ -672,6 +766,7 @@ async function addUrls() {
     if (errs.length) toast(errs.length + " link(s) failed: " + errs[0].error, "err");
     else toast("Added " + urls.length + " link(s)", "ok");
     ta.value = "";
+    if ($("#add-dialog").open) $("#add-dialog").close();
     refreshData();
   } catch (e) {
     if (e.message !== "unauthorized") toast("Add failed: " + e.message, "err");
@@ -816,6 +911,7 @@ async function loadSettings() {
       else el.value = s[f] ?? "";
     }
     $("#set-confirm_delete").checked = !!s.confirm_delete;
+    setFolderPill(s.download_dir);
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -864,6 +960,11 @@ $("#btn-diagnostics-export").addEventListener("click", async () => {
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   } catch (e) { toast("Could not create diagnostics: " + e.message, "err"); }
 });
+
+function setFolderPill(dir) {
+  const el = $("#folder-pill");
+  if (el && dir) { el.textContent = "Saving to " + dir; el.title = dir; }
+}
 
 /* ============================================================ paired devices */
 function fmtTime(t) { return t ? new Date(t * 1000).toLocaleString() : "never"; }
@@ -1041,6 +1142,7 @@ async function loadPluginHealth() {
   refreshData();
   refreshUnread();
   renderCaptchas();
+  api("/api/settings").then(s => setFolderPill(s.download_dir)).catch(() => {});
   loadPluginHealth();
   connectSSE();
   // PWA service worker (best effort; http contexts only register on https/localhost)
