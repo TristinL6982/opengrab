@@ -39,9 +39,11 @@ def test_stop_and_resume_after_splits(tmp_path):
     try:
         data = os.urandom(16 * MB)
         url = site.add("/r.bin", data)
-        # slow enough that the split is checkpointed long before the end
-        site.slow_below, site.slow_delay = 4 * MB, 0.08
-        site.delay_per_64k = 0.03
+        # slow enough that the split is checkpointed long before the end. The
+        # gap is wide (20x) because macOS CI runners stretch short sleeps to
+        # about 0.1 s, which made 0.08 s and 0.03 s look the same there
+        site.slow_below, site.slow_delay = 4 * MB, 0.4
+        site.delay_per_64k = 0.02
         link, dl = _run(url, tmp_path, "r.bin", per_link_chunks=4, segment_min_mb=1)
         errors: list = []
         t = threading.Thread(target=lambda: _swallow(dl.run, errors), daemon=True)
