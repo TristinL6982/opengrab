@@ -51,7 +51,7 @@ def test_stop_and_resume_after_splits(tmp_path):
         meta = tmp_path / "r.bin.part.json"
         deadline = time.time() + 30
         while time.time() < deadline:
-            if meta.exists() and len(json.loads(meta.read_text())["chunks"]) > 4:
+            if meta.exists() and len(_read_meta(meta)["chunks"]) > 4:
                 break
             time.sleep(0.05)
         dl.stop_event.set()
@@ -61,7 +61,7 @@ def test_stop_and_resume_after_splits(tmp_path):
                                f"thread alive={t.is_alive()} final file={final.exists() and final.stat().st_size} "
                                f"files={sorted(p.name for p in tmp_path.iterdir())} "
                                f"requests={[(m, h.get('Range', '')) for m, _p, h in site.requests]}")
-        saved = json.loads(meta.read_text())["chunks"]
+        saved = _read_meta(meta)["chunks"]
         assert len(saved) > 4
         # ranges tile the file without gaps or overlaps
         assert saved[0][0] == 0 and saved[-1][1] == len(data)
@@ -110,6 +110,17 @@ def test_benchmark_multi_connection_beats_single_connection(tmp_path):
         assert t_multi < t_single / 1.5
     finally:
         site.close()
+
+
+def _read_meta(meta):
+    """The downloader replaces the checkpoint atomically; on Windows a read
+    that lands mid-replace raises PermissionError, so try again."""
+    for _ in range(50):
+        try:
+            return json.loads(meta.read_text())
+        except (OSError, ValueError):
+            time.sleep(0.02)
+    return json.loads(meta.read_text())
 
 
 def _swallow(fn, errors=None):
