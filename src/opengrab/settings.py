@@ -135,6 +135,15 @@ class Settings(BaseModel):
     archive_password_file: str = ""
     archive_7zip_path: str = ""        # W10: 7-Zip for split sets and RAR (blank = find it)
     avscan: dict = Field(default_factory=dict)  # W10: {enabled, scanner, custom_command, infected_codes, timeout_s, quarantine}
+    # W11 BitTorrent (libtorrent add-on) and router reconnect
+    torrent: dict = Field(default_factory=dict)       # {dht, pex, lsd, sequential, ratio_limit, seed_minutes}
+    torrent_listen_port: int = 6881
+    torrent_interface: str = "0.0.0.0"
+    torrent_open_files: bool = True                   # open downloaded .torrent files
+    trackers: dict = Field(default_factory=dict)      # TrackerManager.to_dict()
+    tracker_list_url: str = ""                         # public tracker list merged daily
+    portmap: dict = Field(default_factory=dict)       # {enabled, protocols, methods, manual}
+    reconnect: dict = Field(default_factory=dict)     # {enabled, command, ip_check_url, ...}
     packagizer_rules: list[dict] = Field(default_factory=list)
 
     # maintenance

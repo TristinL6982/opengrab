@@ -236,6 +236,7 @@ function rowActions(l) {
       b.push(sm("Try anyway", "paywall"));
       break;
   }
+  if (l.plugin === "torrent" && ["downloading", "resolving", "paused"].includes(l.status)) b.push(sm("Files", "torrent-files"));
   return b.join("");
 }
 
@@ -281,6 +282,10 @@ function linkRow(l) {
   if (l.extra?.avscan && l.extra.avscan.status !== "skipped") notes.push(l.extra.avscan.status === "infected"
     ? `<div class="u hashbad">Virus scan: infected${l.extra.avscan.quarantined ? ", moved to quarantine" : ""}</div>`
     : `<div class="u ${l.extra.avscan.status === "clean" ? "hashok" : ""}">Virus scan: ${esc(l.extra.avscan.status)}</div>`);
+  if (l.plugin === "torrent" && l.extra?.torrent && l.status !== "error") {
+    const t = l.extra.torrent;
+    notes.push(`<div class="u">Torrent: ${t.peers || 0} peer(s), ${t.seeds || 0} seed(s)${t.ratio ? ", ratio " + t.ratio : ""}${t.seeding === "seeding" ? ", seeding" : ""}</div>`);
+  }
   if (l.extra?.hash) notes.push(l.extra.hash.ok ? `<div class="u hashok">${esc(l.extra.hash.algo)} checksum OK</div>` : `<div class="u hashbad">Checksum ${l.extra.hash.error ? esc(l.extra.hash.error) : "mismatch"}</div>`);
   if (l.status === "paywall" && l.paywall_note) notes.push(`<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>`);
   if (l.extra?.archive_extraction) notes.push(`<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok-dark)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>`);
@@ -760,6 +765,7 @@ async function act(action, el) {
         await api(`/api/captcha/clearances/${encodeURIComponent(el.dataset.host)}`, "DELETE");
         await renderCaptchas();
         return;
+      case "torrent-files": await openTorrentFiles(id); return;
       case "notif-read":
         await api(`/api/notifications/${encodeURIComponent(id)}/read`, "POST", {});
         await renderNotifications();
@@ -945,7 +951,8 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "captcha_ocr_enabled", "captcha_ocr_ignore_hardware", "toasts_enabled",
   "scheduler_enabled", "max_per_host", "categories_enabled", "hash_checksum_files",
   "proxy_use_system", "linkgrabber_online_check", "cnl_enabled", "cnl_port",
-  "spider_max_pages", "spider_delay_s", "spider_respect_robots", "archive_7zip_path"];
+  "spider_max_pages", "spider_delay_s", "spider_respect_robots", "archive_7zip_path",
+  "torrent_listen_port", "torrent_open_files", "tracker_list_url"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1205,16 +1212,88 @@ $("#btn-av-test").addEventListener("click", async () => {
   } catch (e) { $("#av-test-result").textContent = e.message + " (save settings first)"; }
 });
 
+/* ============================================================ W11 BitTorrent */
+async function loadTorrentSettings(s) {
+  const t = s.torrent || {};
+  window.__torrentRaw = t; window.__portmapRaw = s.portmap || {};
+  $("#tor-dht").checked = t.dht !== false; $("#tor-pex").checked = t.pex !== false; $("#tor-lsd").checked = t.lsd !== false;
+  $("#tor-seq").checked = !!t.sequential; $("#tor-ratio").value = t.ratio_limit || 0; $("#tor-minutes").value = t.seed_minutes || 0;
+  $("#pm-enabled").checked = !!(s.portmap || {}).enabled;
+  const r = s.reconnect || {};
+  $("#rc-enabled").checked = !!r.enabled; $("#rc-command").value = r.command || ""; $("#rc-ipurl").value = r.ip_check_url || "";
+  $("#rc-minwait").value = r.min_wait_seconds ?? 300; $("#rc-cooldown").value = r.cooldown_seconds ?? 600; $("#rc-attempts").value = r.max_attempts ?? 3;
+  renderTrackers();
+}
+async function renderTrackers() {
+  try {
+    const r = await api("/api/trackers");
+    $("#trackers-body").innerHTML = r.trackers.map(t => `<tr><td><code>${esc(t.url)}</code></td>
+      <td>${t.successes || t.failures ? (t.healthy ? "yes" : "no") : "not tried"}</td><td>${t.seeds || 0}</td><td>${t.peers || 0}</td>
+      <td class="hint">${esc(t.last_error || "")}</td><td><button class="sm danger" data-tracker-del="${esc(t.url)}">Remove</button></td></tr>`).join("");
+  } catch {}
+}
+$("#btn-tracker-add").addEventListener("click", async () => {
+  const url = $("#tracker-add").value.trim(); if (!url) return;
+  try { const r = await api("/api/trackers", "POST", { url }); toast(r.added ? "Tracker added" : "That tracker is already in the list or not valid", r.added ? "ok" : "err"); $("#tracker-add").value = ""; renderTrackers(); }
+  catch (e) { toast(e.message, "err"); }
+});
+$("#btn-tracker-update").addEventListener("click", async () => {
+  try { const r = await api("/api/trackers/update", "POST", {}); toast(`Added ${r.added} tracker(s)`, "ok"); renderTrackers(); }
+  catch (e) { toast("Update failed: " + e.message, "err"); }
+});
+$("#btn-pm-test").addEventListener("click", async () => {
+  $("#pm-result").textContent = "Asking the router…";
+  try { const r = await api("/api/portmap/test", "POST", {});
+    $("#pm-result").textContent = r.ok ? `Port ${r.port} is open (${r.method === "natpmp" ? "NAT-PMP" : r.method.toUpperCase()}).` : "Not mapped: " + (r.error || "no answer"); }
+  catch (e) { $("#pm-result").textContent = e.message; }
+});
+$("#btn-rc-now").addEventListener("click", async () => {
+  if (!confirm("Run the router reset command now? Downloads may pause while the connection drops.")) return;
+  $("#rc-result").textContent = "Reconnecting…";
+  try { const r = await api("/api/reconnect", "POST", {});
+    $("#rc-result").textContent = r.ok ? `New IP address ${r.new_ip}.` : "Did not work: " + r.error; }
+  catch (e) { $("#rc-result").textContent = e.message + " (save settings first)"; }
+});
+document.addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-tracker-del]");
+  if (!b) return;
+  try { await api("/api/trackers?url=" + encodeURIComponent(b.dataset.trackerDel), "DELETE"); renderTrackers(); }
+  catch (e) { toast(e.message, "err"); }
+});
+let filesFor = null;
+async function openTorrentFiles(lid) {
+  try {
+    const r = await api(`/api/torrents/${lid}/files`);
+    if (!r.files.length) return toast("The file list is not known yet. Try again when the torrent shows its size.", "");
+    filesFor = lid;
+    $("#files-dialog-list").innerHTML = r.files.map(f => `<label class="krow check"><input type="checkbox" data-file="${f.index}" ${f.selected ? "checked" : ""}>
+      <span class="grow">${esc(f.path)}</span><span class="hint">${humanBytes(f.size)}</span></label>`).join("");
+    $("#files-dialog").showModal();
+  } catch (e) { toast(e.message, "err"); }
+}
+$("#files-close").addEventListener("click", () => $("#files-dialog").close());
+$("#files-cancel").addEventListener("click", () => $("#files-dialog").close());
+$("#files-save").addEventListener("click", async () => {
+  const selected = $$("#files-dialog-list [data-file]").filter(c => c.checked).map(c => +c.dataset.file);
+  if (!selected.length) return toast("Pick at least one file", "err");
+  try { await api(`/api/torrents/${filesFor}/files`, "POST", { selected }); $("#files-dialog").close(); toast("File selection saved", "ok"); }
+  catch (e) { toast(e.message, "err"); }
+});
+
 /* ============================================================ add-ons */
 let addonPoll = null;
 async function loadAddons() {
-  const st = $("#addon-ocr-status");
-  if (!st) return;
   try {
     const r = await api("/api/addons");
-    const a = (r.addons || []).find(x => x.name === "ocr");
-    if (!a) return;
-    const hw = r.hardware || {};
+    for (const a of r.addons || []) renderAddon(a, r.hardware || {});
+  } catch {
+    for (const id of ["#addon-ocr-status", "#addon-torrent-status"]) if ($(id)) $(id).textContent = "Add-on status unavailable.";
+  }
+}
+function renderAddon(a, hw) {
+  const st = $(`#addon-${a.name}-status`);
+  if (!st) return;
+  {
     const job = a.job;
     let text;
     if (job && job.running) {
@@ -1226,24 +1305,25 @@ async function loadAddons() {
       text = `Not installed. Download size ${humanBytes(a.download_bytes)}.`;
       if (job && job.error) text += " Last attempt failed: " + job.error;
     }
-    if (hw.weak) text += " This PC counts as weak hardware (" + (hw.reasons || []).join(", ") + ").";
+    if (a.name === "ocr" && hw.weak) text += " This PC counts as weak hardware (" + (hw.reasons || []).join(", ") + ").";
     st.textContent = text;
-    $("#btn-addon-ocr-install").hidden = a.installed;
-    $("#btn-addon-ocr-install").disabled = !!(job && job.running);
-    $("#btn-addon-ocr-remove").hidden = !a.installed;
-    clearTimeout(addonPoll);
-    if (job && job.running) addonPoll = setTimeout(loadAddons, 1000);
-  } catch { st.textContent = "Add-on status unavailable."; }
+    $(`#btn-addon-${a.name}-install`).hidden = a.installed;
+    $(`#btn-addon-${a.name}-install`).disabled = !!(job && job.running);
+    $(`#btn-addon-${a.name}-remove`).hidden = !a.installed;
+    if (job && job.running) { clearTimeout(addonPoll); addonPoll = setTimeout(loadAddons, 1000); }
+  }
 }
-$("#btn-addon-ocr-install").addEventListener("click", async () => {
-  try { await api("/api/addons/ocr/install", "POST", {}); loadAddons(); }
-  catch (e) { toast("Install failed: " + e.message, "err"); }
-});
-$("#btn-addon-ocr-remove").addEventListener("click", async () => {
-  if (!confirm("Remove the local OCR add-on?")) return;
-  try { await api("/api/addons/ocr/remove", "POST", {}); loadAddons(); }
-  catch (e) { toast("Remove failed: " + e.message, "err"); }
-});
+for (const name of ["ocr", "torrent"]) {
+  $(`#btn-addon-${name}-install`)?.addEventListener("click", async () => {
+    try { await api(`/api/addons/${name}/install`, "POST", {}); loadAddons(); }
+    catch (e) { toast("Install failed: " + e.message, "err"); }
+  });
+  $(`#btn-addon-${name}-remove`)?.addEventListener("click", async () => {
+    if (!confirm("Remove this add-on?")) return;
+    try { await api(`/api/addons/${name}/remove`, "POST", {}); loadAddons(); }
+    catch (e) { toast("Remove failed: " + e.message, "err"); }
+  });
+}
 
 async function loadSettings() {
   loadDevices();
@@ -1262,6 +1342,7 @@ async function loadSettings() {
     loadFlowSettings(s);
     loadNetSettings(s);
     loadScanSettings(s);
+    loadTorrentSettings(s);
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -1281,12 +1362,23 @@ $("#btn-set-save").addEventListener("click", async () => {
       : ["max_parallel", "per_link_chunks", "speed_limit_kbps", "retry_max",
         "archive_max_files", "archive_max_expanded_gib", "media_max_height",
         "media_playlist_max_entries", "max_per_host", "cnl_port", "spider_max_pages",
-        "spider_delay_s"].includes(f)
+        "spider_delay_s", "torrent_listen_port"].includes(f)
         ? +el.value : el.value;
   }
   body.confirm_delete = $("#set-confirm_delete").checked;
   collectFlowSettings(body);
   collectNetSettings(body);
+  const tor = window.__torrentRaw || {};
+  body.torrent = Object.assign({}, tor, {
+    dht: $("#tor-dht").checked, pex: $("#tor-pex").checked, lsd: $("#tor-lsd").checked,
+    sequential: $("#tor-seq").checked, ratio_limit: +$("#tor-ratio").value || 0, seed_minutes: +$("#tor-minutes").value || 0,
+  });
+  body.portmap = Object.assign({}, window.__portmapRaw || {}, { enabled: $("#pm-enabled").checked });
+  body.reconnect = {
+    enabled: $("#rc-enabled").checked, command: $("#rc-command").value.trim(),
+    ip_check_url: $("#rc-ipurl").value.trim(), min_wait_seconds: +$("#rc-minwait").value || 0,
+    cooldown_seconds: +$("#rc-cooldown").value || 0, max_attempts: +$("#rc-attempts").value || 1,
+  };
   body.avscan = {
     enabled: $("#av-enabled").checked, scanner: $("#av-scanner").value,
     custom_command: $("#av-command").value.trim(),

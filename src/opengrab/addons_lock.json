@@ -63,6 +63,20 @@
         }
       ],
       "download_bytes": 148059001
+    },
+    "torrent": {
+      "root": "libtorrent",
+      "wheels": [
+        {
+          "name": "libtorrent",
+          "version": "2.1.1",
+          "filename": "libtorrent-2.1.1-cp312-cp312-win_amd64.whl",
+          "url": "https://files.pythonhosted.org/packages/5a/8f/a262d268098f58f17a221c8b8c632eaf187bc810b4cf2a633937b3c6bd3e/libtorrent-2.1.1-cp312-cp312-win_amd64.whl",
+          "sha256": "493954405d15f14b9d9f9b1762ae78e7fecc5a44699f74cb433a9800fa3a7b45",
+          "size": 5018631
+        }
+      ],
+      "download_bytes": 5018631
     }
   }
 }

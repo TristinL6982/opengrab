@@ -85,6 +85,8 @@ class DownloadManager:
         self.accounts_view = AccountsView(self.accounts, self.account_policy)
         from .postprocess import VirusScan
         self.virus_scan = VirusScan(settings)  # W10
+        from .torrents import TorrentService
+        self.torrents = TorrentService(self)  # W11 (libtorrent add-on)
         self._deferred: set[str] = set()
         self._tick_done: dict[str, int] = {}
         self._schedule_paused = False
@@ -127,6 +129,13 @@ class DownloadManager:
             self._workers.append(t)
         self._started = True
         threading.Thread(target=self._flow_loop, name="flow-control", daemon=True).start()
+        for l in self.all_links():  # W11: torrents survive a restart
+            t = (l.extra or {}).get("torrent") or {}
+            if self._is_torrent(l) and l.status not in (LinkStatus.FINISHED, LinkStatus.SKIPPED) \
+                    and (t.get("magnet") or t.get("torrent_file")):
+                resume_paused = l.status == LinkStatus.PAUSED
+                self._spawn(self._restore_torrent, l.id, t.get("magnet", ""), t.get("torrent_file", ""),
+                            resume_paused)
         log.info("engine started (%d workers)", n)
 
     def shutdown(self) -> None:
@@ -140,6 +149,10 @@ class DownloadManager:
                 dl.stop_event.set()
             except Exception:
                 pass
+        try:
+            self.torrents.shutdown()
+        except Exception:
+            log.debug("torrent shutdown failed", exc_info=True)
         # Give transfers up to 3 s to checkpoint their chunk maps and exit.
         deadline = time.monotonic() + 3.0
         while self._active and time.monotonic() < deadline:
@@ -215,9 +228,46 @@ class DownloadManager:
             self._links[link.id] = link
         self._persist()
         self._broadcast("grabbed", link)
+        if url.lower().startswith("magnet:?"):
+            link.plugin = "torrent"
+            self._spawn(self._start_torrent, link.id, url, "")
+            return link
 
         self._spawn(self._grab_and_queue, link.id, auto_download)
         return link
+
+    # ------------------------------------------------------------ W11 torrents
+    def _start_torrent(self, link_id: str, magnet: str, torrent_file: str) -> None:
+        link = self.get(link_id)
+        if link is None:
+            return
+        try:
+            self.torrents.add_link(link, magnet=magnet, torrent_file=torrent_file)
+        except Exception as exc:
+            link.status = LinkStatus.ERROR
+            link.error = f"could not start the torrent: {exc}"
+        self._persist()
+        self._broadcast("error" if link.status == LinkStatus.ERROR else "grabbed", link)
+
+    def _restore_torrent(self, link_id, magnet, torrent_file, paused) -> None:
+        self._start_torrent(link_id, magnet, torrent_file)
+        link = self.get(link_id)
+        if paused and link is not None and link.status != LinkStatus.ERROR:
+            self.torrents.pause(link_id)
+            link.status = LinkStatus.PAUSED
+
+    def add_torrent_file(self, path: str, title: str = "") -> Link:
+        link = Link(url=Path(path).as_uri(), title=title or Path(path).stem,
+                    status=LinkStatus.RESOLVING, plugin="torrent")
+        with self._lock:
+            self._links[link.id] = link
+        self._persist()
+        self._broadcast("grabbed", link)
+        self._spawn(self._start_torrent, link.id, "", str(path))
+        return link
+
+    def _is_torrent(self, link: Optional[Link]) -> bool:
+        return link is not None and link.plugin == "torrent"
 
     def _spawn(self, fn, *args) -> None:
         threading.Thread(target=fn, args=args, daemon=True,
@@ -673,6 +723,15 @@ class DownloadManager:
         link = self.get(link_id)
         if link is None:
             return
+        if self._is_torrent(link):
+            if link.status == LinkStatus.ERROR:  # e.g. the add-on was installed since
+                link.error = ""
+                t = link.extra.get("torrent") or {}
+                magnet = t.get("magnet") or (link.url if link.url.lower().startswith("magnet:") else "")
+                self._spawn(self._start_torrent, link.id, magnet, t.get("torrent_file", ""))
+            elif link.status == LinkStatus.PAUSED:
+                self.resume_download(link_id)
+            return
         if link.status not in (LinkStatus.WAITING, LinkStatus.PAUSED,
                                LinkStatus.ERROR):
             return
@@ -688,6 +747,13 @@ class DownloadManager:
         link = self.get(link_id)
         if not link:
             return
+        if self._is_torrent(link):
+            if self.torrents.pause(link_id):
+                link.status = LinkStatus.PAUSED
+                link.speed = 0.0
+                self._persist()
+                self._broadcast("paused", link)
+            return
         if dl:
             link.status = LinkStatus.PAUSED
             link.extra["note"] = "paused by user"
@@ -701,6 +767,13 @@ class DownloadManager:
         dl = self._active.get(link_id)
         link = self.get(link_id)
         if not link or link.status != LinkStatus.PAUSED:
+            return
+        if self._is_torrent(link):
+            if self.torrents.resume(link_id):
+                link.status = LinkStatus.DOWNLOADING
+                link.extra.pop("note", None)
+                self._persist()
+                self._broadcast("resumed", link)
             return
         # Pause stops the transfer (progress is kept in the .part + chunk
         # map), so resuming always re-queues. If the old transfer is still
@@ -716,6 +789,8 @@ class DownloadManager:
 
     def stop_download(self, link_id: str) -> None:
         """Cancel the active transfer (.part kept for resume)."""
+        if self._is_torrent(self.get(link_id)):
+            return self.pause_download(link_id)
         dl = self._active.get(link_id)
         if dl:
             dl.stop_event.set()
@@ -728,6 +803,8 @@ class DownloadManager:
             self._broadcast("stopped", link)
 
     def remove_link(self, link_id: str) -> None:
+        if self._is_torrent(self.get(link_id)):
+            self.torrents.remove(link_id)  # keeps the downloaded files (C6)
         dl = self._active.pop(link_id, None)
         if dl:
             dl.stop_event.set()
@@ -895,6 +972,7 @@ class DownloadManager:
 
     def _flow_tick(self) -> None:
         self._global_limiter.set_rate(self.flow.effective_limit_bps())
+        self.torrents.apply_limits()  # W11: same limits for torrents
         paused = self.flow.downloads_paused_by_schedule()
         if paused and not self._schedule_paused:
             for l in self.all_links():
@@ -1029,6 +1107,8 @@ class DownloadManager:
             self._broadcast("finished", link)
             if self.virus_scan.enabled():  # W10: never blocks the queue
                 self._spawn(self._scan_link, link.id)
+            if str(path).lower().endswith(".torrent") and getattr(self.settings, "torrent_open_files", True):
+                self.add_torrent_file(str(path), title=Path(path).stem)  # W11
         except CaptchaRequired as e:
             # W2: a challenge page instead of the file
             if not self._handle_challenge(link, e, phase="download"):
@@ -1189,7 +1269,68 @@ class DownloadManager:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return resp.read()
 
+    # ------------------------------------------------------------ W11 reconnect
+    def reconnector(self):
+        from ..reconnect import Reconnector, config_from_dict
+        raw = getattr(self.settings, "reconnect", None) or {}
+        try:
+            cfg = config_from_dict(raw)
+        except ValueError:
+            return None
+        key = repr(sorted(raw.items()))
+        if getattr(self, "_reconnector_key", None) != key:
+            self._reconnector_key = key
+            self._reconnector = Reconnector(cfg, lambda: self._run_reconnect_command(raw),
+                                            lambda: self._public_ip(raw))
+        return self._reconnector
+
+    def _run_reconnect_command(self, raw: dict) -> None:
+        import shlex
+        import subprocess
+        cmd = str(raw.get("command") or "").strip()
+        if not cmd:
+            raise RuntimeError("no reconnect command configured")
+        # Windows takes a command line string as is; POSIX gets an argv list
+        argv = cmd if os.name == "nt" else shlex.split(cmd)
+        subprocess.run(argv, check=True, timeout=120, capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        time.sleep(max(0, float(raw.get("settle_seconds", 15) or 0)))
+
+    def _public_ip(self, raw: dict) -> str:
+        url = str(raw.get("ip_check_url") or "https://api.ipify.org")
+        return self.client.get(url, timeout=15, detect_challenges=False).text.strip()[:64]
+
+    def _maybe_reconnect(self, msg: str) -> None:
+        """A host asked us to wait (429 or "wait N minutes"): reset the IP when allowed."""
+        import re
+        rc = self.reconnector()
+        if rc is None or not rc.config.enabled:
+            return
+        m = re.search(r"(\d+)\s*(second|sec|minute|min|hour)", msg, re.I)
+        if m:
+            wait = int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)[0].lower()]
+        elif "429" in msg or "too many" in msg.lower():
+            wait = rc.config.min_wait_seconds
+        else:
+            return
+        with self._lock:
+            active = len(self._active)
+        if not rc.should_reconnect(wait, active):
+            return
+
+        def run():
+            result = rc.reconnect()
+            self.on_change("reconnect", {"ok": result.ok, "old_ip": result.old_ip,
+                                         "new_ip": result.new_ip, "error": result.error})
+            if result.ok:  # retry what was waiting right away
+                for l in self.all_links():
+                    if l.status == LinkStatus.WAITING and l.error.startswith("retry"):
+                        self._ready_put(l.id)
+
+        self._spawn(run)
+
     def _fail(self, link: Link, msg: str, transient: bool) -> None:
+        self._maybe_reconnect(msg)
         n = self._retries.get(link.id, 0)
         maxr = max(0, self.settings.retry_max)
         if transient and n < maxr:

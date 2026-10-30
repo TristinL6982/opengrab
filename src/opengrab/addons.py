@@ -43,6 +43,14 @@ ADDONS: dict[str, dict] = {
         "prune": ["ddddocr/common.onnx", "ddddocr/common_det.onnx"],
         "pip": ["ddddocr>=1.6.1"],
     },
+    "torrent": {
+        "title": "BitTorrent engine (libtorrent)",
+        "module": "libtorrent",
+        "description": "Downloads magnet links and .torrent files with DHT, PEX, LSD, "
+                       "file selection and seeding limits. CPU only, about 5 MB.",
+        "prune": [],
+        "pip": ["libtorrent>=2.0"],
+    },
 }
 
 _lock = threading.Lock()

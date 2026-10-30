@@ -12,17 +12,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 KNOWN_ORPHANS = {
-    "netconfig",
     "plugins.marketplace",
     "plugins.permissions",
     "plugins.sandbox",
     "plugins.sdk",
     "plugins.updates",
-    "portmap",
-    "reconnect",
 
-    "torrent",
-    "trackers",
 }
 
 def _audit():

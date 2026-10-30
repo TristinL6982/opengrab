@@ -23,7 +23,8 @@ from packaging.utils import parse_wheel_filename
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "src" / "opengrab" / "addons_lock.json"
-ADDONS = {"ocr": {"root": "ddddocr", "provided": {"pillow"}}}
+ADDONS = {"ocr": {"root": "ddddocr", "provided": {"pillow"}},
+          "torrent": {"root": "libtorrent", "provided": set()}}
 PLATFORM = "win_amd64"  # the shipped exe is Windows x64, CPython 3.12
 
 

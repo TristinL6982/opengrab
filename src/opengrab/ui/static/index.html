@@ -455,6 +455,58 @@
           <p class="hint">You can also paste a checksum in the Add links dialog. A file that fails its check is deleted and marked as an error so a retry downloads it again.</p>
         </div>
 
+        <h2>BitTorrent</h2>
+        <div class="groupbox">
+          <p class="hint">Magnet links and .torrent files. The torrent engine (libtorrent, about 5 MB) is an add-on
+          that OpenGrab downloads when you choose Install.</p>
+          <div class="formrow">
+            <span id="addon-torrent-status" class="hint">Checking…</span>
+            <span class="grow"></span>
+            <button id="btn-addon-torrent-install">Install</button>
+            <button id="btn-addon-torrent-remove" class="danger" hidden>Remove</button>
+          </div>
+          <div class="settings-grid">
+            <label class="check"><input id="tor-dht" type="checkbox" checked> Find peers with DHT</label>
+            <label class="check"><input id="tor-pex" type="checkbox" checked> Exchange peers (PEX)</label>
+            <label class="check"><input id="tor-lsd" type="checkbox" checked> Find peers on my network (LSD)</label>
+            <label class="check"><input id="tor-seq" type="checkbox"> Download in order (for previews)</label>
+            <label>Stop seeding at ratio (0 = do not seed)<input id="tor-ratio" type="number" min="0" step="0.1" value="0"></label>
+            <label>Stop seeding after minutes (0 = do not seed)<input id="tor-minutes" type="number" min="0" value="0"></label>
+            <label>Listening port<input id="set-torrent_listen_port" type="number" min="0" max="65535"></label>
+            <label class="check"><input id="set-torrent_open_files" type="checkbox"> Open downloaded .torrent files</label>
+          </div>
+          <h2>Trackers</h2>
+          <table class="grid"><thead><tr><th>Tracker</th><th>Works</th><th>Seeds</th><th>Peers</th><th>Last error</th><th></th></tr></thead><tbody id="trackers-body"></tbody></table>
+          <div class="formrow">
+            <input id="tracker-add" type="text" placeholder="udp://tracker.example.org:1337/announce" style="flex:1">
+            <button id="btn-tracker-add">Add tracker</button>
+          </div>
+          <div class="formrow">
+            <label style="flex:1">Public tracker list to merge daily<input id="set-tracker_list_url" type="text" placeholder="https://…/trackers.txt"></label>
+            <button id="btn-tracker-update">Update now</button>
+          </div>
+          <h2>Port mapping</h2>
+          <div class="formrow">
+            <label class="check"><input id="pm-enabled" type="checkbox"> Open the port on my router (UPnP / NAT-PMP)</label>
+            <button id="btn-pm-test">Test port mapping</button><span id="pm-result" class="hint"></span>
+          </div>
+        </div>
+
+        <h2>Router reconnect</h2>
+        <div class="groupbox">
+          <p class="hint">When a file host makes you wait (for example "try again in 30 minutes") and nothing else is downloading,
+          OpenGrab can run a command that resets your router to get a new IP address. Use a script for your router.</p>
+          <div class="settings-grid">
+            <label class="check"><input id="rc-enabled" type="checkbox"> Reconnect when a host makes me wait</label>
+            <label>Command that resets the router<input id="rc-command" type="text" placeholder="C:\Scripts\router-reset.bat"></label>
+            <label>Check my IP at<input id="rc-ipurl" type="text" placeholder="https://api.ipify.org"></label>
+            <label>Only for waits of at least (seconds)<input id="rc-minwait" type="number" min="0" value="300"></label>
+            <label>Wait between reconnects (seconds)<input id="rc-cooldown" type="number" min="0" value="600"></label>
+            <label>Tries per reconnect<input id="rc-attempts" type="number" min="1" value="3"></label>
+          </div>
+          <div class="formrow"><button id="btn-rc-now">Reconnect now</button><span id="rc-result" class="hint"></span></div>
+        </div>
+
         <h2>Advanced</h2>
         <div class="settings-grid groupbox">
           <label class="check"><input id="set-terminal_enabled" type="checkbox"> Allow the web terminal (runs local commands)</label>
@@ -528,6 +580,15 @@
       <button type="button" id="add-cancel">Cancel</button>
       <button type="button" id="btn-add" class="primary">Add links</button>
     </div>
+  </div>
+</dialog>
+
+<dialog id="files-dialog" class="win" aria-labelledby="files-title">
+  <div class="win-title" id="files-title">Files in this torrent<button type="button" class="win-x" id="files-close" aria-label="Close">×</button></div>
+  <div class="win-body">
+    <div id="files-dialog-list" class="linklist boxed" style="max-height:50vh;overflow:auto"></div>
+    <div class="addrow"><span class="grow"></span><button type="button" id="files-cancel">Cancel</button>
+      <button type="button" id="files-save" class="primary">Download selected files</button></div>
   </div>
 </dialog>
 
