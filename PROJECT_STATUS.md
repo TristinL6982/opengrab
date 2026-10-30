@@ -1,5 +1,9 @@
 # PROJECT_STATUS.md — handoff snapshot
 
+> **Superseded (2026-10-30).** The current verified state is in `PROGRESS.md`;
+> open decisions and gaps are in `PROJECT_SPEC.md` section 9. This file is kept
+> as history only.
+
 > Original snapshot written at a pause point (2026-10-25, before a model switch).
 > `PROJECT_SPEC.md` is the source of truth for requirements. This file began
 > as a state snapshot; §4 and §8 have been updated after the original pause.

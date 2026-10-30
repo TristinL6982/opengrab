@@ -20,9 +20,9 @@ Platform skips on Linux and macOS cover Windows-only features only.
 
 | Check | Result |
 |---|---|
-| Full test suite, Windows 11 | __TESTS__ |
-| CI on GitHub | __CI__ |
-| Onedir exe | __EXE__ |
+| Full test suite, Windows 11 | 929 passed, 1 xfailed (B1) |
+| CI on GitHub | Green on 2026-10-30: Windows (tests, exe, smoke test, setup built, silent install, smoke test of the installed copy, uninstall), Ubuntu (under a virtual display) and macOS test suites with Windows-only tests skipped, Docker image healthy and token-protected |
+| Onedir exe | 78 MB, no ML or libtorrent packages; `--smoke-test` passes; frozen exe answers the update, Windows integration and dashboard routes |
 | Import gate | every module under `src/opengrab` is imported by the running app (`tools/import_audit.py`, no known orphans) |
 
 ## Milestones
@@ -44,7 +44,7 @@ Platform skips on Linux and macOS cover Windows-only features only.
 | M13 automation | Done | Event programs, signed webhooks, Folder Watch, keep-awake, when-done, CLI client |
 | M14a appearance, M14b English + Simplified Chinese, first-run setup, accessibility | Done | i18n coverage test, label and keyboard tests, live checks in Chinese |
 | M14c JDownloader 2 import, dashboard, link handlers, autostart | Done | Synthetic JD2 folder test; read-only detection of a real JD2 install; dashboard counted a real download; registry round trip in a scratch key |
-| M14d updates, installer, CI matrix, Docker | Built; see notes | Updater tests run the real swap and rollback script; installer and Docker verified in CI only; signing key not yet created |
+| M14d updates, installer, CI matrix, Docker | Done except the signing key | Updater tests run the real swap and rollback script; update check works against GitHub; installer and Docker verified in CI only; release signing key not yet created, so updates are reported but not installed |
 
 ## What still needs the owner
 
