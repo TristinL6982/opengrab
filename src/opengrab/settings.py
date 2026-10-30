@@ -57,6 +57,11 @@ class Settings(BaseModel):
     user_agent: str = ""               # override UA (empty = use impersonation default)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     proxy: str = ""                    # http://user:pass@host:port  (empty = none)
+    proxies: list[str] = Field(default_factory=list)        # W7: tried in order, with failover
+    proxy_rules: dict[str, str] = Field(default_factory=dict)  # host pattern -> proxy URL or "direct"
+    proxy_bypass: list[str] = Field(default_factory=list)   # host patterns that never use a proxy
+    proxy_use_system: bool = False                           # also use the OS/Windows proxy
+    site_credentials: list[dict] = Field(default_factory=list)  # W7 server/proxy logins (DPAPI)
     timeout_s: float = 30.0
     ua_rotation: bool = False
     ua_pool: list[str] = Field(default_factory=list)

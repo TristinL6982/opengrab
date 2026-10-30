@@ -324,3 +324,4 @@ table.grid td.days label { display: inline-flex; flex-direction: column; align-i
 .c-status .why { display: block; font-size: 11px; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hashok { color: var(--ok-dark); }
 .hashbad { color: var(--err); }
+.settings-grid textarea { width: 100%; resize: vertical; font: 12.5px Consolas, "Cascadia Mono", monospace; }

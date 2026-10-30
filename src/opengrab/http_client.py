@@ -161,7 +161,28 @@ class HttpClient:
         proxy = self._proxy_for(url)
 
         t0 = time.time()
-        if HAVE_CURL_CFFI:
+        if HAVE_CURL_CFFI and self.net is not None:
+            # W7: proxy list/rules with failover, server and proxy logins
+            resp = None
+            last_exc = None
+            for cand in self.net.candidates(url):
+                net_kw = self.net.session_kwargs(url, cand)
+                try:
+                    resp = self._request_curl(method, url, data=data, json_body=json_body,
+                                              headers=headers, timeout=timeout, proxy=None,
+                                              follow=follow, max_bytes=max_bytes, t0=t0,
+                                              net_kw=net_kw)
+                except Exception as exc:  # unreachable proxy: try the next one
+                    if cand is None:
+                        raise
+                    self.net.proxy_failed(cand)
+                    last_exc = exc
+                    continue
+                self.net.proxy_ok(cand)
+                break
+            if resp is None:
+                raise last_exc or RuntimeError("no proxy could be used")
+        elif HAVE_CURL_CFFI:
             resp = self._request_curl(method, url, data=data, json_body=json_body,
                                       headers=headers, timeout=timeout, proxy=proxy,
                                       follow=follow, max_bytes=max_bytes, t0=t0)
@@ -176,6 +197,7 @@ class HttpClient:
 
     # -- W2: Cloudflare clearance and per-host proxy hooks ------------------
     clearance = None  # a clearance.ClearanceStore, set by DownloadManager
+    net = None        # an engine.net.NetPolicy, set by DownloadManager (W7)
 
     def _apply_clearance(self, url: str, headers: dict) -> bool:
         store = self.clearance
@@ -196,19 +218,26 @@ class HttpClient:
         return True
 
     def _proxy_for(self, url: str):
+        if self.net is not None:
+            p = self.net.proxy_for(url)
+            return p.url if p is not None else None
         return self.settings.proxy or None
 
     def _request_curl(self, method, url, data, json_body, headers, timeout,
-                      proxy, follow, max_bytes, t0) -> Response:
+                      proxy, follow, max_bytes, t0, net_kw=None) -> Response:
         import json as _json
         imp = self.settings.impersonate or "chrome"
+        sess_kw = {k: v for k, v in (net_kw or {}).items()
+                   if k in ("curl_options", "auth", "proxy_auth")}
         try:
-            sess = _crl.Session(impersonate=imp)
+            sess = _crl.Session(impersonate=imp, **sess_kw)
         except Exception:
-            sess = _crl.Session()
+            sess = _crl.Session(**sess_kw)
         kw: dict = dict(headers=headers, timeout=timeout, allow_redirects=follow)
         if proxy:
             kw["proxies"] = {"http": proxy, "https": proxy}
+        if net_kw and net_kw.get("proxies"):
+            kw["proxies"] = net_kw["proxies"]
         if json_body is not None:
             kw["json"] = json_body
         elif data is not None:
@@ -269,13 +298,17 @@ class HttpClient:
 
         if HAVE_CURL_CFFI:
             imp = s.impersonate or "chrome"
+            net_kw = self.net.session_kwargs(url) if self.net is not None else {}
+            sess_kw = {k: v for k, v in net_kw.items() if k in ("curl_options", "auth", "proxy_auth")}
             try:
-                sess = _crl.Session(impersonate=imp)
+                sess = _crl.Session(impersonate=imp, **sess_kw)
             except Exception:
-                sess = _crl.Session()
+                sess = _crl.Session(**sess_kw)
             kw: dict = dict(headers=h, timeout=timeout,
                             allow_redirects=True, stream=True)
-            if proxy:
+            if net_kw.get("proxies"):
+                kw["proxies"] = net_kw["proxies"]
+            elif proxy and self.net is None:
                 kw["proxies"] = {"http": proxy, "https": proxy}
             raw = sess.get(url, **kw)
             self._store_cookies(url, raw.headers)

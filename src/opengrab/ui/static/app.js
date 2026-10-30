@@ -745,6 +745,7 @@ document.addEventListener("click", (ev) => {
   if (t.dataset.tab === "linkgrabber") renderLinkGrabber();
   if (t.dataset.tab === "notifications") renderNotifications();
   if (t.dataset.tab === "captchas") renderCaptchas();
+  if (t.dataset.tab === "accounts") renderLogins();
   if (t.dataset.tab === "files") renderFiles();
   if (t.dataset.tab === "packagizer") renderPackagizer();
   refreshData();
@@ -868,7 +869,8 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "terminal_enabled", "auto_extract_archives", "archive_max_files",
   "archive_max_expanded_gib", "archive_password_file",
   "captcha_ocr_enabled", "captcha_ocr_ignore_hardware", "toasts_enabled",
-  "scheduler_enabled", "max_per_host", "categories_enabled", "hash_checksum_files"];
+  "scheduler_enabled", "max_per_host", "categories_enabled", "hash_checksum_files",
+  "proxy_use_system"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1037,6 +1039,74 @@ $("#btn-queue-add").addEventListener("click", async () => {
   } catch (e) { toast("Could not create queue: " + e.message, "err"); }
 });
 
+/* ============================================================ W7 proxies + logins */
+function proxyRuleRow(pattern = "", target = "direct") {
+  return `<tr><td><input type="text" class="r-pattern" value="${esc(pattern)}" placeholder="*.example.com"></td>
+    <td><input type="text" class="r-target" value="${esc(target)}"></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+async function loadNetSettings(s) {
+  $("#proxy-list").value = (s.proxies || []).join("\n");
+  $("#proxy-bypass").value = (s.proxy_bypass || []).join("\n");
+  $("#proxyrule-body").innerHTML = Object.entries(s.proxy_rules || {}).map(([p, t]) => proxyRuleRow(p, t)).join("");
+  try {
+    const info = await api("/api/proxies");
+    const parts = [];
+    if (info.proxies.length) parts.push("In use: " + info.proxies.join(", "));
+    if (info.failed.length) parts.push("Not reachable lately: " + info.failed.join(", "));
+    (info.errors || []).forEach(e => parts.push("Ignored: " + e));
+    $("#proxy-status").textContent = parts.join(". ");
+  } catch {}
+}
+function collectNetSettings(body) {
+  const lines = id => $(id).value.split("\n").map(x => x.trim()).filter(Boolean);
+  body.proxies = lines("#proxy-list");
+  body.proxy_bypass = lines("#proxy-bypass");
+  body.proxy_rules = Object.fromEntries($$("#proxyrule-body tr")
+    .map(tr => [$(".r-pattern", tr).value.trim(), $(".r-target", tr).value.trim() || "direct"]).filter(([p]) => p));
+}
+$("#btn-proxyrule-add").addEventListener("click", () => $("#proxyrule-body").insertAdjacentHTML("beforeend", proxyRuleRow()));
+$("#btn-proxy-test").addEventListener("click", async () => {
+  const proxy = $("#proxy-test-addr").value.trim() || $("#proxy-list").value.split("\n")[0].trim();
+  if (!proxy) return toast("Enter a proxy to test", "err");
+  $("#proxy-test-result").textContent = "Testing…";
+  try {
+    const r = await api("/api/proxies/test", "POST", { proxy });
+    $("#proxy-test-result").textContent = r.ok ? `Works (${r.ms} ms)` : "Failed: " + (r.error || "HTTP " + r.status);
+  } catch (e) { $("#proxy-test-result").textContent = "Failed: " + e.message; }
+});
+async function renderLogins() {
+  const el = $("#logins-list");
+  if (!el) return;
+  try {
+    const r = await api("/api/site-logins");
+    el.innerHTML = r.logins.length ? r.logins.map(l => `<div class="krow">
+        <code>${esc(l.pattern)}</code><span class="badge">${esc(l.scheme)}</span>
+        <span class="grow">${esc(l.username)}${l.for_proxy ? " (proxy)" : ""}</span>
+        <button class="sm danger" data-login-del="${esc(l.pattern)}" data-proxy="${l.for_proxy ? 1 : 0}">Remove</button></div>`).join("")
+      : '<div class="empty">No server or proxy logins.</div>';
+  } catch {}
+}
+$("#btn-login-add").addEventListener("click", async () => {
+  const body = { pattern: $("#login-pattern").value.trim(), username: $("#login-user").value.trim(),
+                 password: $("#login-pass").value, scheme: $("#login-scheme").value, for_proxy: $("#login-proxy").checked };
+  if (!body.pattern || !body.username) return toast("Enter a site and a user name", "err");
+  try {
+    await api("/api/site-logins", "POST", body);
+    $("#login-pass").value = "";
+    toast("Login saved", "ok");
+    renderLogins();
+  } catch (e) { toast("Could not save login: " + e.message, "err"); }
+});
+document.addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-login-del]");
+  if (!b) return;
+  try {
+    await api(`/api/site-logins?pattern=${encodeURIComponent(b.dataset.loginDel)}&proxy=${b.dataset.proxy}`, "DELETE");
+    renderLogins();
+  } catch (e) { toast("Could not remove login: " + e.message, "err"); }
+});
+
 /* ============================================================ add-ons */
 let addonPoll = null;
 async function loadAddons() {
@@ -1092,6 +1162,7 @@ async function loadSettings() {
     setFolderPill(s.download_dir);
     await loadFlow();
     loadFlowSettings(s);
+    loadNetSettings(s);
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -1115,6 +1186,7 @@ $("#btn-set-save").addEventListener("click", async () => {
   }
   body.confirm_delete = $("#set-confirm_delete").checked;
   collectFlowSettings(body);
+  collectNetSettings(body);
   try {
     const res = await api("/api/settings", "POST", body);
     (res.warnings || []).forEach(w => toast("Not applied: " + w, "err"));

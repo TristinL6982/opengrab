@@ -106,10 +106,16 @@ class _Probe:
         self.headers = headers or {}
 
 
-def _open_session(settings) -> object:
-    """One curl_cffi session per thread (sessions are not thread-safe)."""
+def _open_session(settings, net_kw: Optional[dict] = None) -> object:
+    """One curl_cffi session per thread (sessions are not thread-safe).
+
+    ``net_kw`` comes from engine.net.NetPolicy (W7): proxy, logins and the
+    libcurl auth options for this URL; without it the old single proxy is used.
+    """
     kw = {"impersonate": IMPERSONATE}
-    if getattr(settings, "proxy", ""):
+    if net_kw is not None:
+        kw.update({k: v for k, v in net_kw.items() if not k.startswith("_")})
+    elif getattr(settings, "proxy", ""):
         kw["proxies"] = {"http": settings.proxy, "https": settings.proxy}
     if getattr(settings, "timeout_s", 0):
         kw["timeout"] = float(settings.timeout_s)
@@ -193,6 +199,7 @@ class LinkDownload:
                  pause_event: Optional[threading.Event] = None,
                  cookies: Optional[dict] = None,
                  rate_limiter: Optional[_RateLimiter] = None,
+                 net=None,
                  on_tick=None):
         self.link = link
         self.url = url
@@ -220,6 +227,7 @@ class LinkDownload:
         self._speed = 0.0
         self._samples: list[tuple[float, int]] = []
         self._limiter = rate_limiter or _RateLimiter(0.0)
+        self.net = net  # engine.net.NetPolicy (W7) or None
         # a shared limiter is owned (and rated) by the manager's flow control
         self._own_limiter = rate_limiter is None
         self._last_tick = 0.0
@@ -287,8 +295,21 @@ class LinkDownload:
             except Exception:
                 pass
 
+    def _new_session(self):
+        """Session for this download's URL, through the W7 network policy."""
+        if self.net is None:
+            self._proxy = None
+            return _open_session(self.settings)
+        net_kw = self.net.session_kwargs(self.url)
+        self._proxy = net_kw.get("_proxy")
+        return _open_session(self.settings, net_kw)
+
+    def _proxy_failed(self) -> None:
+        if self.net is not None and getattr(self, "_proxy", None) is not None:
+            self.net.proxy_failed(self._proxy)
+
     def _probe(self) -> _Probe:
-        sess = _open_session(self.settings)
+        sess = self._new_session()
         headers = dict(self.headers)
         if self._cookies:  # the probe must carry the same cookies as the transfer
             headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
@@ -388,7 +409,9 @@ class LinkDownload:
         DownloadError on failure/cancel."""
         self.dest_dir.mkdir(parents=True, exist_ok=True)
         probe = self._probe()
-        self._total = probe.size
+        # A probe length of 0 (some servers answer HEAD that way) is not proof
+        # of an empty file: stream it and let the body decide.
+        self._total = probe.size if probe.size else None
         self.url = probe.final_url
         from ..recovery import validators_from_headers
         self._validators = validators_from_headers(probe.headers)
@@ -500,7 +523,7 @@ class LinkDownload:
                 end = seg_end()
                 if pos >= end:
                     return  # the remaining range was handed to another worker
-            sess = _open_session(self.settings)
+            sess = self._new_session()
             try:
                 headers = dict(self.headers)
                 if self._cookies:
@@ -624,6 +647,7 @@ class LinkDownload:
                 attempts += 1
                 if self.stop_event.is_set():
                     raise _cancelled()
+                self._proxy_failed()  # the next attempt may pick another proxy
                 
                 if attempts > max(1, getattr(self.settings, 'retry_max', 2)):
                     raise DownloadError(f"download failed after {attempts} attempts: {e}", 
@@ -730,8 +754,10 @@ class LinkDownload:
             stem, suf = self.dest.stem, self.dest.suffix
             final = self.dest_dir / f"{stem}_{i}{suf}"
             i += 1
-        if self.part.exists():
-            os.replace(self.part, final)
+        if not self.part.exists():
+            # never report a download as finished when nothing was written
+            raise DownloadError("nothing was downloaded (no partial file)", transient=True)
+        os.replace(self.part, final)
         self.final_path = final
         with self._state_lock:
             self._speed = 0.0

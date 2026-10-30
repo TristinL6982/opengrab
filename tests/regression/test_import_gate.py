@@ -28,10 +28,8 @@ KNOWN_ORPHANS = {
     "plugins.updates",
     "portmap",
     "premium",
-    "proxies",
     "reconnect",
 
-    "siteauth",
     "spider",
     "torrent",
     "trackers",

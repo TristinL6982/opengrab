@@ -641,7 +641,7 @@ def _make_handler(srv: ApiServer):
                 return self._err(403 if p.startswith("/api/") else 404,
                                  "forbidden")
             try:
-                self._api_delete(p)
+                self._api_delete(p, parse_qs(u.query))
             except Exception as e:  # noqa: BLE001
                 self._err(500, str(e))
 
@@ -1059,6 +1059,7 @@ def _make_handler(srv: ApiServer):
                 d = mgr.settings.model_dump()
                 d["download_dir"] = str(Path(mgr.settings.download_dir))
                 d.pop("api_token", None)  # Never include api_token in settings response
+                d.pop("site_credentials", None)  # protected secrets stay server-side
                 return self._json(d)
             if p == "/api/diagnostics":
                 links = mgr.all_links()
@@ -1299,7 +1300,8 @@ def _make_handler(srv: ApiServer):
                     return
                 if not isinstance(body, dict):
                     return self._json({"error": "settings body must be a JSON object"}, 400)
-                forbidden = {"api_token", "api_host", "api_port", "base_path", "terminal_enabled"}
+                forbidden = {"api_token", "api_host", "api_port", "base_path", "terminal_enabled",
+                             "site_credentials"}  # logins go through /api/site-logins
                 known = set(type(mgr.settings).model_fields)
                 allowed = {k: v for k, v in body.items() if k in known and k not in forbidden}
                 ignored = sorted(k for k in body if k not in allowed)
@@ -1338,7 +1340,7 @@ def _make_handler(srv: ApiServer):
                 return
             self._err(404, "unknown endpoint")
 
-        def _api_delete(self, p: str):
+        def _api_delete(self, p: str, q: Optional[dict] = None):
             import re
             m = re.fullmatch(r"/api/links/([^/]+)", p)
             if m:
@@ -1363,7 +1365,7 @@ def _make_handler(srv: ApiServer):
                     return self._err(404, "Packagizer rule not found")
                 mgr.settings.save()
                 return self._json({"ok": True})
-            if self._route("DELETE", p, {}, {}):
+            if self._route("DELETE", p, q or {}, {}):
                 return
             self._err(404, "unknown endpoint")
 

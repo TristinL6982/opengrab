@@ -75,7 +75,10 @@ class DownloadManager:
         self.captcha_chain = SolverChain(settings, self.client, clearance_store=self.clearance)
         # W3-W5: scheduler, host limits, queues, speed profiles, data cap
         from .flow import FlowControl
+        from .net import NetPolicy
         self.flow = FlowControl(settings, self.data_dir)
+        self.net = NetPolicy(settings)  # W7: proxies and server/proxy logins
+        self.client.net = self.net
         self._deferred: set[str] = set()
         self._tick_done: dict[str, int] = {}
         self._schedule_paused = False
@@ -840,7 +843,7 @@ class DownloadManager:
 
     def settings_changed(self) -> list[str]:
         """Re-read flow-control settings (called after POST /api/settings)."""
-        errors = self.flow.reload()
+        errors = self.flow.reload() + self.net.reload()
         self._global_limiter.set_rate(self.flow.effective_limit_bps())
         return errors
 
@@ -917,6 +920,7 @@ class DownloadManager:
                                   cookies={**dict(self.client._cookies_for(url) or {}),
                                            **b_cookies, **c_cookies},
                                   rate_limiter=self._global_limiter,
+                                  net=self.net,
                                   on_tick=lambda d: self._on_tick(link, d))
                 with self._lock:
                     self._active[link.id] = dl
