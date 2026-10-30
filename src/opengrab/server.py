@@ -1315,6 +1315,12 @@ def _make_handler(srv: ApiServer):
                     return self._json({"error": "settings body must be a JSON object"}, 400)
                 forbidden = {"api_token", "api_host", "api_port", "base_path", "terminal_enabled",
                              "site_credentials"}  # logins go through /api/site-logins
+                # settings that make OpenGrab run programs are only accepted from
+                # this computer, never from LAN/remote clients (C4 lesson)
+                runs_programs = {"event_hooks", "reconnect", "avscan", "archive_7zip_path",
+                                 "media_ffmpeg_path", "captcha_ffmpeg_path", "captcha_tesseract_path"}
+                if not is_loopback(srv.access.client_ip(self.client_address[0], self.headers)):
+                    forbidden = forbidden | runs_programs
                 known = set(type(mgr.settings).model_fields)
                 allowed = {k: v for k, v in body.items() if k in known and k not in forbidden}
                 ignored = sorted(k for k in body if k not in allowed)

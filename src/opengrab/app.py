@@ -114,9 +114,13 @@ def start_server(settings: Optional[Settings] = None,
 
 
 def _close_server(manager: DownloadManager, server: ApiServer) -> None:
-    lg = getattr(server, "features", {}).get("linkgrabber")
-    if lg is not None:
-        lg.shutdown()
+    for name in ("linkgrabber", "automation"):
+        feature = getattr(server, "features", {}).get(name)
+        if feature is not None:
+            try:
+                feature.shutdown()
+            except Exception:
+                _log.debug("%s shutdown failed", name, exc_info=True)
     server.stop()
     manager.shutdown()
 
@@ -300,6 +304,9 @@ def run_gui_mode(settings: Optional[Settings] = None,
                     except Exception:
                         _log.debug("tray toast failed", exc_info=True)
                 notify.toaster = _toast
+            automation = getattr(server, "features", {}).get("automation")
+            if automation is not None:  # M13: "exit when done"
+                automation.exit_app = lambda _tray=tray: exit_app(_tray, None)
             watcher.start()
             webview.start()
         finally:

@@ -144,6 +144,15 @@ class Settings(BaseModel):
     tracker_list_url: str = ""                         # public tracker list merged daily
     portmap: dict = Field(default_factory=dict)       # {enabled, protocols, methods, manual}
     reconnect: dict = Field(default_factory=dict)     # {enabled, command, ip_check_url, ...}
+    # M13 automation
+    event_hooks: list[dict] = Field(default_factory=list)   # {event, command, enabled}
+    hooks_enabled: bool = True
+    webhooks: list[dict] = Field(default_factory=list)      # {url, events, secret, enabled}
+    folder_watch: list[dict] = Field(default_factory=list)  # {path, mode: review|queue, enabled}
+    anti_standby: str = "downloading"                       # off | downloading | always
+    when_done: str = "nothing"                              # nothing | exit | sleep | hibernate | shutdown
+    when_done_delay_s: int = 60
+    when_done_once: bool = True                             # reset to nothing after it ran
     # W12 plugins
     plugin_sandbox_enabled: bool = True
     plugin_index_url: str = ""            # template update index

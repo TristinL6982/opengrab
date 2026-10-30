@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from . import (accounts_api, addons_api, captcha, flow_api, linkgrabber, net_api, notify,
+from . import (accounts_api, addons_api, automation_api, captcha, flow_api, linkgrabber, net_api, notify,
                plugins_api, scan_api, torrent_api)
 
 log = logging.getLogger("opengrab.features")
@@ -26,6 +26,7 @@ FEATURES = (
     ("scan", scan_api),
     ("torrents", torrent_api),
     ("plugins", plugins_api),
+    ("automation", automation_api),
     ("addons", addons_api),
 )
 

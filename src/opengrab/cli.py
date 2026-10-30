@@ -49,8 +49,20 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _client_commands():
+    from .client_cli import COMMANDS
+    return COMMANDS
+
+
 def main(argv=None) -> int:
     _ensure_stdio()
+    raw = list(sys.argv[1:] if argv is None else argv)
+    launcher_only = {"--gui", "--headless", "--smoke-test", "--list-plugins", "--validate-template",
+                     "--version", "--pair"}
+    if any(a in _client_commands() for a in raw) and not launcher_only & set(raw):
+        # M13: opengrab add|list|status|pause|resume|start|stop|remove|notifications
+        from .client_cli import run as run_client
+        return run_client(raw)
     args = _parser().parse_args(argv)
     if args.validate_template:  # W12: plugin SDK
         from .plugins.sdk import validate_template_file

@@ -141,6 +141,7 @@ function onEvent(kind, payload) {
     return;
   }
   if (kind === "flow") { FLOW = payload; renderFlowChrome(); return; }
+  if (kind === "when_done") { showWhenDone(payload); return; }
   if (kind === "captcha") {
     setCaptchaBadge(payload.pending || 0);
     if ($("#tab-captchas")?.classList.contains("active")) renderCaptchas();
@@ -955,7 +956,8 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "spider_max_pages", "spider_delay_s", "spider_respect_robots", "archive_7zip_path",
   "torrent_listen_port", "torrent_open_files", "tracker_list_url",
   "plugin_sandbox_enabled", "plugin_index_url", "plugin_auto_update", "marketplace_url",
-  "marketplace_require_signature"];
+  "marketplace_require_signature", "anti_standby", "when_done", "when_done_delay_s", "when_done_once",
+  "hooks_enabled"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1346,6 +1348,79 @@ document.addEventListener("click", async (ev) => {
   } catch (e) { toast(e.message, "err"); }
 });
 
+/* ============================================================ M13 automation */
+const AUTO_EVENTS = ["finished", "failed", "all_done", "captcha", "added", "virus"];
+const EVENT_TEXT = { finished: "a download finishes", failed: "a download fails", all_done: "all downloads are done",
+  captcha: "a captcha waits", added: "links are added", virus: "a virus is found" };
+function hookRow(h = {}) {
+  return `<tr><td><select class="h-event">${AUTO_EVENTS.map(e => `<option value="${e}" ${h.event === e ? "selected" : ""}>${EVENT_TEXT[e]}</option>`).join("")}</select></td>
+    <td><input type="text" class="h-cmd" value="${esc(h.command || "")}" placeholder='"C:\\Tools\\notify.exe" --title done'></td>
+    <td><input type="checkbox" class="h-on" ${h.enabled !== false ? "checked" : ""}></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+function webhookRow(w = {}) {
+  return `<tr><td><input type="text" class="w-url" value="${esc(w.url || "")}" placeholder="https://…"></td>
+    <td><input type="text" class="w-events" value="${esc((w.events || []).join(" "))}" placeholder="finished failed"></td>
+    <td><input type="password" class="w-secret" value="${esc(w.secret || "")}"></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+function watchRow(f = {}) {
+  return `<tr><td><input type="text" class="f-path" value="${esc(f.path || "")}" placeholder="C:\\Users\\me\\Downloads\\watch"></td>
+    <td><select class="f-mode"><option value="review" ${f.mode !== "queue" ? "selected" : ""}>wait in the LinkGrabber</option><option value="queue" ${f.mode === "queue" ? "selected" : ""}>download right away</option></select></td>
+    <td><input type="checkbox" class="f-on" ${f.enabled !== false ? "checked" : ""}></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+function loadAutomationSettings(s) {
+  $("#hooks-body").innerHTML = (s.event_hooks || []).map(hookRow).join("");
+  $("#webhooks-body").innerHTML = (s.webhooks || []).map(webhookRow).join("");
+  $("#watch-body").innerHTML = (s.folder_watch || []).map(watchRow).join("");
+  $("#when-done-pick").value = s.when_done || "nothing";
+}
+function collectAutomationSettings(body) {
+  body.event_hooks = $$("#hooks-body tr").map(tr => ({ event: $(".h-event", tr).value, command: $(".h-cmd", tr).value.trim(),
+    enabled: $(".h-on", tr).checked })).filter(h => h.command);
+  body.webhooks = $$("#webhooks-body tr").map(tr => ({ url: $(".w-url", tr).value.trim(),
+    events: $(".w-events", tr).value.split(/[\s,]+/).filter(Boolean), secret: $(".w-secret", tr).value })).filter(w => w.url);
+  body.folder_watch = $$("#watch-body tr").map(tr => ({ path: $(".f-path", tr).value.trim(), mode: $(".f-mode", tr).value,
+    enabled: $(".f-on", tr).checked })).filter(f => f.path);
+}
+$("#btn-hook-add").addEventListener("click", () => $("#hooks-body").insertAdjacentHTML("beforeend", hookRow()));
+$("#btn-webhook-add").addEventListener("click", () => $("#webhooks-body").insertAdjacentHTML("beforeend", webhookRow()));
+$("#btn-watch-add").addEventListener("click", () => $("#watch-body").insertAdjacentHTML("beforeend", watchRow()));
+$("#btn-auto-test").addEventListener("click", async () => {
+  try { await api("/api/automation/test", "POST", { event: "finished" }); $("#auto-test-result").textContent = "Sent. Check the result below in a few seconds."; setTimeout(showAutomationHistory, 3000); }
+  catch (e) { $("#auto-test-result").textContent = e.message + " (save settings first)"; }
+});
+async function showAutomationHistory() {
+  try {
+    const r = await api("/api/automation");
+    const h = r.history[0];
+    if (h) $("#auto-test-result").textContent = h.kind === "webhook" ? `Webhook ${h.url}: ${h.code || h.error}` : `Program exited with ${h.code}`;
+  } catch {}
+}
+function showWhenDone(st) {
+  const b = $("#whendone-banner");
+  if (!b) return;
+  if (st && st.pending) {
+    const what = { exit: "close OpenGrab", sleep: "put the PC to sleep", hibernate: "hibernate the PC", shutdown: "shut down the PC" }[st.pending];
+    $("#whendone-text").textContent = `All downloads are done. OpenGrab will ${what} in ${st.seconds_left ?? "a few"} seconds.`;
+    b.classList.remove("hidden");
+  } else b.classList.add("hidden");
+  if (st && st.action) $("#when-done-pick").value = st.action;
+}
+$("#btn-whendone-cancel").addEventListener("click", async () => {
+  try { await api("/api/automation/cancel", "POST", {}); await api("/api/automation/when-done", "POST", { action: "nothing" }); showWhenDone(null); toast("Cancelled", "ok"); }
+  catch (e) { toast(e.message, "err"); }
+});
+$("#when-done-pick").addEventListener("change", async (ev) => {
+  try { await api("/api/automation/when-done", "POST", { action: ev.target.value }); toast("When done: " + ev.target.selectedOptions[0].textContent, "ok"); }
+  catch (e) { toast(e.message, "err"); }
+});
+setInterval(async () => {
+  if ($("#whendone-banner")?.classList.contains("hidden")) return;
+  try { showWhenDone((await api("/api/automation")).when_done); } catch {}
+}, 1000);
+
 /* ============================================================ add-ons */
 let addonPoll = null;
 async function loadAddons() {
@@ -1410,6 +1485,7 @@ async function loadSettings() {
     loadScanSettings(s);
     loadTorrentSettings(s);
     $("#mk-keys").value = (s.marketplace_keys || []).join("\n");
+    loadAutomationSettings(s);
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -1429,12 +1505,13 @@ $("#btn-set-save").addEventListener("click", async () => {
       : ["max_parallel", "per_link_chunks", "speed_limit_kbps", "retry_max",
         "archive_max_files", "archive_max_expanded_gib", "media_max_height",
         "media_playlist_max_entries", "max_per_host", "cnl_port", "spider_max_pages",
-        "spider_delay_s", "torrent_listen_port"].includes(f)
+        "spider_delay_s", "torrent_listen_port", "when_done_delay_s"].includes(f)
         ? +el.value : el.value;
   }
   body.confirm_delete = $("#set-confirm_delete").checked;
   collectFlowSettings(body);
   collectNetSettings(body);
+  collectAutomationSettings(body);
   body.marketplace_keys = $("#mk-keys").value.split("\n").map(x => x.trim()).filter(Boolean);
   const tor = window.__torrentRaw || {};
   body.torrent = Object.assign({}, tor, {
@@ -1695,6 +1772,7 @@ async function loadPluginHealth() {
   refreshUnread();
   renderCaptchas();
   loadFlow();
+  api("/api/automation").then(r => showWhenDone(r.when_done)).catch(() => {});
   api("/api/settings").then(s => setFolderPill(s.download_dir)).catch(() => {});
   loadPluginHealth();
   connectSSE();

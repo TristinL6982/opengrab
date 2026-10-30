@@ -314,6 +314,10 @@ dialog.win::backdrop { background: rgba(30, 45, 70, .25); }
   .tab { white-space: nowrap; padding: 6px 10px; width: auto; }
 }
 
+/* ---------- M13 when-done banner ---------- */
+#whendone-banner { display: flex; gap: 10px; align-items: center; padding: 6px 12px;
+  background: #e5f1fb; border-bottom: 1px solid var(--select-line); font-size: 13px; }
+
 /* ---------- W8 LinkGrabber ---------- */
 .lghead, .lgrow { display: grid; grid-template-columns: minmax(200px, 1fr) 80px 90px 150px 150px; align-items: center; }
 .lghead { position: static; margin-top: 4px; border: 1px solid var(--line); border-bottom: 0; }

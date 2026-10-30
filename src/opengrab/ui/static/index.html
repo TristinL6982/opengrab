@@ -55,6 +55,11 @@
     <button class="tb" id="tb-settings" title="Settings"><svg aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
   </div>
 
+  <div id="whendone-banner" class="hidden">
+    <span id="whendone-text"></span>
+    <button id="btn-whendone-cancel" class="primary">Cancel</button>
+  </div>
+
   <div id="auth-banner" class="hidden">
     <span>This OpenGrab needs its access token. Paste it from the OpenGrab console:</span>
     <input id="auth-token" type="password" placeholder="Access token">
@@ -530,6 +535,33 @@
           <div class="formrow"><button id="btn-rc-now">Reconnect now</button><span id="rc-result" class="hint"></span></div>
         </div>
 
+        <h2>Automation</h2>
+        <div class="groupbox">
+          <div class="settings-grid">
+            <label>Keep the PC awake<select id="set-anti_standby"><option value="downloading">while downloading</option><option value="always">always</option><option value="off">never</option></select></label>
+            <label>When all downloads are done<select id="set-when_done"><option value="nothing">do nothing</option><option value="exit">close OpenGrab</option><option value="sleep">sleep</option><option value="hibernate">hibernate</option><option value="shutdown">shut down</option></select></label>
+            <label>Wait before that (seconds)<input id="set-when_done_delay_s" type="number" min="5" max="3600"></label>
+            <label class="check"><input id="set-when_done_once" type="checkbox"> Only for the current downloads (then back to "do nothing")</label>
+          </div>
+
+          <h2>Run a program on events</h2>
+          <p class="hint">The program gets the details in environment variables: OPENGRAB_EVENT, OPENGRAB_TITLE,
+          OPENGRAB_FILENAME, OPENGRAB_PATH, OPENGRAB_URL, OPENGRAB_STATUS, OPENGRAB_ERROR. These can only be set on this computer.</p>
+          <table class="grid"><thead><tr><th>When</th><th>Program and arguments</th><th>On</th><th></th></tr></thead><tbody id="hooks-body"></tbody></table>
+          <div class="formrow"><button id="btn-hook-add">Add program</button><label class="check"><input id="set-hooks_enabled" type="checkbox"> Run programs on events</label></div>
+
+          <h2>Webhooks</h2>
+          <p class="hint">OpenGrab posts JSON to these addresses. With a secret, the body is signed in the X-OpenGrab-Signature header (HMAC-SHA256).</p>
+          <table class="grid"><thead><tr><th>Address</th><th>Events (blank = all)</th><th>Secret</th><th></th></tr></thead><tbody id="webhooks-body"></tbody></table>
+          <div class="formrow"><button id="btn-webhook-add">Add webhook</button><button id="btn-auto-test">Send a test event</button><span id="auto-test-result" class="hint"></span></div>
+
+          <h2>Folder Watch</h2>
+          <p class="hint">Drop .txt, .url, .crawljob, .rsdf or .torrent files into these folders and OpenGrab picks them up,
+          then moves them to an "added" subfolder.</p>
+          <table class="grid"><thead><tr><th>Folder</th><th>New links</th><th>On</th><th></th></tr></thead><tbody id="watch-body"></tbody></table>
+          <div class="formrow"><button id="btn-watch-add">Add folder</button></div>
+        </div>
+
         <h2>Plugins</h2>
         <div class="settings-grid groupbox">
           <label class="check"><input id="set-plugin_sandbox_enabled" type="checkbox"> Sandbox my own plugins and templates</label>
@@ -588,6 +620,9 @@
     <span id="active-pill" class="pill">0 active</span>
     <span id="speed-pill" class="pill">0 B/s</span>
     <label class="pill profile-pill" title="Speed profile">Profile <select id="speed-profile"></select></label>
+    <label class="pill profile-pill" title="What to do when all downloads are done">When done <select id="when-done-pick">
+      <option value="nothing">nothing</option><option value="exit">close OpenGrab</option><option value="sleep">sleep</option>
+      <option value="hibernate">hibernate</option><option value="shutdown">shut down</option></select></label>
     <span id="limit-pill" class="pill" title="Effective speed limit"></span>
     <canvas id="speed-graph" height="18" aria-label="Transfer rate over the last minute"></canvas>
     <span class="grow"></span>
