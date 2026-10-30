@@ -3,7 +3,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 
 @dataclass
@@ -32,8 +32,12 @@ class InboxFull(Exception):
 
 
 class CaptchaInbox:
-    def __init__(self, max_pending: int = 50):
+    def __init__(self, max_pending: int = 50,
+                 on_new: Optional[Callable[["CaptchaRequest"], None]] = None):
         self._max_pending = max_pending
+        # push hook: called once per NEW request (not for de-duplicated ones),
+        # outside the lock, so paired/remote devices can be told a captcha waits
+        self.on_new = on_new
         self._requests: Dict[str, CaptchaRequest] = {}
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
@@ -67,7 +71,13 @@ class CaptchaInbox:
             req = CaptchaRequest(id=uuid.uuid4().hex, host=host, kind=kind, sitekey=sitekey,
                                  page_url=page_url, created_at=now, timeout_s=timeout_s)
             self._requests[req.id] = req
-            return req
+        hook = self.on_new
+        if hook is not None:
+            try:
+                hook(req)
+            except Exception:
+                pass  # a broken push target must never block the download
+        return req
 
     def pending(self, now: Optional[float] = None) -> List[CaptchaRequest]:
         if now is None:

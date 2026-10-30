@@ -29,6 +29,15 @@ def download_notification(name: str, status: str, error: str = "") -> tuple[str,
     raise ValueError(f"unsupported status: {status}")
 
 
+def captcha_waiting_notification(host: str, kind: str) -> tuple[str, str, str]:
+    """(kind, title, message) for a captcha that needs a human, pushed to
+    every paired device so it can be solved remotely."""
+    host = host or "unknown host"
+    kind = kind or "captcha"
+    return ("info", f"Captcha waiting: {host}",
+            f"A {kind} captcha needs solving. Open OpenGrab on any paired device to solve it.")
+
+
 class NotificationCenter:
     def __init__(self, max_items: int = 100, clock=time.time, toaster=None, toasts_enabled: bool = True) -> None:
         if max_items <= 0:
