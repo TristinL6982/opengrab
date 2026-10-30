@@ -30,7 +30,8 @@ a = Analysis(
     hookspath=[], hooksconfig={}, runtime_hooks=[], noarchive=False,
     # Spec section 2: no ML packages in the base app. Local OCR is an add-on
     # downloaded on opt-in (src/opengrab/addons.py).
-    excludes=["ddddocr", "onnxruntime", "cv2", "numpy", "torch", "tensorflow"],
+    excludes=["ddddocr", "onnxruntime", "cv2", "numpy", "torch", "tensorflow",
+              "libtorrent"],  # torrent engine is an add-on too (W11)
 )
 pyz = PYZ(a.pure)
 exe = EXE(
