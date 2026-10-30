@@ -800,6 +800,7 @@ document.addEventListener("click", (ev) => {
   if (t.dataset.tab === "notifications") renderNotifications();
   if (t.dataset.tab === "captchas") renderCaptchas();
   if (t.dataset.tab === "accounts") renderLogins();
+  if (t.dataset.tab === "plugins") renderPluginsPage();
   if (t.dataset.tab === "files") renderFiles();
   if (t.dataset.tab === "packagizer") renderPackagizer();
   refreshData();
@@ -952,7 +953,9 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "scheduler_enabled", "max_per_host", "categories_enabled", "hash_checksum_files",
   "proxy_use_system", "linkgrabber_online_check", "cnl_enabled", "cnl_port",
   "spider_max_pages", "spider_delay_s", "spider_respect_robots", "archive_7zip_path",
-  "torrent_listen_port", "torrent_open_files", "tracker_list_url"];
+  "torrent_listen_port", "torrent_open_files", "tracker_list_url",
+  "plugin_sandbox_enabled", "plugin_index_url", "plugin_auto_update", "marketplace_url",
+  "marketplace_require_signature"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1280,6 +1283,69 @@ $("#files-save").addEventListener("click", async () => {
   catch (e) { toast(e.message, "err"); }
 });
 
+/* ============================================================ W12 plugins */
+async function renderPluginsPage() {
+  renderPermissions();
+  renderMarketplace();
+}
+async function renderPermissions() {
+  try {
+    const r = await api("/api/plugins/permissions");
+    $("#perm-body").innerHTML = r.plugins.length ? r.plugins.map(p => {
+      const ask = [...p.requested.hosts, p.requested.cookies ? "cookies" : "", p.requested.files ? "files" : ""].filter(Boolean).join(", ") || "nothing";
+      const has = [...p.granted.hosts, p.granted.cookies ? "cookies" : "", p.granted.files ? "files" : ""].filter(Boolean).join(", ") || "nothing";
+      return `<tr><td>${esc(p.id)} <span class="hint">${esc(p.origin)}</span></td><td>${esc(ask)}</td><td>${esc(has)}</td>
+        <td>${p.missing.length ? `<button class="sm primary" data-perm-grant="${esc(p.id)}">Allow</button>` : ""}
+        <button class="sm" data-perm-revoke="${esc(p.id)}">Revoke</button></td></tr>`;
+    }).join("") : `<tr><td colspan="4" class="hint">No plugins or templates of your own.</td></tr>`;
+  } catch {}
+}
+async function renderMarketplace() {
+  const el = $("#mk-list");
+  try {
+    const q = encodeURIComponent($("#mk-search").value.trim());
+    const r = await api(`/api/marketplace?q=${q}&sort=${$("#mk-sort").value}`);
+    el.innerHTML = r.listings.length ? r.listings.map(l => `<div class="krow">
+      <span class="grow"><b>${esc(l.name)}</b> ${esc(l.version)} <span class="hint">by ${esc(l.author || "unknown")}</span>
+      <div class="hint">${esc(l.description)}</div>
+      <div class="hint">Needs: ${esc(l.permissions.hosts.join(", ") || "no sites")}${l.permissions.cookies ? ", cookies" : ""}</div></span>
+      <span class="hint">${"★".repeat(Math.round(l.rating))}${"☆".repeat(5 - Math.round(l.rating))} (${l.ratings_count})</span>
+      ${l.signed ? '<span class="badge include">signed</span>' : '<span class="badge exclude">unsigned</span>'}
+      ${l.installed && !l.update ? `<span class="badge">installed ${esc(l.installed)}</span>`
+        : `<button class="sm primary" data-mk-install="${esc(l.id)}">${l.update ? "Update" : "Install"}</button>`}
+    </div>`).join("") : '<div class="empty">No plugins match.</div>';
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#btn-mk-search").addEventListener("click", renderMarketplace);
+$("#btn-tpl-validate").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/plugins/validate", "POST", { template: $("#tpl-text").value });
+    $("#tpl-result").textContent = r.ok ? "The template is valid." : "Problems: " + r.errors.join("; ");
+  } catch (e) { $("#tpl-result").textContent = e.message; }
+});
+$("#btn-tpl-update").addEventListener("click", async () => {
+  $("#tpl-update-result").textContent = "Checking…";
+  try {
+    const r = await api("/api/plugins/update", "POST", {});
+    const failed = Object.keys(r.failed || {});
+    $("#tpl-update-result").textContent = (r.updated.length ? "Updated: " + r.updated.join(", ") : "Everything is up to date.")
+      + (failed.length ? " Failed: " + failed.join(", ") : "");
+    loadPluginHealth();
+  } catch (e) { $("#tpl-update-result").textContent = e.message; }
+});
+document.addEventListener("click", async (ev) => {
+  const g = ev.target.closest("[data-perm-grant]"), rv = ev.target.closest("[data-perm-revoke]"), mi = ev.target.closest("[data-mk-install]");
+  try {
+    if (g) { await api(`/api/plugins/${encodeURIComponent(g.dataset.permGrant)}/permissions`, "POST", {}); renderPermissions(); }
+    else if (rv) { await api(`/api/plugins/${encodeURIComponent(rv.dataset.permRevoke)}/permissions`, "DELETE"); renderPermissions(); }
+    else if (mi) {
+      if (!confirm("Install this plugin and allow the access it lists?")) return;
+      await api("/api/marketplace/install", "POST", { id: mi.dataset.mkInstall });
+      toast("Plugin installed", "ok"); renderPluginsPage(); loadPluginHealth();
+    }
+  } catch (e) { toast(e.message, "err"); }
+});
+
 /* ============================================================ add-ons */
 let addonPoll = null;
 async function loadAddons() {
@@ -1343,6 +1409,7 @@ async function loadSettings() {
     loadNetSettings(s);
     loadScanSettings(s);
     loadTorrentSettings(s);
+    $("#mk-keys").value = (s.marketplace_keys || []).join("\n");
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -1368,6 +1435,7 @@ $("#btn-set-save").addEventListener("click", async () => {
   body.confirm_delete = $("#set-confirm_delete").checked;
   collectFlowSettings(body);
   collectNetSettings(body);
+  body.marketplace_keys = $("#mk-keys").value.split("\n").map(x => x.trim()).filter(Boolean);
   const tor = window.__torrentRaw || {};
   body.torrent = Object.assign({}, tor, {
     dht: $("#tor-dht").checked, pex: $("#tor-pex").checked, lsd: $("#tor-lsd").checked,

@@ -87,6 +87,8 @@ class DownloadManager:
         self.virus_scan = VirusScan(settings)  # W10
         from .torrents import TorrentService
         self.torrents = TorrentService(self)  # W11 (libtorrent add-on)
+        from .plugin_policy import PluginPolicy
+        self.plugin_policy = PluginPolicy(self)  # W12
         self._deferred: set[str] = set()
         self._tick_done: dict[str, int] = {}
         self._schedule_paused = False
@@ -120,6 +122,7 @@ class DownloadManager:
             self.registry.scan()
         except Exception:
             log.warning("plugin scan failed", exc_info=True)
+        self._spawn(self.plugin_policy.maybe_auto_update)  # W12
         n = self.settings.max_parallel or 3
         MAX_WORKERS = 16
         for i in range(MAX_WORKERS):
@@ -279,6 +282,10 @@ class DownloadManager:
                              captcha_chain=self.captcha_chain,
                              logger=log)
 
+    def _ctx_for(self, plugin) -> PluginContext:
+        """W12: user plugins and templates get a sandboxed context."""
+        return self.plugin_policy.context_for(plugin, self._ctx())
+
     def _pick_plugin(self, link: Link):
         plugins = self.registry.for_url(link.url)
         if not plugins:
@@ -299,7 +306,7 @@ class DownloadManager:
         try:
             plugin = self._pick_plugin(link)
             link.plugin = plugin.id
-            ctx = self._ctx()
+            ctx = self._ctx_for(plugin)
             try:
                 g = plugin.grab(link.url, ctx)
             except (NotImplementedError, PluginError):
@@ -857,7 +864,7 @@ class DownloadManager:
         def retry():
             try:
                 plugin = self._plugin_for(link)
-                ctx = self._ctx()
+                ctx = self._ctx_for(plugin)
                 ctx.manual_code = (code or "").strip()
                 self._resolve(link, plugin, ctx)
                 if link.status == LinkStatus.WAITING and link.direct_url:
@@ -886,7 +893,7 @@ class DownloadManager:
         def retry():
             try:
                 plugin = self._plugin_for(link)
-                ctx = self._ctx()
+                ctx = self._ctx_for(plugin)
                 self._resolve(link, plugin, ctx)
                 if link.status == LinkStatus.WAITING and link.direct_url:
                     self._ready_put(link.id)
@@ -913,7 +920,7 @@ class DownloadManager:
         def retry():
             try:
                 plugin = self._plugin_for(link)
-                ctx = self._ctx()
+                ctx = self._ctx_for(plugin)
                 self._resolve(link, plugin, ctx)
                 if link.status == LinkStatus.WAITING and link.direct_url:
                     self._ready_put(link.id)

@@ -81,6 +81,7 @@
       <button data-tab="filters" class="tab"><i class="ti ti-filter"></i>Filters</button>
       <button data-tab="packagizer" class="tab"><i class="ti ti-box"></i>Packagizer</button>
       <div class="tree-group">Tools</div>
+      <button data-tab="plugins" class="tab"><i class="ti ti-box"></i>Plugins</button>
       <button data-tab="settings" class="tab"><i class="ti ti-gear"></i>Settings</button>
       <button data-tab="terminal" class="tab"><i class="ti ti-term"></i>Terminal</button>
     </nav>
@@ -264,6 +265,28 @@
           <button id="btn-pack-preview">Preview</button>
         </div>
         <pre id="pack-preview-result" class="terminal-output" style="min-height:5em"></pre>
+      </section>
+
+      <!-- ============================ PLUGINS ============================ -->
+      <section id="tab-plugins" class="tabpane pagepane">
+        <h2>Plugin marketplace</h2>
+        <p class="hint">Plugins from the catalog address in Settings. OpenGrab installs only plugins signed by a
+        publisher key you trust, and installing one approves exactly the access it lists.</p>
+        <div class="formrow"><input id="mk-search" type="text" placeholder="Search plugins" style="flex:1">
+          <select id="mk-sort"><option value="rating">Best rated</option><option value="name">Name</option></select>
+          <button id="btn-mk-search">Search</button></div>
+        <div id="mk-list" class="linklist boxed"></div>
+
+        <h2>Permissions</h2>
+        <p class="hint">Your own plugins and templates run in a sandbox: they can reach only the sites you allow.
+        Built-in plugins are trusted.</p>
+        <table class="grid"><thead><tr><th>Plugin</th><th>Asks for</th><th>Allowed</th><th></th></tr></thead><tbody id="perm-body"></tbody></table>
+
+        <h2>Templates</h2>
+        <div class="formrow"><button id="btn-tpl-update">Check for template updates</button><span id="tpl-update-result" class="hint"></span></div>
+        <label class="win-label" for="tpl-text">Check a template before you add it</label>
+        <textarea id="tpl-text" rows="6" style="width:100%;font:12.5px Consolas,monospace" placeholder='{"id": "myhost", "name": "My host", "site": "myhost.example", "url_pattern": "…", "direct_url_regex": "…"}'></textarea>
+        <div class="formrow"><button id="btn-tpl-validate">Validate</button><span id="tpl-result" class="hint"></span></div>
       </section>
 
       <!-- ============================ TERMINAL =========================== -->
@@ -505,6 +528,16 @@
             <label>Tries per reconnect<input id="rc-attempts" type="number" min="1" value="3"></label>
           </div>
           <div class="formrow"><button id="btn-rc-now">Reconnect now</button><span id="rc-result" class="hint"></span></div>
+        </div>
+
+        <h2>Plugins</h2>
+        <div class="settings-grid groupbox">
+          <label class="check"><input id="set-plugin_sandbox_enabled" type="checkbox"> Sandbox my own plugins and templates</label>
+          <label>Template update index<input id="set-plugin_index_url" type="text" placeholder="https://…/index.json"></label>
+          <label class="check"><input id="set-plugin_auto_update" type="checkbox"> Update templates when OpenGrab starts</label>
+          <label>Marketplace catalog<input id="set-marketplace_url" type="text" placeholder="https://…/catalog.json"></label>
+          <label class="check"><input id="set-marketplace_require_signature" type="checkbox"> Install only signed plugins</label>
+          <label>Trusted publisher keys (Ed25519, one per line)<textarea id="mk-keys" rows="2"></textarea></label>
         </div>
 
         <h2>Advanced</h2>

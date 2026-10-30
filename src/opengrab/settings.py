@@ -144,6 +144,13 @@ class Settings(BaseModel):
     tracker_list_url: str = ""                         # public tracker list merged daily
     portmap: dict = Field(default_factory=dict)       # {enabled, protocols, methods, manual}
     reconnect: dict = Field(default_factory=dict)     # {enabled, command, ip_check_url, ...}
+    # W12 plugins
+    plugin_sandbox_enabled: bool = True
+    plugin_index_url: str = ""            # template update index
+    plugin_auto_update: bool = False
+    marketplace_url: str = ""
+    marketplace_require_signature: bool = True
+    marketplace_keys: list[str] = Field(default_factory=list)  # trusted Ed25519 public keys
     packagizer_rules: list[dict] = Field(default_factory=list)
 
     # maintenance

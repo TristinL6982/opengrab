@@ -44,12 +44,21 @@ def _parser() -> argparse.ArgumentParser:
                         help="with --headless, print a one-time device pairing code at startup")
     parser.add_argument("--smoke-test", action="store_true",
                         help="run the OpenGrab smoke check and exit")
+    parser.add_argument("--validate-template", metavar="FILE", default=None,
+                        help="check a plugin template (.json) and exit 1 if it has errors")
     return parser
 
 
 def main(argv=None) -> int:
     _ensure_stdio()
     args = _parser().parse_args(argv)
+    if args.validate_template:  # W12: plugin SDK
+        from .plugins.sdk import validate_template_file
+        errors = validate_template_file(args.validate_template)
+        for e in errors:
+            print(f"error: {e}")
+        print("template OK" if not errors else f"{len(errors)} problem(s)")
+        return 1 if errors else 0
     if args.data_dir:
         os.environ["OPENGRAB_DATA_DIR"] = args.data_dir
     settings = load_settings()

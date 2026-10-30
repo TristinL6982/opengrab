@@ -11,14 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-KNOWN_ORPHANS = {
-    "plugins.marketplace",
-    "plugins.permissions",
-    "plugins.sandbox",
-    "plugins.sdk",
-    "plugins.updates",
-
-}
+KNOWN_ORPHANS: set[str] = set()  # every module was wired in by W12 (2026-10-30)
 
 def _audit():
     spec = importlib.util.spec_from_file_location("import_audit", ROOT / "tools" / "import_audit.py")
