@@ -129,6 +129,7 @@ function onEvent(kind, payload) {
     return;
   }
   if (kind === "addon") { loadAddons(); return; }
+  if (kind === "flow") { FLOW = payload; renderFlowChrome(); return; }
   if (kind === "captcha") {
     setCaptchaBadge(payload.pending || 0);
     if ($("#tab-captchas")?.classList.contains("active")) renderCaptchas();
@@ -266,6 +267,7 @@ function linkRow(l) {
   const notes = [];
   if (l.status === "error" && l.error) notes.push(`<div class="u" style="color:var(--err)">${esc(l.error)}</div>`);
   if (l.status === "captcha" && l.extra?.captcha_request_id) notes.push(`<div class="u" style="color:var(--warn)">Waiting for a ${esc(l.captcha_kind)} check on ${esc((l.extra.captcha_site_url || l.url).split("/")[2] || "")}${l.extra.captcha_ray_id ? ", Ray ID " + esc(l.extra.captcha_ray_id) : ""}. Open Captchas to solve it.</div>`);
+  if (l.extra?.hash) notes.push(l.extra.hash.ok ? `<div class="u hashok">${esc(l.extra.hash.algo)} checksum OK</div>` : `<div class="u hashbad">Checksum ${l.extra.hash.error ? esc(l.extra.hash.error) : "mismatch"}</div>`);
   if (l.status === "paywall" && l.paywall_note) notes.push(`<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>`);
   if (l.extra?.archive_extraction) notes.push(`<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok-dark)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>`);
   const sub = l.status === "finished" && l.path ? l.path : (l.url + (l.plugin ? " · " + l.plugin : ""));
@@ -274,7 +276,7 @@ function linkRow(l) {
       <div class="t">${esc(l.title || l.filename || l.url)}</div>
       <div class="u">${esc(sub)}</div>${notes.join("")}</span></div>
     <div class="c-size">${l.size ? humanBytes(l.size) : "—"}</div>
-    <div class="c-status"><span class="st ${esc(l.status)}">${esc(statusText(l))}</span></div>
+    <div class="c-status"><span class="st ${esc(l.status)}">${esc(statusText(l))}</span>${l.status === "waiting" && l.extra?.wait_reason ? `<span class="why" title="${esc(l.extra.wait_reason)}">${esc(l.extra.wait_reason)}</span>` : ""}</div>
     <div class="c-eta">${l.status === "downloading" ? humanEta(l.eta) : (l.status === "finished" ? humanTime(l.finished) : "")}</div>
     <div class="c-speed">${l.status === "downloading" ? humanBytes(l.speed) + "/s" : ""}</div>
     <div class="c-prog"><div class="${barCls}"><i style="width:${pct}%"></i><span class="pct">${pct}%</span></div></div>
@@ -327,6 +329,8 @@ function allLinksFiltered() {
     case "finished": arr = arr.filter(l => l.status === "finished"); break;
     case "failed": arr = arr.filter(l => ["error", "skipped"].includes(l.status)); break;
     case "parked": arr = arr.filter(l => ["captcha", "login", "paywall"].includes(l.status)); break;
+    default:
+      if (S.filter.startsWith("queue:")) arr = arr.filter(l => l.extra?.queue === S.filter.slice(6));
   }
   return arr.sort((a, b) => b.created - a.created);
 }
@@ -347,6 +351,7 @@ function renderLists() {
   renderFilters();
   renderCounts();
   updateToolbar();
+  renderFlowChrome();
 }
 
 function renderCounts() {
@@ -728,7 +733,9 @@ document.addEventListener("click", (ev) => {
 });
 
 /* ============================================================ tabs */
-$$(".tab").forEach(t => t.addEventListener("click", () => {
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest(".tab[data-tab]");
+  if (!t) return;
   $$(".tab").forEach(x => x.classList.remove("active"));
   $$(".tabpane").forEach(x => x.classList.remove("active"));
   t.classList.add("active");
@@ -742,7 +749,7 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   if (t.dataset.tab === "packagizer") renderPackagizer();
   refreshData();
   renderGraph();
-}));
+});
 
 $$(".chip").forEach(c => c.addEventListener("click", () => {
   $$(".chip").forEach(x => x.classList.remove("active"));
@@ -761,7 +768,10 @@ async function addUrls() {
       urls,
       priority: +$("#url-priority").value || 0,
       auto_download: $("#url-auto").checked,
+      queue: $("#url-queue")?.value || "",
+      hash: $("#url-hash")?.value.trim() || "",
     });
+    if ($("#url-hash")) $("#url-hash").value = "";
     const errs = (out || []).filter(o => o.error);
     if (errs.length) toast(errs.length + " link(s) failed: " + errs[0].error, "err");
     else toast("Added " + urls.length + " link(s)", "ok");
@@ -857,7 +867,175 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "ua_rotation", "auto_start_after_grab", "clipboard_monitor_enabled",
   "terminal_enabled", "auto_extract_archives", "archive_max_files",
   "archive_max_expanded_gib", "archive_password_file",
-  "captcha_ocr_enabled", "captcha_ocr_ignore_hardware", "toasts_enabled"];
+  "captcha_ocr_enabled", "captcha_ocr_ignore_hardware", "toasts_enabled",
+  "scheduler_enabled", "max_per_host", "categories_enabled", "hash_checksum_files"];
+
+
+/* ============================================================ W3-W5 flow control */
+let FLOW = null;          // last /api/flow answer
+let CATS = [];            // category rows being edited
+const DAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+
+async function loadFlow() {
+  try { FLOW = await api("/api/flow"); } catch { return; }
+  renderFlowChrome();
+}
+
+function renderFlowChrome() {
+  if (!FLOW) return;
+  const sel = $("#speed-profile");
+  if (sel) {
+    sel.innerHTML = FLOW.profiles.map(p => `<option ${p.name === FLOW.active_profile ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+  }
+  const lim = $("#limit-pill");
+  if (lim) {
+    const parts = [];
+    parts.push(FLOW.effective_limit_bps ? "Limit " + humanBytes(FLOW.effective_limit_bps) + "/s" : "No limit");
+    if (FLOW.schedule) parts.push(FLOW.schedule.action === "pause" ? "schedule: paused" : FLOW.schedule.action === "limit" ? "schedule: limited" : "schedule: on");
+    if (FLOW.data_cap?.exceeded) parts.push("data cap reached");
+    lim.textContent = parts.join(", ");
+  }
+  const qsel = $("#url-queue");
+  if (qsel) {
+    const cur = qsel.value;
+    qsel.innerHTML = FLOW.queues.map(q => `<option ${q.name === cur ? "selected" : ""}>${esc(q.name)}</option>`).join("");
+  }
+  const tree = $("#tree-queues");
+  if (tree) {
+    const extra = FLOW.queues.filter(q => q.name !== "Main");
+    tree.innerHTML = extra.map(q => `<button data-tab="all" data-filter="queue:${esc(q.name)}" class="tab sub${S.filter === "queue:" + q.name ? " active" : ""}"><i class="ti ti-queue"></i>${esc(q.name)}${q.paused ? " (paused)" : ""}<span class="count">${Array.from(S.links.values()).filter(l => l.extra?.queue === q.name && l.status !== "finished").length || ""}</span></button>`).join("");
+  }
+}
+
+$("#speed-profile")?.addEventListener("change", async (ev) => {
+  try { await api("/api/speed/profile", "POST", { name: ev.target.value }); toast("Speed profile: " + ev.target.value, "ok"); loadFlow(); }
+  catch (e) { toast("Could not switch profile: " + e.message, "err"); }
+});
+
+function schedRow(w = {}) {
+  const days = new Set(w.days ?? [0, 1, 2, 3, 4, 5, 6]);
+  return `<tr>
+    <td><input type="text" class="w-start" value="${esc(w.start || "09:00")}" placeholder="HH:MM"></td>
+    <td><input type="text" class="w-end" value="${esc(w.end || "17:00")}" placeholder="HH:MM"></td>
+    <td class="days">${DAY_NAMES.map((d, i) => `<label>${d}<input type="checkbox" class="w-day" data-day="${i}" ${days.has(i) ? "checked" : ""}></label>`).join("")}</td>
+    <td><select class="w-action">${[["pause", "Pause downloads"], ["limit", "Limit speed"], ["allow", "Allow downloads"]].map(([v, t]) => `<option value="${v}" ${w.action === v ? "selected" : ""}>${t}</option>`).join("")}</select></td>
+    <td><input type="number" class="w-speed" min="0" value="${Number(w.speed_kbps || 0)}"></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+
+function profileRow(p = {}) {
+  return `<tr data-upload="${Number(p.upload_limit || 0)}"><td><input type="text" class="p-name" value="${esc(p.name || "")}" placeholder="Profile name"></td>
+    <td><input type="number" class="p-limit" min="0" value="${Math.round((p.download_limit || 0) / 1024)}"></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+
+function hostRow(host = "", n = 1) {
+  return `<tr><td><input type="text" class="h-host" value="${esc(host)}" placeholder="e.g. example.com"></td>
+    <td><input type="number" class="h-limit" min="0" value="${n}"></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+
+function catRow(c = {}) {
+  return `<tr><td><input type="text" class="c-name" value="${esc(c.name || "")}"></td>
+    <td><input type="text" class="c-exts" value="${esc((c.extensions || []).join(" "))}" placeholder=".mp4 .mkv"></td>
+    <td><input type="text" class="c-folder" value="${esc(c.folder || "")}"></td>
+    <td><button class="sm danger" data-row-del>Delete</button></td></tr>`;
+}
+
+function queueRow(q) {
+  const main = q.name === "Main";
+  return `<tr data-queue="${esc(q.name)}"><td>${esc(q.name)}${main ? " (default)" : ""}</td>
+    <td>${main ? '<span class="hint">uses "Downloads at the same time"</span>' : `<input type="number" class="q-max" min="1" max="32" value="${q.max_active}">`}</td>
+    <td><input type="checkbox" class="q-paused" ${q.paused ? "checked" : ""}></td>
+    <td>${main ? "" : '<button class="sm danger" data-queue-del>Delete</button>'}</td></tr>`;
+}
+
+function loadFlowSettings(s) {
+  $("#sched-body").innerHTML = (s.scheduler_windows || []).map(schedRow).join("");
+  const profiles = (s.speed_profiles && s.speed_profiles.profiles) || (FLOW ? FLOW.profiles : []);
+  $("#profiles-body").innerHTML = profiles.map(profileRow).join("");
+  const cap = s.data_cap || {};
+  $("#cap-enabled").checked = !!cap.enabled;
+  $("#cap-limit").value = cap.limit_mb ?? 1024;
+  $("#cap-period").value = cap.period || "day";
+  $("#cap-action").value = cap.action || "stop";
+  $("#cap-slow").value = cap.slow_kbps ?? 64;
+  $("#hostlim-body").innerHTML = Object.entries(s.per_host_limits || {}).map(([h, n]) => hostRow(h, n)).join("");
+  CATS = (FLOW && FLOW.categories) || [];
+  $("#cats-body").innerHTML = CATS.map(catRow).join("");
+  renderQueuesTable();
+  const u = FLOW?.data_cap;
+  $("#cap-usage").textContent = u ? `Used ${humanBytes(u.used)} of ${humanBytes(u.limit_bytes)} this ${u.period}.` : "";
+  $("#sched-now").textContent = FLOW?.schedule ? `Now in a "${FLOW.schedule.action}" window (${FLOW.schedule.start}–${FLOW.schedule.end}).` : "";
+}
+
+function renderQueuesTable() {
+  if (!FLOW) return;
+  $("#queues-body").innerHTML = FLOW.queues.map(queueRow).join("");
+}
+
+function collectFlowSettings(body) {
+  body.scheduler_windows = $$("#sched-body tr").map(tr => ({
+    start: $(".w-start", tr).value.trim(), end: $(".w-end", tr).value.trim(),
+    days: $$(".w-day", tr).filter(c => c.checked).map(c => +c.dataset.day),
+    action: $(".w-action", tr).value, speed_kbps: +$(".w-speed", tr).value || 0,
+  }));
+  const profiles = $$("#profiles-body tr").map(tr => ({
+    name: $(".p-name", tr).value.trim(), download_limit: (+$(".p-limit", tr).value || 0) * 1024,
+    upload_limit: +tr.dataset.upload || 0,
+  })).filter(p => p.name);
+  const active = FLOW?.active_profile && profiles.some(p => p.name === FLOW.active_profile) ? FLOW.active_profile : (profiles[0]?.name || "Normal");
+  body.speed_profiles = profiles.length ? { active, profiles } : {};
+  body.data_cap = { enabled: $("#cap-enabled").checked, limit_mb: +$("#cap-limit").value || 0,
+                    period: $("#cap-period").value, action: $("#cap-action").value, slow_kbps: +$("#cap-slow").value || 64 };
+  body.per_host_limits = Object.fromEntries($$("#hostlim-body tr")
+    .map(tr => [$(".h-host", tr).value.trim().toLowerCase(), +$(".h-limit", tr).value || 0]).filter(([h]) => h));
+  body.categories = $$("#cats-body tr").map(tr => ({
+    name: $(".c-name", tr).value.trim(),
+    extensions: $(".c-exts", tr).value.split(/[\s,]+/).filter(Boolean),
+    folder: $(".c-folder", tr).value.trim(),
+  })).filter(c => c.name);
+}
+
+document.addEventListener("click", async (ev) => {
+  const del = ev.target.closest("[data-row-del]");
+  if (del) { del.closest("tr").remove(); return; }
+  const qdel = ev.target.closest("[data-queue-del]");
+  if (qdel) {
+    const name = qdel.closest("tr").dataset.queue;
+    if (!confirm(`Delete queue ${name}? Its downloads move to Main.`)) return;
+    try { await api("/api/queues/" + encodeURIComponent(name), "DELETE"); await loadFlow(); renderQueuesTable(); }
+    catch (e) { toast("Could not delete queue: " + e.message, "err"); }
+  }
+});
+document.addEventListener("change", async (ev) => {
+  const tr = ev.target.closest("#queues-body tr");
+  if (!tr) return;
+  const name = tr.dataset.queue, body = {};
+  if (ev.target.classList.contains("q-max")) body.max_active = +ev.target.value || 1;
+  if (ev.target.classList.contains("q-paused")) body.paused = ev.target.checked;
+  try { await api("/api/queues/" + encodeURIComponent(name), "POST", body); await loadFlow(); }
+  catch (e) { toast("Could not change queue: " + e.message, "err"); }
+});
+$("#btn-sched-add").addEventListener("click", () => $("#sched-body").insertAdjacentHTML("beforeend", schedRow({ action: "pause" })));
+$("#btn-profile-add").addEventListener("click", () => $("#profiles-body").insertAdjacentHTML("beforeend", profileRow({})));
+$("#btn-hostlim-add").addEventListener("click", () => $("#hostlim-body").insertAdjacentHTML("beforeend", hostRow("", 1)));
+$("#btn-cat-add").addEventListener("click", () => $("#cats-body").insertAdjacentHTML("beforeend", catRow({})));
+$("#btn-cat-reset").addEventListener("click", async () => {
+  if (!confirm("Restore the built-in categories? Your category edits are discarded when you save.")) return;
+  $("#cats-body").innerHTML = "";
+  CATS = [];
+  toast("Built-in categories return after you save.", "");
+});
+$("#btn-queue-add").addEventListener("click", async () => {
+  const name = $("#queue-new-name").value.trim();
+  if (!name) return toast("Give the queue a name", "err");
+  try {
+    await api("/api/queues", "POST", { name, max_active: +$("#queue-new-max").value || 1 });
+    $("#queue-new-name").value = "";
+    await loadFlow(); renderQueuesTable();
+  } catch (e) { toast("Could not create queue: " + e.message, "err"); }
+});
 
 /* ============================================================ add-ons */
 let addonPoll = null;
@@ -912,6 +1090,8 @@ async function loadSettings() {
     }
     $("#set-confirm_delete").checked = !!s.confirm_delete;
     setFolderPill(s.download_dir);
+    await loadFlow();
+    loadFlowSettings(s);
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -930,12 +1110,15 @@ $("#btn-set-save").addEventListener("click", async () => {
     body[f] = el.type === "checkbox" ? el.checked
       : ["max_parallel", "per_link_chunks", "speed_limit_kbps", "retry_max",
         "archive_max_files", "archive_max_expanded_gib", "media_max_height",
-        "media_playlist_max_entries"].includes(f)
+        "media_playlist_max_entries", "max_per_host"].includes(f)
         ? +el.value : el.value;
   }
   body.confirm_delete = $("#set-confirm_delete").checked;
+  collectFlowSettings(body);
   try {
-    await api("/api/settings", "POST", body);
+    const res = await api("/api/settings", "POST", body);
+    (res.warnings || []).forEach(w => toast("Not applied: " + w, "err"));
+    await loadFlow();
     $("#clipboard-state").textContent = body.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -1142,6 +1325,7 @@ async function loadPluginHealth() {
   refreshData();
   refreshUnread();
   renderCaptchas();
+  loadFlow();
   api("/api/settings").then(s => setFolderPill(s.download_dir)).catch(() => {});
   loadPluginHealth();
   connectSSE();

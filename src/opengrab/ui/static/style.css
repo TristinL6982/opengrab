@@ -313,3 +313,14 @@ dialog.win::backdrop { background: rgba(30, 45, 70, .25); }
   .tree-group { display: none; }
   .tab { white-space: nowrap; padding: 6px 10px; width: auto; }
 }
+
+/* ---------- W3-W5 ---------- */
+.profile-pill select { min-height: 18px; padding: 0 4px; font-size: 12px; border-radius: 2px; }
+table.grid input[type=text], table.grid input[type=number], table.grid select { width: 100%; min-height: 22px; }
+table.grid td.days { white-space: nowrap; }
+table.grid td.days label { display: inline-flex; flex-direction: column; align-items: center; font-size: 10.5px; margin-right: 2px; }
+.ti-queue { background: linear-gradient(#bcd6f5, #5b8fd6); }
+.tab.sub { padding-left: 30px; }
+.c-status .why { display: block; font-size: 11px; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hashok { color: var(--ok-dark); }
+.hashbad { color: var(--err); }

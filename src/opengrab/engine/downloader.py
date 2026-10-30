@@ -220,6 +220,8 @@ class LinkDownload:
         self._speed = 0.0
         self._samples: list[tuple[float, int]] = []
         self._limiter = rate_limiter or _RateLimiter(0.0)
+        # a shared limiter is owned (and rated) by the manager's flow control
+        self._own_limiter = rate_limiter is None
         self._last_tick = 0.0
         self._active_threads = 0
 
@@ -332,6 +334,10 @@ class LinkDownload:
             with self._state_lock:
                 data = {"url": self.url, "total": self._total,
                         "chunks": [list(c) for c in self._chunks]}
+                v = getattr(self, "_validators", None)
+                if v is not None:  # W3: identify the remote file version
+                    data["validators"] = {"etag": v.etag, "last_modified": v.last_modified,
+                                          "length": v.length}
             tmp_path = self.meta + ".tmp"
             with open(tmp_path, "w") as f:
                 json.dump(data, f)
@@ -348,6 +354,16 @@ class LinkDownload:
             if (data.get("total") != self._total or
                     not isinstance(data.get("chunks"), list)):
                 return None
+            saved = data.get("validators")
+            current = getattr(self, "_validators", None)
+            if isinstance(saved, dict) and current is not None:
+                from ..recovery import Validators, can_resume
+                old = Validators(str(saved.get("etag") or ""), str(saved.get("last_modified") or ""),
+                                 saved.get("length"))
+                if (old.etag or old.last_modified) and (current.etag or current.last_modified)                         and not can_resume(old, current):
+                    # W3: the server has a different file now; the part is useless
+                    self.link.extra["note"] = "restarted: the file changed on the server"
+                    return None
             chunks = []
             for ch in data["chunks"]:
                 if (not isinstance(ch, list) or len(ch) != 3 or
@@ -373,6 +389,10 @@ class LinkDownload:
         probe = self._probe()
         self._total = probe.size
         self.url = probe.final_url
+        from ..recovery import validators_from_headers
+        self._validators = validators_from_headers(probe.headers)
+        if self._validators.length is None and self._total is not None:
+            self._validators.length = self._total
         # server-side name wins over plugin guess
         cd = probe.headers.get("content-disposition", "")
         name = _cd_filename(cd)
@@ -383,8 +403,9 @@ class LinkDownload:
             self.meta = str(self.part) + ".json"
 
         # speed limit: settings value is KB/s (JD2-style)
-        limit = (getattr(self.settings, "speed_limit_kbps", 0) or 0) * 1024
-        self._limiter.set_rate(limit)
+        if self._own_limiter:
+            limit = (getattr(self.settings, "speed_limit_kbps", 0) or 0) * 1024
+            self._limiter.set_rate(limit)
 
         chunks_meta = self._load_meta() if self._total else None
         try:
@@ -394,6 +415,7 @@ class LinkDownload:
                 self._chunks = chunks_meta
                 with self._state_lock:
                     self._done = sum(ch[2] for ch in chunks_meta)
+                    self.start_done = self._done
                 self._parallel(self._total, self._chunks)
             else:
                 if os.path.exists(self.meta):
@@ -407,6 +429,7 @@ class LinkDownload:
                     part_size = 0
                 with self._state_lock:
                     self._done = part_size
+                    self.start_done = part_size
                 if self._total is not None and part_size == self._total:
                     pass  # complete single-stream part: finalize below
                 elif (probe.accept_ranges and self._total and part_size == 0

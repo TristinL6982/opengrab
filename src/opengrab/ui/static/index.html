@@ -70,6 +70,7 @@
       <button data-tab="all" data-filter="finished" class="tab"><i class="ti ti-finished"></i>Finished<span class="count" id="cnt-finished"></span></button>
       <button data-tab="all" data-filter="failed" class="tab"><i class="ti ti-failed"></i>Failed<span class="count" id="cnt-failed"></span></button>
       <button data-tab="all" data-filter="parked" class="tab"><i class="ti ti-parked"></i>Needs you<span class="count" id="cnt-parked"></span></button>
+      <div id="tree-queues"></div>
       <div class="tree-group">Collect</div>
       <button data-tab="linkgrabber" class="tab"><i class="ti ti-grab"></i>LinkGrabber</button>
       <button data-tab="captchas" class="tab"><i class="ti ti-captcha"></i>Captchas <span id="captcha-badge" class="badge-count hidden">0</span></button>
@@ -310,6 +311,58 @@
           </div>
         </div>
 
+        <h2>Schedule</h2>
+        <div class="groupbox">
+          <label class="check"><input id="set-scheduler_enabled" type="checkbox"> Follow this schedule</label>
+          <p class="hint">Each window pauses downloads, limits their speed, or allows them. When windows overlap, the lowest one in the list wins.</p>
+          <table class="grid"><thead><tr><th>From</th><th>To</th><th>Days</th><th>What happens</th><th>Speed (kB/s)</th><th></th></tr></thead><tbody id="sched-body"></tbody></table>
+          <div class="formrow"><button id="btn-sched-add">Add time window</button><span id="sched-now" class="hint"></span></div>
+        </div>
+
+        <h2>Speed profiles and data cap</h2>
+        <div class="groupbox">
+          <table class="grid"><thead><tr><th>Profile</th><th>Download limit (kB/s, 0 = none)</th><th></th></tr></thead><tbody id="profiles-body"></tbody></table>
+          <div class="formrow"><button id="btn-profile-add">Add profile</button><span class="hint">Switch profiles from the status bar or the tray icon.</span></div>
+          <div class="settings-grid">
+            <label class="check"><input id="cap-enabled" type="checkbox"> Limit how much I download</label>
+            <label>Data cap (MB)<input id="cap-limit" type="number" min="1"></label>
+            <label>Per<select id="cap-period"><option value="day">day</option><option value="month">month</option></select></label>
+            <label>When reached<select id="cap-action"><option value="stop">stop starting downloads</option><option value="slow">slow down</option></select></label>
+            <label>Slow speed (kB/s)<input id="cap-slow" type="number" min="1"></label>
+          </div>
+          <p id="cap-usage" class="hint"></p>
+        </div>
+
+        <h2>Per-site limits</h2>
+        <div class="groupbox">
+          <div class="settings-grid"><label>Downloads per site at the same time (0 = no limit)
+            <input id="set-max_per_host" type="number" min="0" max="32"></label></div>
+          <table class="grid"><thead><tr><th>Site</th><th>At the same time</th><th></th></tr></thead><tbody id="hostlim-body"></tbody></table>
+          <div class="formrow"><button id="btn-hostlim-add">Add site rule</button></div>
+        </div>
+
+        <h2>Queues</h2>
+        <div class="groupbox">
+          <p class="hint">Downloads go to the Main queue unless you pick another one when adding links. Each queue has its own limit and can be paused on its own. Changes here apply right away.</p>
+          <table class="grid"><thead><tr><th>Queue</th><th>At the same time</th><th>Paused</th><th></th></tr></thead><tbody id="queues-body"></tbody></table>
+          <div class="formrow"><input id="queue-new-name" type="text" placeholder="New queue name" style="flex:0 0 200px">
+            <input id="queue-new-max" type="number" min="1" max="32" value="1" style="width:5em"><button id="btn-queue-add">Create queue</button></div>
+        </div>
+
+        <h2>Categories</h2>
+        <div class="groupbox">
+          <label class="check"><input id="set-categories_enabled" type="checkbox"> Sort downloads into category folders</label>
+          <p class="hint">A Packagizer rule that matches always wins. Files of no category stay in the download folder.</p>
+          <table class="grid"><thead><tr><th>Category</th><th>File types</th><th>Folder</th><th></th></tr></thead><tbody id="cats-body"></tbody></table>
+          <div class="formrow"><button id="btn-cat-add">Add category</button><button id="btn-cat-reset">Restore defaults</button></div>
+        </div>
+
+        <h2>Checksums</h2>
+        <div class="groupbox">
+          <label class="check"><input id="set-hash_checksum_files" type="checkbox"> Look for a .sha256 or .md5 file next to each download and check it</label>
+          <p class="hint">You can also paste a checksum in the Add links dialog. A file that fails its check is deleted and marked as an error so a retry downloads it again.</p>
+        </div>
+
         <h2>Advanced</h2>
         <div class="settings-grid groupbox">
           <label class="check"><input id="set-terminal_enabled" type="checkbox"> Allow the web terminal (runs local commands)</label>
@@ -357,6 +410,8 @@
     <span id="conn-pill" class="pill warn">connecting…</span>
     <span id="active-pill" class="pill">0 active</span>
     <span id="speed-pill" class="pill">0 B/s</span>
+    <label class="pill profile-pill" title="Speed profile">Profile <select id="speed-profile"></select></label>
+    <span id="limit-pill" class="pill" title="Effective speed limit"></span>
     <canvas id="speed-graph" height="18" aria-label="Transfer rate over the last minute"></canvas>
     <span class="grow"></span>
     <span id="folder-pill" class="pill"></span>
@@ -370,9 +425,12 @@
     <label for="url-input" class="win-label">Links, one per line</label>
     <textarea id="url-input" rows="7"
       placeholder="https://example.com/video&#10;https://example.com/file.zip"></textarea>
+    <label for="url-hash" class="win-label" style="margin-top:8px">Checksum (optional, for a single link)</label>
+    <input id="url-hash" type="text" placeholder="sha256:… or md5:…" style="width:100%">
     <div class="addrow">
       <label>Priority <input id="url-priority" type="number" value="0" style="width:4.5em"></label>
       <label class="check"><input id="url-auto" type="checkbox" checked> Start now</label>
+      <label>Queue <select id="url-queue"></select></label>
       <span class="grow"></span>
       <button type="button" id="add-cancel">Cancel</button>
       <button type="button" id="btn-add" class="primary">Add links</button>

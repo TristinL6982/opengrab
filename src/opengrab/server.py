@@ -181,6 +181,8 @@ class ApiServer:
         # (method, regex, fn) routes that carry their own credential (e.g. a
         # one-time key in the URL) and are dispatched before the bearer check
         self.public_routes: list = []
+        # callables run with the list of applied keys after POST /api/settings
+        self.settings_hooks: list = []
         from .features import install_all
         self.features = install_all(self)
 
@@ -1164,6 +1166,8 @@ def _make_handler(srv: ApiServer):
                 elif action == "paywall-accept":
                     mgr.accept_paywall(lid)
                 else:
+                    if self._route("POST", p, {}, body):
+                        return
                     return self._err(404, "unknown action")
                 return self._json({"ok": True})
             if p == "/api/extension/config":
@@ -1206,6 +1210,8 @@ def _make_handler(srv: ApiServer):
                             auto_download=bool(body.get("auto_download", True)),
                             title=str(body.get("title", "")),
                             filename=str(body.get("filename", "")),
+                            queue=str(body.get("queue") or ""),
+                            expected_hash=str(body.get("hash") or "") if len(urls) == 1 else "",
                         ).to_public())
                     except Exception as e:  # noqa: BLE001
                         out.append({"url": u_, "error": str(e)})
@@ -1308,7 +1314,14 @@ def _make_handler(srv: ApiServer):
                     mgr.settings.save()
                 except Exception:
                     pass
-                return self._json({"ok": True, "applied": sorted(allowed), "ignored": ignored})
+                warnings: list = []
+                for hook in srv.settings_hooks:
+                    try:
+                        warnings.extend(hook(sorted(allowed)) or [])
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append(str(exc))
+                return self._json({"ok": True, "applied": sorted(allowed), "ignored": ignored,
+                                   "warnings": warnings})
             if p == "/api/plugins/scan":
                 return self._json({"scanned": mgr.registry.scan(force=True)})
             if p == "/api/accounts":

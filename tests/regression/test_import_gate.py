@@ -12,13 +12,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 KNOWN_ORPHANS = {
-    "accountauth", "archives", "avscan", 
-    "categories", "cnl", "cnl_server", "cookies", "debrid",
-    "hashverify", "hostlimits", "linkcheck", "netconfig",
-    "plugins.marketplace", "plugins.permissions", "plugins.sandbox",
-    "plugins.sdk", "plugins.updates", "portmap", "premium", "proxies",
-    "queues", "reconnect", "recovery", "scheduler", "segments", "siteauth",
-    "speedprofiles", "spider", "torrent", "trackers", "usage",
+    "accountauth",
+    "archives",
+    "avscan",
+    "cnl",
+    "cnl_server",
+    "cookies",
+    "debrid",
+    "linkcheck",
+    "netconfig",
+    "plugins.marketplace",
+    "plugins.permissions",
+    "plugins.sandbox",
+    "plugins.sdk",
+    "plugins.updates",
+    "portmap",
+    "premium",
+    "proxies",
+    "reconnect",
+    "segments",
+    "siteauth",
+    "spider",
+    "torrent",
+    "trackers",
+    "usage",
 }
 
 

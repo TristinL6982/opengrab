@@ -109,7 +109,8 @@ def test_cloudflare_page_parks_shared_inbox_entry_then_browser_clears_it(site, m
         st, body = req(srv, "POST", f"/api/captcha/{rid}/browser", body={})
         assert st == 202, body
         _wait(lambda: _link(srv, a.id).status.value == "finished" and _link(srv, b.id).status.value == "finished")
-        assert driver.opened == [site + "/cf/one.zip"] and driver.closed
+        # the entry belongs to whichever link parked first
+        assert driver.opened in ([site + "/cf/one.zip"], [site + "/cf/two.zip"]) and driver.closed
         for lid in (a.id, b.id):
             data = open(_link(srv, lid).path, "rb").read()
             assert hashlib.sha256(data).digest() == hashlib.sha256(FILE).digest()

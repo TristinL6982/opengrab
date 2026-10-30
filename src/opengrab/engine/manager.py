@@ -73,6 +73,12 @@ class DownloadManager:
         self.captcha_inbox = CaptchaInbox(
             max_pending=max(1, int(getattr(settings, "captcha_inbox_max_pending", 50) or 50)))
         self.captcha_chain = SolverChain(settings, self.client, clearance_store=self.clearance)
+        # W3-W5: scheduler, host limits, queues, speed profiles, data cap
+        from .flow import FlowControl
+        self.flow = FlowControl(settings, self.data_dir)
+        self._deferred: set[str] = set()
+        self._tick_done: dict[str, int] = {}
+        self._schedule_paused = False
         try:
             self.accounts.load()
             self.filters.load()
@@ -111,6 +117,7 @@ class DownloadManager:
             t.start()
             self._workers.append(t)
         self._started = True
+        threading.Thread(target=self._flow_loop, name="flow-control", daemon=True).start()
         log.info("engine started (%d workers)", n)
 
     def shutdown(self) -> None:
@@ -169,12 +176,19 @@ class DownloadManager:
     # ------------------------------------------------------------------ grab
     def add_url(self, url: str, priority: int = 0,
                 auto_download: bool = True, title: str = "",
-                filename: str = "") -> Link:
+                filename: str = "", queue: str = "", expected_hash: str = "") -> Link:
         """Register a URL and run the grab phase (async).  Returns the Link
         immediately (status RESOLVING, or SKIPPED if a filter excludes it)."""
         url = (url or "").strip()
         if not url:
             raise ValueError("empty url")
+        extra: dict = {}
+        if queue:
+            extra["queue"] = self.flow.queues.get(queue).name  # KeyError: unknown queue
+        if expected_hash:
+            from ..hashverify import parse_expected
+            algo, digest = parse_expected(expected_hash)  # ValueError: bad checksum
+            extra["expected_hash"] = f"{algo}:{digest}"
         allowed, reason = self.filters.allows(url, filename)
         if not allowed:
             link = Link(url=url, title=title, filename=filename,
@@ -187,7 +201,7 @@ class DownloadManager:
             return link
 
         link = Link(url=url, title=title, filename=filename,
-                    priority=priority, status=LinkStatus.RESOLVING)
+                    priority=priority, status=LinkStatus.RESOLVING, extra=extra)
         with self._lock:
             self._links[link.id] = link
         self._persist()
@@ -392,6 +406,69 @@ class DownloadManager:
             self._regrab(link)
         return True
 
+    # ------------------------------------------------------- W3 hash check
+    def _expected_hash(self, link: Link, path: Path) -> str:
+        expected = str(link.extra.get("expected_hash") or "").strip()
+        if expected or not getattr(self.settings, "hash_checksum_files", False):
+            return expected
+        from ..hashverify import parse_checksum_file
+        base = (link.direct_url or link.url).split("?", 1)[0]
+        name = path.name
+        for suffix, algo in ((".sha256", "sha256"), (".md5", "md5"), (".sha1", "sha1")):
+            try:
+                r = self.client.get(base + suffix, timeout=15, max_bytes=65536, detect_challenges=False)
+            except Exception:
+                continue
+            if r.status_code != 200:
+                continue
+            table = parse_checksum_file(r.text)
+            hit = table.get(name) or (next(iter(table.values())) if len(table) == 1 else None)
+            if hit:
+                link.extra["hash_source"] = base + suffix
+                return f"{hit[0]}:{hit[1]}"
+        return ""
+
+    def _verify_hash(self, link: Link, path: Path) -> None:
+        """W3: compare the finished file with a known checksum."""
+        expected = self._expected_hash(link, path)
+        if not expected:
+            return
+        from ..hashverify import verify_file
+        try:
+            res = verify_file(path, expected)
+        except ValueError as exc:
+            link.extra["hash"] = {"ok": False, "error": f"bad checksum: {exc}"}
+            return
+        link.extra["hash"] = {"ok": res.ok, "algo": res.algo, "expected": res.expected,
+                              "actual": res.actual}
+        if not res.ok:
+            # a corrupt file must not look finished; retry downloads it again
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            link.extra.pop("download_target_filename", None)
+            link.downloaded = 0
+            link.progress = 0.0
+            raise DownloadError(f"hash mismatch: expected {res.algo} {res.expected[:16]}…, "
+                                f"got {res.actual[:16]}…")
+
+    def verify_now(self, link_id: str, expected: str = "") -> dict:
+        link = self.get(link_id)
+        if link is None or link.status != LinkStatus.FINISHED or not link.path:
+            raise ValueError("only finished downloads can be checked")
+        from ..hashverify import verify_file
+        expected = (expected or link.extra.get("expected_hash") or "").strip()
+        if not expected:
+            raise ValueError("enter a checksum, e.g. sha256:<hex>")
+        res = verify_file(Path(link.path), expected)
+        link.extra["expected_hash"] = expected
+        link.extra["hash"] = {"ok": res.ok, "algo": res.algo, "expected": res.expected,
+                              "actual": res.actual}
+        self._persist()
+        self._broadcast("grabbed", link)
+        return link.extra["hash"]
+
     def _clearance_extras(self, url: str) -> tuple[dict, dict]:
         host = urlparse(url).hostname or ""
         c = self.clearance.get(host) if host else None
@@ -437,7 +514,8 @@ class DownloadManager:
             except (TypeError, IndexError):
                 continue
             child = self.add_url(u, priority=parent.priority,
-                                 auto_download=auto, title=t)
+                                 auto_download=auto, title=t,
+                                 queue=str(parent.extra.get("queue") or ""))
             if child.status != LinkStatus.SKIPPED:
                 child.parent = parent.id
             out.append(child)
@@ -712,12 +790,64 @@ class DownloadManager:
                 continue
             if not link.direct_url:
                 continue
-            self._run_download(link)
+            with self._lock:
+                running = [l for l in self._links.values() if l.status == LinkStatus.DOWNLOADING]
+                reason = self.flow.gate(link, running)
+                if reason:
+                    self._deferred.add(link.id)
+                elif link.status == LinkStatus.WAITING:
+                    link.status = LinkStatus.DOWNLOADING  # reserve the slot atomically
+                else:
+                    continue
+            if reason:
+                if link.extra.get("wait_reason") != reason:
+                    link.extra["wait_reason"] = reason
+                    self._persist()
+                    self._broadcast("waiting", link)
+                continue
+            link.extra.pop("wait_reason", None)
+            self._run_download(link, previous_status=LinkStatus.WAITING)
 
-    def _run_download(self, link: Link) -> None:
+    # --------------------------------------------------------- W3-W5 ticker
+    def _flow_loop(self) -> None:
+        """Once a second: apply the effective speed limit, follow schedule
+        pause windows, and give deferred downloads another chance."""
+        while self._started:
+            try:
+                self._flow_tick()
+            except Exception:
+                log.debug("flow tick failed", exc_info=True)
+            time.sleep(1.0)
+
+    def _flow_tick(self) -> None:
+        self._global_limiter.set_rate(self.flow.effective_limit_bps())
+        paused = self.flow.downloads_paused_by_schedule()
+        if paused and not self._schedule_paused:
+            for l in self.all_links():
+                if l.status == LinkStatus.DOWNLOADING:
+                    l.extra["paused_by_schedule"] = True
+                    self.pause_download(l.id)
+                    l.extra["note"] = "paused by the schedule"
+        elif not paused and self._schedule_paused:
+            for l in self.all_links():
+                if l.extra.pop("paused_by_schedule", False) and l.status == LinkStatus.PAUSED:
+                    self.resume_download(l.id)
+        self._schedule_paused = paused
+        with self._lock:
+            again, self._deferred = self._deferred, set()
+        for lid in again:
+            self._ready_put(lid)
+
+    def settings_changed(self) -> list[str]:
+        """Re-read flow-control settings (called after POST /api/settings)."""
+        errors = self.flow.reload()
+        self._global_limiter.set_rate(self.flow.effective_limit_bps())
+        return errors
+
+    def _run_download(self, link: Link, previous_status=None) -> None:
         reservation = None
         try:
-            previous_status = link.status
+            previous_status = previous_status or link.status
             link.status = LinkStatus.DOWNLOADING
             link.error = ""
             self._persist()
@@ -735,6 +865,12 @@ class DownloadManager:
                 source_name = link.filename or Path(urlparse(link.url).path).name
                 plan = plan_packagizer(self.settings.packagizer_rules,
                                        link.url, source_name, root)
+                if not plan.get("matched"):
+                    # W4: categories decide the folder when no Packagizer rule matched
+                    link.extra["category"] = self.flow.category_for(plan["filename"])
+                    cat_dir = self.flow.category_subdir(plan["filename"])
+                    if cat_dir:
+                        plan["subdir"] = safe_subdir(cat_dir)
             dest = (root / plan["subdir"]).resolve()
             dest.relative_to(root)
             filename = safe_filename(plan["filename"])
@@ -789,8 +925,14 @@ class DownloadManager:
                 finally:
                     with self._lock:
                         self._active.pop(link.id, None)
+                    try:  # bytes after the last progress tick
+                        self._count_bytes(link.id, dl, dl.progress()[1])
+                    except Exception:
+                        pass
+                    self._tick_done.pop(link.id, None)
             path = self._finish_media(link, Path(path))
             link.path = str(path)
+            self._verify_hash(link, Path(path))
             if self.settings.auto_extract_archives:
                 from .archives import extract_archive, is_supported_archive
                 if is_supported_archive(Path(path)):
@@ -986,8 +1128,10 @@ class DownloadManager:
             link.error = f"retry {n + 1}/{maxr}: {msg}"
             link.attempts = n + 1
 
+            delay = self.flow.retry.delay_for(n + 1)
+
             def delayed():
-                time.sleep(min(2 ** n, 60))
+                time.sleep(delay)
                 if self.get(link.id) is not None:
                     self._ready_put(link.id)
 
@@ -998,8 +1142,18 @@ class DownloadManager:
             link.error = msg
             self._broadcast("error", link)
 
+    def _count_bytes(self, link_id: str, dl: LinkDownload, done: int) -> None:
+        """Feed newly transferred bytes to the data cap (W5)."""
+        prev = self._tick_done.get(link_id)
+        if prev is None:
+            prev = int(getattr(dl, "start_done", 0) or 0)
+        if done > prev:
+            self.flow.record_bytes(done - prev)
+        self._tick_done[link_id] = max(prev, done)
+
     def _on_tick(self, link: Link, dl: LinkDownload) -> None:
         total, done, speed = dl.progress()
+        self._count_bytes(link.id, dl, done)
         link.downloaded = done
         if total:
             link.size = total

@@ -101,6 +101,19 @@ class Settings(BaseModel):
     clipboard_monitor_enabled: bool = False
     toasts_enabled: bool = True     # desktop toast for finished/failed/captcha (W1)
 
+    # W3-W5 flow control (engine/flow.py); empty values mean defaults
+    scheduler_enabled: bool = False
+    scheduler_windows: list[dict] = Field(default_factory=list)  # {start, end, days, action, speed_kbps}
+    max_per_host: int = 0                                       # 0 = unlimited
+    per_host_limits: dict[str, int] = Field(default_factory=dict)
+    categories_enabled: bool = False                            # Video/Music/... folders
+    categories: list[dict] = Field(default_factory=list)        # empty = built-in categories
+    speed_profiles: dict = Field(default_factory=dict)          # ProfileSet.to_dict()
+    data_cap: dict = Field(default_factory=dict)                # {enabled, limit_mb, period, action, slow_kbps}
+    queues: dict = Field(default_factory=dict)                  # QueueManager.to_dict()
+    retry_policy: dict = Field(default_factory=dict)            # {base_delay, factor, max_delay}
+    hash_checksum_files: bool = False                           # look for .sha256/.md5 next to downloads
+
     # Password search remains opt-in and uses only a user-selected local file.
     auto_extract_archives: bool = True
     archive_max_files: int = 10000

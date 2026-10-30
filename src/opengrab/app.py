@@ -246,10 +246,29 @@ def run_gui_mode(settings: Optional[Settings] = None,
                 draw.polygon([(27, 17), (37, 17), (37, 34), (45, 34),
                               (32, 49), (19, 34), (27, 34)], fill="#10212b")
             
+            def switch_profile(name):
+                def run(icon, item):
+                    try:
+                        manager.flow.switch_profile(name)
+                        settings.save()
+                        manager._global_limiter.set_rate(manager.flow.effective_limit_bps())
+                        server.broadcast("flow", manager.flow.status())
+                    except Exception:
+                        _log.warning("could not switch speed profile", exc_info=True)
+                return run
+
+            def profile_items():
+                # W5: speed profiles switchable from the tray (spec 6c)
+                for name in manager.flow.profiles.names():
+                    yield pystray.MenuItem(
+                        name, switch_profile(name), radio=True,
+                        checked=lambda item, n=name: manager.flow.profiles.active.name == n)
+
             tray = pystray.Icon(
                 "OpenGrab", image, "OpenGrab",
                 menu=pystray.Menu(
                     pystray.MenuItem("Open OpenGrab", show_window, default=True),
+                    pystray.MenuItem("Speed profile", pystray.Menu(profile_items)),
                     pystray.MenuItem("Monitor copied links", toggle_monitor,
                                      checked=lambda item: settings.clipboard_monitor_enabled),
                     pystray.MenuItem("Exit", exit_app),
