@@ -91,8 +91,10 @@ def test_cloudflare_page_parks_shared_inbox_entry_then_browser_clears_it(site, m
     with running_server() as srv:
         a = srv.manager.add_url(site + "/cf/one.zip")
         b = srv.manager.add_url(site + "/cf/two.zip")
-        la = _wait(lambda: _link(srv, a.id).status.value == "captcha" and _link(srv, a.id))
-        lb = _wait(lambda: _link(srv, b.id).status.value == "captcha" and _link(srv, b.id))
+        # the status flips a moment before the inbox entry id is stored (raced on CI)
+        parked = lambda lid: (l := _link(srv, lid)).status.value == "captcha" and l.extra.get("captcha_request_id") and l
+        la = _wait(lambda: parked(a.id))
+        lb = _wait(lambda: parked(b.id))
         assert la.captcha_kind == "cf_js" and la.extra["captcha_ray_id"] == "8a1b2c3d4e5f6a7b-FRA"
         rid = la.extra["captcha_request_id"]
         assert lb.extra["captcha_request_id"] == rid  # one entry per host and kind
