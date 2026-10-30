@@ -1,137 +1,235 @@
-# OpenGrab
+<p align="center">
+  <img src="src/opengrab/assets/icon.png" width="96" alt="OpenGrab">
+</p>
 
-OpenGrab is a local-first link grabber and resumable downloader with a web UI,
-plugin hooks, CAPTCHA workflows, and a `yt-dlp` bridge. It is an early
-development build, not a JDownloader replacement yet. See the implementation
-gaps at the end before relying on it for unattended downloads.
+<h1 align="center">OpenGrab</h1>
 
-## Requirements and quick start
+<p align="center"><strong>A Better Internet Download Manager</strong></p>
 
-- Python 3.12 or newer for the source install.
-- Windows desktop mode needs the Microsoft WebView2 Runtime. Linux and macOS
-  need a pywebview-supported web engine; the tray backend depends on the OS.
-- Use a virtual environment, then run `python -m pip install -e .`.
-- Start the desktop UI with `python -m opengrab` or the API/web UI with
-  `python -m opengrab --headless`.
-- Open `http://127.0.0.1:5678/`. The server binds to loopback by default.
-- Check the install with `python -m opengrab --smoke-test`; it performs a real
-  small download and checks the known size and SHA-256.
+<p align="center">
+  Free and open source. No ads, no nag screens, no subscription.<br>
+  Multi-connection downloads, a LinkGrabber that catches links from anywhere, captchas and Cloudflare handled,<br>
+  BitTorrent, automation and remote control, in a classic desktop interface that stays out of your way.
+</p>
 
-Useful CLI options: `--gui`, `--headless`, `--port`, `--bind`, `--data-dir`,
-repeatable `--grab URL`, `--list-plugins`, `--version`, `--help`.
+<p align="center">
+  <a href="https://github.com/TristinL6982/opengrab/actions/workflows/ci.yml"><img src="https://github.com/TristinL6982/opengrab/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TristinL6982/opengrab/releases"><img src="https://img.shields.io/github/v/release/TristinL6982/opengrab?include_prereleases&label=release" alt="Release"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/headless-Linux%20%7C%20macOS%20%7C%20Docker-555" alt="Headless on Linux, macOS and Docker">
+  <img src="https://img.shields.io/badge/python-3.12-3776ab" alt="Python 3.12">
+</p>
 
-## Configuration and storage
+<p align="center">
+  <img src="docs/screenshots/downloads.png" alt="OpenGrab downloading several files at once" width="900">
+</p>
 
-Settings and the queue live under `%APPDATA%/OpenGrab` on Windows,
-`~/Library/Application Support/OpenGrab` on macOS, or
-`$XDG_DATA_HOME/OpenGrab` (default `~/.local/share/OpenGrab`) on Linux.
-Downloads default to `~/Downloads`. Configure the download folder and
-concurrency in Settings.
+## Why OpenGrab
 
-Queued links start by descending user priority, then older items first. The
-speed limit is shared across all active downloads. Eligible large downloads
-use parallel byte ranges; if a server rejects ranges, OpenGrab restarts that
-file as a single stream. Interrupted downloads retain their `.part` data and
-resume where the server supports it.
+- **Fast where it counts.** Every download is split into up to 16 connections. When one connection slows down, the others take over its remaining range, so a single bad mirror never holds up the file.
+- **Resumes anything.** Network drop, crash, shutdown or power cut: OpenGrab keeps a checkpoint next to the file and continues where it stopped, verifying that the remote file has not changed.
+- **Catches links everywhere.** Paste them, copy them, drop them on the window, send them from the browser extension, use Click'n'Load buttons, crawl a page with the site spider, or drop a `.crawljob` file in a watched folder.
+- **Handles the hard sites.** Cloudflare and DDoS-Guard checks, captchas, logins and premium accounts are part of the normal flow, not an error message.
+- **Does the rest for you.** Extraction, checksums, virus scans, categories, renaming rules, scheduled speed windows, data caps, and "shut down when done".
+- **Yours to run anywhere.** A Windows desktop app with a tray icon, or a headless server in Docker that you control from your phone, the command line, or scripts.
+- **Light.** Around 80 MB on disk, no bundled AI models, no GPU needed. Optional add-ons such as the local captcha solver are downloaded only when you turn them on.
 
-Environment overrides:
+## See it in action
 
-| Variable | Purpose |
+Adding links and watching them download:
+
+<p align="center"><img src="docs/media/tour-add.gif" alt="Adding links to OpenGrab" width="860"></p>
+
+The dashboard, the LinkGrabber, Settings and the dark theme:
+
+<p align="center"><img src="docs/media/tour-views.gif" alt="OpenGrab's views and dark theme" width="860"></p>
+
+An MP4 of the full tour is in [docs/media/tour.mp4](docs/media/tour.mp4).
+
+## Install
+
+### Windows
+
+Download `OpenGrab-<version>-setup.exe` from the [latest release](https://github.com/TristinL6982/opengrab/releases/latest) and run it. The wizard lets you choose:
+
+- the install folder (default `C:\Program Files\OpenGrab`),
+- Start menu and desktop shortcuts,
+- starting OpenGrab in the tray when you sign in,
+- which links and files Windows should hand to OpenGrab: `magnet:` and `opengrab://` links, `.torrent`, `.crawljob` and `.dlc` files,
+- an optional download of the small local captcha solver.
+
+Your settings and queue live in `%APPDATA%\OpenGrab`. The uninstaller asks before deleting them.
+
+Prefer no installer? Download `OpenGrab-<version>-win64.zip`, unpack it anywhere and run `OpenGrab.exe`.
+
+Requirements: 64-bit Windows 10 or 11 and the Microsoft Edge WebView2 Runtime, which Windows 11 and recent Windows 10 installs already have. The first start of an unsigned build shows a SmartScreen warning: choose *More info*, then *Run anyway*.
+
+### From source (Windows, Linux, macOS)
+
+```bash
+git clone https://github.com/TristinL6982/opengrab.git
+cd opengrab
+python -m venv .venv
+.venv/Scripts/pip install -e .        # Linux and macOS: .venv/bin/pip
+python -m opengrab                    # desktop window on Windows
+python -m opengrab --headless         # API and web UI only, any platform
+```
+
+Python 3.12 or newer. On Linux and macOS the headless server and web UI are tested in CI; the native window and tray are Windows-only for now.
+
+### Docker
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+The web UI is on port 5678. The API token is written to `./config/settings.json`. Keep the container behind an HTTPS reverse proxy or a private network: OpenGrab refuses plain HTTP from other machines unless you allow it in `.env`.
+
+## Features
+
+### Downloads
+
+| | |
 |---|---|
-| `OPENGRAB_DATA_DIR` | Settings, queue, and user plugins directory |
-| `OPENGRAB_DOWNLOAD_DIR` | Download directory |
-| `OPENGRAB_BIND` / `OPENGRAB_API_HOST` | Bind address; default `127.0.0.1` |
-| `OPENGRAB_PORT` / `OPENGRAB_API_PORT` | Listen port; default `5678` |
-| `OPENGRAB_BASE_PATH` | Reverse-proxy URL prefix such as `/opengrab` |
-| `TZ` | Container timezone setting |
+| **Multi-connection** | Up to 16 connections per file. The slowest segment is split while the download runs, the way IDM does it. |
+| **Resume and recovery** | A checkpoint file next to every download. Resumes after crashes and power loss, and checks ETag and Last-Modified before continuing. Falls back to a single stream on servers that ignore ranges. |
+| **Limits that follow your day** | Global and per-download speed limits, named speed profiles (Normal, Gaming, Night), scheduled windows, per-site connection limits, and a daily or monthly data cap. |
+| **Queues and priorities** | Several queues with their own slot counts, priorities, per-queue pause, and a "when done" action: exit, sleep, hibernate or shut down. |
+| **Media** | Video and audio from thousands of sites through yt-dlp, including HLS streams, playlists and channels with a review step before anything is queued. |
+| **Checksums** | Pass a SHA-256 or MD5 with a link and OpenGrab verifies the file when it finishes. |
+| **Keep the PC awake** | Prevents standby while downloads run, if you want it to. |
 
-The GUI has a tray menu for showing the window and enabling/disabling copied
-link monitoring. Clipboard links go to LinkGrabber for review; they are never
-queued automatically by the watcher. The UI also provides download-root
-scoped file operations, notifications, audio playback, and an opt-in web
-terminal. Terminal commands run with the OpenGrab process permissions, and
-require both the Settings toggle and the API bearer token.
+### Collecting links
 
-ZIP/CBZ, 7z, and TAR-family files can be extracted after download. Extraction
-rejects traversal paths, links, excessive file counts, expanded sizes above
-the configured limit, and extreme ZIP compression ratios; it writes to a new
-folder and preserves the source archive. Encrypted ZIP/7z/RAR password lookup is
-off unless you set a local password-list file in Settings. That file is read
-as UTF-8, with a 1 MiB / 1,000-entry limit; keep it private. RAR uses the
-`rarfile` adapter and needs a compatible `unrar`, `unar`, or `bsdtar` program on `PATH`;
-that external tool is not bundled, and RAR extraction has not yet been verified
-against a RAR fixture.
+| | |
+|---|---|
+| **LinkGrabber** | Links wait in a review list where each one is checked online first, with size and availability. Add them one by one or all at once. |
+| **Clipboard** | Copy a link anywhere and it shows up for review. Never queued behind your back. |
+| **Browser extension** | Chromium browsers (Chrome, Edge, Brave, Opera, Vivaldi): send a link, the page's links, selected text or a started browser download to OpenGrab. |
+| **Click'n'Load** | Buttons on download pages hand their links to OpenGrab on port 9666, as they would to JDownloader. |
+| **Site spider** | Crawl a page or a whole site to a chosen depth and pick the file types you want. |
+| **Drag and drop** | Drop links or any text with links in it onto the window. |
+| **Folder Watch** | Drop link lists or `.crawljob` files into a watched folder and they are picked up automatically. |
+| **Link filters and Packagizer** | Block or allow links by pattern, and rename or sort downloads into folders with rules, with a live preview. |
 
-## Remote access and security
+### Difficult sites
 
-Keep the default loopback binding for local use. Remote clients require the
-owner API token and HTTPS. Put OpenGrab behind a trusted HTTPS reverse proxy;
-the proxy must send `X-Forwarded-Proto: https` and should restrict access to
-trusted users. For proxied remote requests, send `Authorization: Bearer <token>`.
-The generated token is stored in `settings.json`; protect that file and rotate
-the token there if it is exposed. Do not forward plain HTTP from an internet
-facing proxy. `OPENGRAB_BASE_PATH` must match the proxy prefix. OpenGrab does
-not currently configure direct TLS itself or provide multi-user accounts.
+| | |
+|---|---|
+| **Cloudflare and DDoS-Guard** | A challenge page is recognised and parked, one entry per site. Solve it once in your own Edge or Chrome and OpenGrab keeps the clearance for the other downloads. |
+| **Captchas** | Image captchas are answered in the download's row or in the Captchas view. Optional solvers: a local OCR add-on (small, CPU only, downloaded on demand), audio challenges, and paid services (2captcha, CapMonster, CapSolver, NopeCHA) with your own key. |
+| **Accounts** | Premium and free accounts per site, with daily quotas and parallel limits per account. Passwords are protected with Windows DPAPI and never shown again. |
+| **Debrid services** | Real-Debrid and AllDebrid links are resolved through your account. |
+| **Proxies and logins** | HTTP, HTTPS and SOCKS proxies, per-site or global, with failover. Basic and Digest logins for servers and proxies. |
+| **Router reconnect** | Trigger a router reconnect for a fresh IP when a host says "wait 30 minutes". |
 
-## Docker
+### BitTorrent
 
-Docker deployment files are included, but Docker is unavailable in the
-development environment, so the image and compose setup have not been built or
-run here. Review the files before exposing a service.
+An optional libtorrent add-on, installed from Settings in one click, adds magnet links and `.torrent` files to the same queue: per-file selection and priorities, a built-in tracker list, UPnP and NAT-PMP port mapping, seeding limits by ratio or time, and the same speed profiles as everything else. Finished `.torrent` downloads can open themselves.
 
-1. Copy `.env.example` to `.env`; choose the host `OPENGRAB_PORT`, and set
-   `OPENGRAB_BASE_PATH` only when the HTTPS proxy uses that URL prefix.
-2. Run `docker compose up -d --build`.
-3. Persist `./config` and `./downloads`; the generated API token is in
-   `./config/settings.json`.
-4. Serve remote access only through an authenticated HTTPS proxy.
+### After the download
 
-The Compose file publishes port 5678 on the host. For a private LAN, firewall
-that port to trusted clients; direct remote HTTP is rejected by the app. There
-is no GPU acceleration requirement for downloading. Synology, unRAID, UID/GID
-mapping, and vendor-specific container steps are not yet verified or
-documented.
+| | |
+|---|---|
+| **Extraction** | ZIP, 7z and TAR archives are unpacked into their own folder, with a private password list for encrypted archives. RAR needs an `unrar` tool on your PATH. |
+| **Virus scan** | Optional scan of every finished file with Windows Defender or any command-line scanner. |
+| **Categories** | Video, Music, Documents, Archives and Programs go into their own folders if you want. |
+| **Files and audio** | Browse the download folder from the app and play audio files right there. |
 
-## Plugins and media
+### Automation and remote control
 
-Built-in plugins include direct HTTP links, generic HTML page extraction, and
-the `yt-dlp` extractor bridge. Add custom Python plugins to the user `plugins`
-folder and use **rescan plugins**. Treat plugins as executable code running
-with OpenGrab's privileges; install only code you trust. The extractor bridge
-does not imply that every upstream site works. Playlist and channel URLs are
-enumerated as reviewable child links (10,000 by default, configurable up to
-50,000); nothing is queued until individual children are selected or “queue
-all” is chosen. Media downloads use the best progressive stream by default,
-with an optional maximum resolution. Separate video/audio streams require
-merging and currently fail with a clear message rather than silently dropping
-audio. Playlist enumeration and format choice have fixture tests; live
-extractor compatibility is not independently verified.
+| | |
+|---|---|
+| **Command line** | `opengrab add <link>`, `list`, `status`, `pause`, `resume`, `start`, `stop`, `remove`, `notifications`. Handy for scripts and AI agents. |
+| **Run a program** | Start any program when a download finishes or fails, with the details in environment variables. |
+| **Webhooks** | JSON posted to your own endpoints, signed with HMAC-SHA256. |
+| **Headless and Docker** | The full web UI on a server, with a health check for your container platform. |
+| **Pairing** | Pair phones, browsers and scripts with a one-time code. Each device gets its own revocable token that can manage downloads but never change settings. |
 
-## Packagizer
+### The app itself
 
-Add rules in the Packagizer tab. Rules are evaluated in order and the first
-matching URL/filename glob or regex decides the rename and/or relative target
-subfolder. Preview shows the selected rule, path, and whether a collision
-already exists. Templates support `{name}`, `{stem}`, `{ext}`, and `{host}`.
-Rule paths and filenames are sanitized and confined to the download directory;
-existing downloads are preserved and new collisions receive numbered names.
+| | |
+|---|---|
+| **Classic look, modern build** | The layout you know from IDM and JDownloader 2: a toolbar, a category tree and a list with real progress bars. Light and dark themes, three row densities, your choice of columns and accent colour. |
+| **Dashboard** | Today's totals, the last 14 days, a live transfer graph, what is downloading now and your busiest sites, in panels you can rearrange. |
+| **Languages** | English and Simplified Chinese. Translations are plain JSON files, so adding a language needs no code. |
+| **Accessibility** | Full keyboard control of the download list, spoken names for every control, visible focus, and WCAG AA colour contrast. |
+| **Import from JDownloader 2** | Bring your download list, LinkGrabber links and main settings across in one step. JDownloader's files are never changed. |
+| **Updates** | One click checks GitHub for a new release, verifies its signature, tests it, and installs it. The previous version is kept so you can go back. |
+| **Plugins** | Declarative site templates in JSON, Python plugins for the rest, a permission system for what a plugin may reach, and a signed plugin catalog format. |
 
-## Current limitations
+## Screenshots
 
-- RAR extraction has an adapter but requires an external tool and is unverified;
-  router reconnect is not implemented.
-- The requested maintained inventories of 110+ hosters, 300+ decryptors, and
-  1,400+ router models are not present. Upstream extractor count is not
-  compatibility evidence.
-- Browser extensions, a remote-control cloud service, diagnostics export,
-  and Linux/macOS packaged desktop builds are not implemented/verified.
-- The Windows onedir executable passes `--version`, plugin discovery, and the
-  real-download smoke test. GUI lifecycle is mock-tested; WebView2/tray behavior
-  still needs a real interactive smoke test. The executable is under
-  `build/release/OpenGrab/` after a build.
-- Docker is unverified. Do not treat the current build as production-ready.
+| | |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![LinkGrabber](docs/screenshots/linkgrabber.png) |
+| Dashboard with the live transfer graph | LinkGrabber with online checks |
+| ![Add links](docs/screenshots/add-links.png) | ![Accounts](docs/screenshots/accounts.png) |
+| Adding links with a checksum, priority and queue | Site accounts, server and proxy logins |
+| ![Dark theme](docs/screenshots/downloads-dark.png) | ![Simplified Chinese](docs/screenshots/downloads-zh.png) |
+| The dark theme | Simplified Chinese |
+| ![Settings](docs/screenshots/settings.png) | ![Dark dashboard](docs/screenshots/dashboard-dark.png) |
+| Settings | The dashboard in the dark theme |
 
-See `PROJECT_SPEC.md`, `PROJECT_STATUS.md`, and `PROGRESS.md` for requirements,
-decisions, and evidence. Keep the download directory backed up: interrupted
-downloads retain `.part` files for resumption, but this prototype does not yet
-provide all archival/recovery guarantees in the product specification.
+## Browser extension
+
+The extension lives in [`extension/`](extension/). Until it is on the Chrome Web Store, load it unpacked:
+
+1. Open `chrome://extensions` (or `edge://extensions`), turn on *Developer mode* and choose *Load unpacked*. Pick the `extension` folder.
+2. In OpenGrab, open Settings, Paired devices, and pair a new device.
+3. Paste the app address and the device token into the extension's options page.
+
+From then on, right-click any link or page to send it to OpenGrab, and let the extension catch the downloads the browser would otherwise start itself.
+
+## Command line
+
+```bash
+opengrab add https://example.com/big.iso --hash sha256:…
+opengrab list
+opengrab status
+opengrab pause <id>
+```
+
+The command talks to the running app. Links, `magnet:` and `opengrab://` addresses and `.torrent` or `.crawljob` files given to `OpenGrab.exe` are opened in the running copy too, which is how Windows hands them over.
+
+## How it compares
+
+| | OpenGrab | Internet Download Manager | JDownloader 2 |
+|---|---|---|---|
+| Price | Free, open source | Paid licence | Free |
+| Multi-connection downloads with dynamic splitting | Yes | Yes | Yes |
+| LinkGrabber with online checks | Yes | No | Yes |
+| Captcha and Cloudflare handling | Yes | No | Yes |
+| BitTorrent | Add-on | No | No |
+| Headless server, Docker, pairing for phones and scripts | Yes | No | Partial |
+| Command line and webhooks | Yes | No | Partial |
+| Runs without Java or a browser plugin | Yes | Yes | No |
+| Disk footprint | About 80 MB | Small | Several hundred MB |
+
+## Privacy and security
+
+- Everything runs on your machine. OpenGrab contacts only the sites you download from, GitHub for update checks when you ask, and the solver services you configure.
+- The local API listens on `127.0.0.1` and needs a token on every request. Other machines get in only with a paired device token over HTTPS, or over plain HTTP if you allow it explicitly.
+- Settings that make OpenGrab run programs (event hooks, reconnect scripts, scanner paths) can only be changed from the computer it runs on.
+- Updates are installed only when their Ed25519 signature matches the key built into the app.
+
+## Project status
+
+OpenGrab is at version 0.1.0. Every feature above is covered by automated tests (over 900 of them, run on every push on Windows, Linux, macOS and in Docker), and the Windows build is installed, started and uninstalled by the pipeline before it is published.
+
+Things that are built but not yet verified against the real world, and the decisions still open, are listed in [PROJECT_SPEC.md, section 9](PROJECT_SPEC.md#9-open-decisions-and-known-gaps-recorded-2026-10-30). The current verified state is in [PROGRESS.md](PROGRESS.md). Bug reports with a link that misbehaves are the most useful thing you can send.
+
+## Development
+
+```bash
+.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider
+cd build && ../.venv/Scripts/python.exe -m PyInstaller --clean --noconfirm --distpath release OpenGrab.spec
+build/release/OpenGrab/OpenGrab.exe --smoke-test
+```
+
+The code is plain Python 3.12 with a vanilla JavaScript UI and no build step. Site support is reimplemented from public site behaviour; nothing is ported from other download managers.
+
+## License
+
+OpenGrab is free software. See [LICENSE](LICENSE).
