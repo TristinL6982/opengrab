@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse, unquote
 
-from ..base import (SitePlugin, GrabResult, ResolveResult, PluginError,
+from ..base import (SitePlugin, GrabResult, ResolveResult, PluginError, CaptchaRequired,
                     PluginContext)
 
 FILE_EXTS = {
@@ -68,8 +68,11 @@ class DirectLinkPlugin(SitePlugin):
         headers = {}
         try:
             r = ctx.client.request("HEAD", url, timeout=ctx.settings.timeout_s)
-            if r.status_code in (405, 403, 501) or not r.headers:
-                r = ctx.client.get(url, max_bytes=2048)
+            if r.status_code in (405, 403, 501, 429, 503) or not r.headers:
+                # a GET body is needed to recognise a challenge page (W2)
+                r = ctx.client.get(url, max_bytes=200000)
+        except CaptchaRequired:
+            raise  # W2: a challenge page; the engine parks the link
         except Exception as e:
             raise PluginError(f"HEAD/GET failed: {e}")
         ct = r.headers.get("content-type", "").lower()

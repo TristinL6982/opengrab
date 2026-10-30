@@ -121,6 +121,26 @@ def _open_session(settings) -> object:
                         allow_redirects=True)
 
 
+def _raise_for_challenge(url: str, r) -> None:
+    """W2: a Cloudflare/DDoS-Guard/captcha page instead of the file."""
+    from ..challenge import CHALLENGE_STATUSES, raise_for_challenge
+    if r.status_code not in CHALLENGE_STATUSES:
+        return
+    ctype = str(r.headers.get("content-type") or "").lower()
+    if "html" not in ctype and "cf-mitigated" not in {k.lower() for k in r.headers}:
+        return
+    body = b""
+    try:
+        for chunk in r.iter_content(chunk_size=16384):
+            body += chunk
+            if len(body) >= 200000:
+                break
+    except Exception:
+        pass
+    raise_for_challenge(str(getattr(r, "url", "") or url), r.status_code,
+                        dict(r.headers), body)
+
+
 def _is_transient(e: Exception) -> bool:
     msg = str(e).lower()
     return any(k in msg for k in (
@@ -267,18 +287,24 @@ class LinkDownload:
 
     def _probe(self) -> _Probe:
         sess = _open_session(self.settings)
+        headers = dict(self.headers)
+        if self._cookies:  # the probe must carry the same cookies as the transfer
+            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
         try:
-            r = sess.head(self.url, headers=self.headers,
+            r = sess.head(self.url, headers=headers,
                           timeout=30.0, allow_redirects=True)
-            if r.status_code in (405, 403, 501):
-                r = sess.get(self.url, headers={**self.headers,
+            if r.status_code in (405, 403, 501, 429, 503):
+                r = sess.get(self.url, headers={**headers,
                                                 "Range": "bytes=0-0"},
                              stream=True, timeout=30.0, allow_redirects=True)
-                r.close()
+                try:
+                    _raise_for_challenge(self.url, r)
+                finally:
+                    r.close()
             size = _int_hdr(r.headers.get("content-length"))
             if size is None:
                 # no content-length on HEAD -> ranged GET probe
-                r2 = sess.get(self.url, headers={**self.headers,
+                r2 = sess.get(self.url, headers={**headers,
                                                  "Range": "bytes=0-0"},
                               stream=True, timeout=30.0,
                               allow_redirects=True)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from . import addons_api, notify
+from . import addons_api, captcha, notify
 
 log = logging.getLogger("opengrab.features")
 
@@ -17,6 +17,7 @@ log = logging.getLogger("opengrab.features")
 # Modules are imported statically so tools/import_audit.py can see them.
 FEATURES = (
     ("notify", notify),
+    ("captcha", captcha),
     ("addons", addons_api),
 )
 

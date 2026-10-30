@@ -142,27 +142,61 @@ class HttpClient:
     # -- core --------------------------------------------------------------
     def request(self, method: str, url: str, *, data=None, json_body=None,
                 headers: Optional[dict] = None, timeout: Optional[float] = None,
-                follow: bool = True, max_bytes: Optional[int] = None) -> Response:
+                follow: bool = True, max_bytes: Optional[int] = None,
+                detect_challenges: bool = True) -> Response:
         s = self.settings
+        extra_headers = headers
         headers = dict(self._base_headers())
         if json_body is not None:
             headers.setdefault("content-type", "application/json")
-        (headers or {}).update(headers or {})
+        # caller headers override the defaults (they were silently dropped before)
+        for k, v in (extra_headers or {}).items():
+            headers[str(k).lower()] = v
         headers = {k: v for k, v in headers.items() if v is not None}
         cookie_hdr = "; ".join(f"{k}={v}" for k, v in self._cookies_for(url).items())
         if cookie_hdr:
             headers["cookie"] = cookie_hdr
+        self._apply_clearance(url, headers)
         timeout = timeout if timeout is not None else s.timeout_s
-        proxy = s.proxy or None
+        proxy = self._proxy_for(url)
 
         t0 = time.time()
         if HAVE_CURL_CFFI:
-            return self._request_curl(method, url, data=data, json_body=json_body,
+            resp = self._request_curl(method, url, data=data, json_body=json_body,
+                                      headers=headers, timeout=timeout, proxy=proxy,
+                                      follow=follow, max_bytes=max_bytes, t0=t0)
+        else:
+            resp = self._request_httpx(method, url, data=data, json_body=json_body,
                                        headers=headers, timeout=timeout, proxy=proxy,
                                        follow=follow, max_bytes=max_bytes, t0=t0)
-        return self._request_httpx(method, url, data=data, json_body=json_body,
-                                   headers=headers, timeout=timeout, proxy=proxy,
-                                   follow=follow, max_bytes=max_bytes, t0=t0)
+        if detect_challenges:
+            from .challenge import raise_for_challenge
+            raise_for_challenge(resp.url or url, resp.status_code, resp.headers, resp.content)
+        return resp
+
+    # -- W2: Cloudflare clearance and per-host proxy hooks ------------------
+    clearance = None  # a clearance.ClearanceStore, set by DownloadManager
+
+    def _apply_clearance(self, url: str, headers: dict) -> bool:
+        store = self.clearance
+        if store is None:
+            return False
+        host = urlparse(url).hostname or ""
+        c = store.get(host) if host else None
+        if c is None:
+            return False
+        headers["user-agent"] = c.user_agent
+        jar = {}
+        for part in (headers.get("cookie") or "").split(";"):
+            if "=" in part:
+                k, v = part.strip().split("=", 1)
+                jar[k] = v
+        jar.update(c.cookies)
+        headers["cookie"] = "; ".join(f"{k}={v}" for k, v in jar.items())
+        return True
+
+    def _proxy_for(self, url: str):
+        return self.settings.proxy or None
 
     def _request_curl(self, method, url, data, json_body, headers, timeout,
                       proxy, follow, max_bytes, t0) -> Response:
@@ -229,8 +263,9 @@ class HttpClient:
                                for k, v in self._cookies_for(url).items())
         if cookie_hdr:
             h["cookie"] = cookie_hdr
+        self._apply_clearance(url, h)
         timeout = timeout if timeout is not None else max(s.timeout_s, 60.0)
-        proxy = s.proxy or None
+        proxy = self._proxy_for(url)
 
         if HAVE_CURL_CFFI:
             imp = s.impersonate or "chrome"

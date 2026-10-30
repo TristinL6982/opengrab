@@ -87,6 +87,8 @@ class GenericPagePlugin(SitePlugin):
         host = urlparse(url).netloc
         try:
             r = ctx.client.get(url, timeout=ctx.settings.grab_timeout_s)
+        except CaptchaRequired:
+            raise  # W2: a challenge page; the engine parks the link
         except Exception as e:
             raise PluginError(f"fetch failed: {e}")
         if r.status_code == 451 or r.status_code == 402:

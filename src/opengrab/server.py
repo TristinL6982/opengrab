@@ -178,6 +178,9 @@ class ApiServer:
         self._thread: Optional[threading.Thread] = None
         # -- features wired in after M12 (see routes.py, features/) --------
         self.router = Router()
+        # (method, regex, fn) routes that carry their own credential (e.g. a
+        # one-time key in the URL) and are dispatched before the bearer check
+        self.public_routes: list = []
         from .features import install_all
         self.features = install_all(self)
 
@@ -607,6 +610,8 @@ def _make_handler(srv: ApiServer):
                     return
                 code, payload = srv.access.pair_start(scope)
                 return self._json(payload, code)
+            if self._public_route("POST", p, parse_qs(u.query), None):
+                return
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
             try:
@@ -931,6 +936,21 @@ def _make_handler(srv: ApiServer):
                 return None
             return l
 
+        def _public_route(self, method: str, p: str, q: dict, body) -> bool:
+            import re as _re
+            for m_, pattern, fn in srv.public_routes:
+                if m_ != method:
+                    continue
+                match = _re.fullmatch(pattern, p)
+                if not match:
+                    continue
+                if method == "GET":
+                    fn(self, *match.groups(), q)
+                else:
+                    fn(self, *match.groups(), q, self._body() if body is None else body)
+                return True
+            return False
+
         def _route(self, method: str, p: str, q: dict, body) -> bool:
             route, params = srv.router.match(method, p)
             if route is None:
@@ -982,6 +1002,8 @@ def _make_handler(srv: ApiServer):
                     if not file_path.is_file():
                         return self._err(404, "audio file not found")
                     return self._serve_file(file_path, attachment=False)
+            if self._public_route("GET", p, q, None):
+                return
             if p == "/api/events" and q.get("ticket"):
                 with srv._sse_tickets_lock:
                     expires = srv._sse_tickets.pop(q["ticket"][0], 0)

@@ -22,14 +22,15 @@ log = logging.getLogger("opengrab.captcha.chain")
 
 
 class SolverChain:
-    def __init__(self, settings: Settings, client=None):
+    def __init__(self, settings: Settings, client=None, clearance_store=None):
         self.settings = settings
         self.client = client
+        self.clearance_store = clearance_store
         self.solvers: list[BaseSolver] = [
             DdddOCRSolver(settings),
             TesseractSolver(settings),
             AudioCaptchaSolver(settings),
-            BrowserCaptchaSolver(settings),
+            BrowserCaptchaSolver(settings, store=clearance_store),
             ManualSolver(settings),
             TwoCaptchaSolver(settings),
             CapMonsterSolver(settings),

@@ -127,6 +127,11 @@ function onEvent(kind, payload) {
     return;
   }
   if (kind === "addon") { loadAddons(); return; }
+  if (kind === "captcha") {
+    setCaptchaBadge(payload.pending || 0);
+    if ($("#tab-captchas")?.classList.contains("active")) renderCaptchas();
+    return;
+  }
   if (payload && payload.id && payload.status) {
     const isNew = !S.links.has(payload.id);
     S.links.set(payload.id, payload);
@@ -237,7 +242,12 @@ function rowActions(l) {
       b.push(sm("stop", "stop", "danger"));
       break;
     case "captcha":
-      b.push(`<span class="inlineform" data-for="${l.id}"></span>`);
+      if (l.extra?.captcha_request_id) {
+        b.push(sm("solve in browser", "captcha-browser-link"), sm("retry", "captcha-retry"),
+               sm("remove", "remove", "danger"));
+      } else {
+        b.push(`<span class="inlineform" data-for="${l.id}"></span>`);
+      }
       break;
     case "login":
       b.push(`<span class="inlineform" data-for="${l.id}"></span>`);
@@ -284,6 +294,7 @@ function linkRow(l, showStatus = true) {
       <div class="t">${esc(l.title || l.filename || l.url)}</div>
       <div class="u">${esc(l.url)}${l.plugin ? " · " + esc(l.plugin) : ""}</div>
       ${l.status === "error" && l.error ? `<div class="u" style="color:var(--err)">${esc(l.error)}</div>` : ""}
+      ${l.status === "captcha" && l.extra?.captcha_request_id ? `<div class="u" style="color:var(--warn)">Waiting for a ${esc(l.captcha_kind)} check on ${esc((l.extra.captcha_site_url || l.url).split("/")[2] || "")}${l.extra.captcha_ray_id ? " · Ray ID " + esc(l.extra.captcha_ray_id) : ""}. See the Captchas tab.</div>` : ""}
       ${l.status === "paywall" && l.paywall_note ? `<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>` : ""}
       ${l.status === "finished" && l.path ? `<div class="u" style="color:var(--ok)">${esc(l.path)}</div>` : ""}
       ${l.extra?.archive_extraction ? `<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>` : ""}
@@ -420,6 +431,37 @@ function refreshData() {
   if ($("#tab-packagizer")?.classList.contains("active")) renderPackagizer();
 }
 
+/* ============================================================ captchas */
+function setCaptchaBadge(n) {
+  const b = $("#captcha-badge");
+  if (!b) return;
+  b.textContent = String(n || 0);
+  b.classList.toggle("hidden", !n);
+}
+async function renderCaptchas() {
+  try {
+    const r = await api("/api/captcha/inbox");
+    const pend = r.pending || [];
+    setCaptchaBadge(pend.length);
+    const el = $("#captcha-list");
+    if (el) el.innerHTML = pend.length ? pend.map(c => {
+      const left = Math.max(0, Math.round((c.expires_at * 1000 - Date.now()) / 60000));
+      const links = (c.links || []).map(x => esc(x.title)).join(", ");
+      return `<div class="krow"><span class="st captcha">${esc(c.kind)}</span>
+        <span class="grow"><b>${esc(c.host)}</b> · ${c.links.length} download(s)${links ? ": " + links : ""}
+        <div class="u">expires in ${left} min</div></span>
+        ${c.solve_in_browser ? `<button class="sm primary" data-act="captcha-browser" data-id="${c.id}" ${c.browser_busy ? "disabled" : ""}>${c.browser_busy ? "browser open…" : "solve in browser"}</button>` : ""}
+        ${c.harvest ? `<button class="sm" data-act="captcha-harvest" data-id="${c.id}">solver page</button>` : ""}
+        <button class="sm danger" data-act="captcha-skip" data-id="${c.id}">skip</button></div>`;
+    }).join("") : '<div class="empty">Nothing is waiting for a captcha.</div>';
+    const cl = $("#clearance-list");
+    if (cl) cl.innerHTML = (r.clearances || []).length ? r.clearances.map(c =>
+      `<div class="krow"><code>${esc(c.host)}</code><span class="grow hint">valid until ${new Date(c.expires_at * 1000).toLocaleTimeString()}</span>
+       <button class="sm danger" data-act="clearance-del" data-host="${esc(c.host)}">forget</button></div>`).join("")
+      : '<div class="empty">No saved clearances.</div>';
+  } catch {}
+}
+
 async function renderNotifications() {
   try {
     const items = await api("/api/notifications");
@@ -545,6 +587,33 @@ async function act(action, el) {
         refreshData();
         break;
       }
+      case "captcha-browser":
+        await api(`/api/captcha/${id}/browser`, "POST", {});
+        toast("Opening the site in a browser window. Pass the check there.", "ok");
+        await renderCaptchas();
+        return;
+      case "captcha-browser-link": {
+        const l = S.links.get(id);
+        const rid = l?.extra?.captcha_request_id;
+        if (rid) { await api(`/api/captcha/${rid}/browser`, "POST", {}); toast("Opening the site in a browser window.", "ok"); }
+        return;
+      }
+      case "captcha-harvest": {
+        const r = await api(`/api/captcha/${id}/harvest-link`, "POST", {});
+        window.open(withBasePath(r.url.replace(BASE_PATH, "")), "_blank", "noopener,width=480,height=640");
+        toast(r.note, "");
+        return;
+      }
+      case "captcha-skip":
+        if (!confirm("Skip this captcha? Waiting downloads will be marked as failed.")) return;
+        await api(`/api/captcha/${id}/skip`, "POST", {});
+        await renderCaptchas();
+        break;
+      case "captcha-retry": await api(`/api/links/${id}/captcha-retry`, "POST", {}); break;
+      case "clearance-del":
+        await api(`/api/captcha/clearances/${encodeURIComponent(el.dataset.host)}`, "DELETE");
+        await renderCaptchas();
+        return;
       case "notif-read":
         await api(`/api/notifications/${encodeURIComponent(id)}/read`, "POST", {});
         await renderNotifications();
@@ -574,6 +643,7 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   if (t.dataset.tab === "settings") loadSettings();
   if (t.dataset.tab === "linkgrabber") renderLinkGrabber();
   if (t.dataset.tab === "notifications") renderNotifications();
+  if (t.dataset.tab === "captchas") renderCaptchas();
   if (t.dataset.tab === "files") renderFiles();
   if (t.dataset.tab === "packagizer") renderPackagizer();
   refreshData();
@@ -970,6 +1040,7 @@ async function loadPluginHealth() {
   renderGraph();
   refreshData();
   refreshUnread();
+  renderCaptchas();
   loadPluginHealth();
   connectSSE();
   // PWA service worker (best effort; http contexts only register on https/localhost)

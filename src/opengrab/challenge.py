@@ -87,3 +87,43 @@ def detect_challenge(status: int, headers: dict, body: Union[str, bytes, None]) 
         return make(ChallengeKind.TURNSTILE, "turnstile challenge")
 
     return Challenge(ChallengeKind.NONE, reason="")
+
+# --- W2: wiring helpers -------------------------------------------------------
+CHALLENGE_STATUSES = (403, 429, 503)
+# solved by opening the site in a real browser (clearance cookies)
+BROWSER_KINDS = frozenset({ChallengeKind.CF_JS.value, ChallengeKind.CF_TURNSTILE.value,
+                           ChallengeKind.DDOS_GUARD.value})
+# solved by a widget token (harvest page, paid solver or browser)
+WIDGET_KINDS = frozenset({ChallengeKind.RECAPTCHA.value, ChallengeKind.HCAPTCHA.value,
+                          ChallengeKind.TURNSTILE.value})
+INBOX_KINDS = BROWSER_KINDS | WIDGET_KINDS
+
+
+class ChallengeBlocked(Exception):
+    """The site refused the request outright (e.g. Cloudflare error 1020)."""
+
+
+def check_response(status: int, headers: dict, body) -> Optional[Challenge]:
+    """Return the challenge on an error response, or None.
+
+    Only 403, 429 and 503 are inspected: a normal 200 page that merely
+    contains a captcha widget is left to the plugin.
+    """
+    if status not in CHALLENGE_STATUSES:
+        return None
+    c = detect_challenge(status, headers, body)
+    return None if c.kind == ChallengeKind.NONE else c
+
+
+def raise_for_challenge(url: str, status: int, headers: dict, body) -> None:
+    """Raise CaptchaRequired for a solvable challenge, ChallengeBlocked for a block."""
+    c = check_response(status, headers, body)
+    if c is None:
+        return
+    if c.kind == ChallengeKind.CF_BLOCK:
+        ray = f" (Ray ID {c.ray_id})" if c.ray_id else ""
+        raise ChallengeBlocked(f"blocked by Cloudflare: access denied{ray}")
+    from .plugins.base import CaptchaRequired  # lazy: avoid an import cycle
+    raise CaptchaRequired(kind=c.kind.value, sitekey=c.sitekey or "", site_url=url,
+                          extra={"challenge": c.kind.value, "ray_id": c.ray_id or "",
+                                 "reason": c.reason})

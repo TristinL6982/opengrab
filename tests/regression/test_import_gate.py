@@ -12,8 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 KNOWN_ORPHANS = {
-    "accountauth", "archives", "avscan", "captcha.harvest", "captcha.inbox",
-    "categories", "challenge", "cnl", "cnl_server", "cookies", "debrid",
+    "accountauth", "archives", "avscan", 
+    "categories", "cnl", "cnl_server", "cookies", "debrid",
     "hashverify", "hostlimits", "linkcheck", "netconfig",
     "plugins.marketplace", "plugins.permissions", "plugins.sandbox",
     "plugins.sdk", "plugins.updates", "portmap", "premium", "proxies",

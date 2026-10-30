@@ -80,6 +80,7 @@ class Settings(BaseModel):
     captcha_browser_enabled: bool = False   # opt-in real-browser Cloudflare solver
     captcha_browser_engine: str = "edge"    # edge (CDP) | camoufox
     captcha_manual_timeout_s: int = 120
+    captcha_inbox_max_pending: int = 50       # W2: pending challenges kept for a human
     captcha_auto_failover: bool = True # try cheaper/faster solvers first, escalate
 
     # grabbing

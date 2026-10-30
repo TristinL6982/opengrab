@@ -25,6 +25,7 @@
       <button data-tab="queue" class="tab active">Queue</button>
       <button data-tab="all" class="tab">All Links</button>
       <button data-tab="linkgrabber" class="tab">LinkGrabber</button>
+      <button data-tab="captchas" class="tab">Captchas <span id="captcha-badge" class="badge-count hidden">0</span></button>
       <button data-tab="accounts" class="tab">Accounts</button>
       <button data-tab="filters" class="tab">Filters</button>
       <button data-tab="packagizer" class="tab">Packagizer</button>
@@ -108,6 +109,17 @@
       <div id="files-list" class="linklist"></div>
       <h2>Audio player</h2>
       <audio id="audio-player" controls hidden></audio>
+    </section>
+
+    <!-- ============================ CAPTCHAS =========================== -->
+    <section id="tab-captchas" class="tabpane">
+      <h2>Captchas and site challenges</h2>
+      <p class="hint">Cloudflare, DDoS-Guard and captcha widgets that need a human. One entry covers
+      every download from the same site. <em>Solve in browser</em> opens the site in Edge; once the
+      check passes, the waiting downloads continue. Image captchas are answered in the download's row.</p>
+      <div id="captcha-list" class="linklist"></div>
+      <h2>Saved site clearances</h2>
+      <div id="clearance-list" class="linklist"></div>
     </section>
 
     <!-- ============================ LINKGRABBER ======================== -->

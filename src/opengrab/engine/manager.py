@@ -65,7 +65,14 @@ class DownloadManager:
         self.accounts = AccountManager()
         self.filters = FilterManager()
         self.registry = PluginRegistry()
-        self.captcha_chain = SolverChain(settings, self.client)
+        # W2: Cloudflare clearance cookies and the shared captcha inbox
+        from ..captcha.inbox import CaptchaInbox
+        from ..clearance import ClearanceStore
+        self.clearance = ClearanceStore(str(self.data_dir / "clearance.json"))
+        self.client.clearance = self.clearance
+        self.captcha_inbox = CaptchaInbox(
+            max_pending=max(1, int(getattr(settings, "captcha_inbox_max_pending", 50) or 50)))
+        self.captcha_chain = SolverChain(settings, self.client, clearance_store=self.clearance)
         try:
             self.accounts.load()
             self.filters.load()
@@ -230,14 +237,8 @@ class DownloadManager:
                                    LinkStatus.PAYWALL, LinkStatus.SKIPPED):
                 self._resolve(link, plugin, ctx)
         except CaptchaRequired as e:
-            link.status = LinkStatus.CAPTCHA
-            link.captcha_image = e.image_b64
-            link.captcha_kind = e.kind
-            link.extra.update({
-                "captcha_site_url": e.site_url,
-                "captcha_sitekey": e.sitekey,
-                "captcha_image_url": (e.extra or {}).get("image_url", ""),
-            })
+            if self._handle_challenge(link, e, phase="grab"):
+                return
         except LoginRequired as e:
             link.status = LinkStatus.LOGIN
             link.login_hint = e.hint
@@ -256,6 +257,147 @@ class DownloadManager:
                 and link.direct_url):
             self._ready_put(link.id)
             self._broadcast("queued", link)
+
+    # ----------------------------------------------- W2 challenges / inbox
+    def _park_captcha(self, link: Link, e, phase: str) -> None:
+        link.status = LinkStatus.CAPTCHA
+        link.captcha_image = e.image_b64
+        link.captcha_kind = e.kind
+        extra = e.extra or {}
+        link.extra.update({
+            "captcha_site_url": e.site_url,
+            "captcha_sitekey": e.sitekey,
+            "captcha_image_url": extra.get("image_url", ""),
+            "captcha_phase": phase,
+        })
+        for key in ("challenge", "ray_id", "solver_error"):
+            if extra.get(key):
+                link.extra["captcha_" + key] = extra[key]
+        from ..challenge import INBOX_KINDS
+        if e.kind in INBOX_KINDS:
+            host = urlparse(e.site_url or link.direct_url or link.url).hostname or ""
+            try:
+                req = self.captcha_inbox.submit(
+                    host, e.kind, e.site_url or link.url, sitekey=e.sitekey or None,
+                    timeout_s=max(60, int(self.settings.captcha_manual_timeout_s or 120) * 5))
+                link.extra["captcha_request_id"] = req.id
+            except Exception as exc:  # inbox full: the link stays parked
+                link.extra["captcha_error"] = str(exc)
+
+    def _auto_solve_challenge(self, link: Link, e) -> str:
+        """Try the automatic solvers once per park. Returns "__CLEARANCE__",
+        a widget token, or "" when a human is needed."""
+        from ..captcha.base import CaptchaRequest
+        from ..challenge import INBOX_KINDS
+        if e.kind not in INBOX_KINDS or link.extra.get("challenge_auto_tried"):
+            return ""
+        link.extra["challenge_auto_tried"] = True
+        from ..challenge import BROWSER_KINDS
+        if e.kind in BROWSER_KINDS:
+            # only a real browser passes a Cloudflare/DDoS-Guard interstitial
+            browser = next((s for s in self.captcha_chain.solvers if s.id == "browser"), None)
+            if browser is None or not browser.enabled():
+                return ""
+            req = CaptchaRequest(kind="turnstile", site_url=e.site_url or link.url)
+            try:
+                res = browser.solve(req, timeout_s=float(self.settings.captcha_manual_timeout_s or 120))
+            except Exception as exc:
+                log.info("browser challenge solve failed: %s", exc)
+                return ""
+            return res.text if res.ok and res.text == "__CLEARANCE__" else ""
+        req = CaptchaRequest(kind=e.kind, site_url=e.site_url or link.url,
+                             recaptcha_sitekey=e.sitekey or "")
+        auto = [s.id for s in self.captcha_chain._ordered(e.kind)
+                if s.id not in ("manual", "browser")]
+        if not auto:
+            return ""
+        try:
+            res = self.captcha_chain.solve(req, allowed=auto)
+        except Exception as exc:
+            log.info("automatic challenge solve failed: %s", exc)
+            return ""
+        if not res.ok or res.text in ("", "__MANUAL__"):
+            return ""
+        return res.text
+
+    def _handle_challenge(self, link: Link, e, phase: str) -> bool:
+        """Solve automatically or park. True when a retry was started."""
+        answer = self._auto_solve_challenge(link, e)
+        if answer == "__CLEARANCE__":
+            link.extra["note"] = "challenge cleared in the browser"
+            if phase == "download":
+                link.status = LinkStatus.WAITING
+                self._persist()
+                self._ready_put(link.id)
+                self._broadcast("queued", link)
+            else:
+                self._regrab(link)
+            return True
+        self._park_captcha(link, e, phase)
+        if answer:
+            self._persist()
+            self.submit_captcha(link.id, answer)
+            return True
+        return False
+
+    def _regrab(self, link: Link) -> None:
+        link.status = LinkStatus.RESOLVING
+        link.error = ""
+        self._persist()
+        self._broadcast("grabbing", link)
+        self._spawn(self._grab_and_queue, link.id, True)
+
+    def links_for_captcha(self, request_id: str) -> list[Link]:
+        return [l for l in self.all_links()
+                if l.status == LinkStatus.CAPTCHA
+                and l.extra.get("captcha_request_id") == request_id]
+
+    def captcha_request_solved(self, request_id: str, answer: str) -> int:
+        """Resume every link waiting on an inbox request."""
+        links = self.links_for_captcha(request_id)
+        for link in links:
+            link.extra.pop("challenge_auto_tried", None)
+            if link.extra.get("captcha_phase") == "download" and answer == "__CLEARANCE__":
+                link.status = LinkStatus.WAITING
+                self._persist()
+                self._ready_put(link.id)
+                self._broadcast("queued", link)
+            elif answer == "__CLEARANCE__":
+                self._regrab(link)
+            else:
+                self.submit_captcha(link.id, answer)
+        return len(links)
+
+    def captcha_request_skipped(self, request_id: str) -> int:
+        links = self.links_for_captcha(request_id)
+        for link in links:
+            link.status = LinkStatus.ERROR
+            link.error = "captcha skipped"
+            self._persist()
+            self._broadcast("error", link)
+        return len(links)
+
+    def retry_captcha(self, link_id: str) -> bool:
+        """Grab or download a parked captcha link again (e.g. after expiry)."""
+        link = self.get(link_id)
+        if link is None or link.status != LinkStatus.CAPTCHA:
+            return False
+        link.extra.pop("challenge_auto_tried", None)
+        if link.extra.get("captcha_phase") == "download":
+            link.status = LinkStatus.WAITING
+            self._persist()
+            self._ready_put(link.id)
+            self._broadcast("queued", link)
+        else:
+            self._regrab(link)
+        return True
+
+    def _clearance_extras(self, url: str) -> tuple[dict, dict]:
+        host = urlparse(url).hostname or ""
+        c = self.clearance.get(host) if host else None
+        if c is None:
+            return {}, {}
+        return {"User-Agent": c.user_agent}, dict(c.cookies)
 
     def _apply_grab(self, link: Link, plugin_id: str, g) -> None:
         link.plugin = plugin_id
@@ -631,11 +773,13 @@ class DownloadManager:
             else:
                 from ..extrules import browser_request_extras
                 b_headers, b_cookies = browser_request_extras(link.extra, url)
+                c_headers, c_cookies = self._clearance_extras(url)
                 dl = LinkDownload(link, url, dest,
-                                  headers={**b_headers, **(link.direct_headers or {})},
+                                  headers={**b_headers, **c_headers,
+                                           **(link.direct_headers or {})},
                                   settings=self.settings,
                                   cookies={**dict(self.client._cookies_for(url) or {}),
-                                           **b_cookies},
+                                           **b_cookies, **c_cookies},
                                   rate_limiter=self._global_limiter,
                                   on_tick=lambda d: self._on_tick(link, d))
                 with self._lock:
@@ -673,6 +817,11 @@ class DownloadManager:
             link.progress = 1.0
             self._retries.pop(link.id, None)
             self._broadcast("finished", link)
+        except CaptchaRequired as e:
+            # W2: a challenge page instead of the file
+            if not self._handle_challenge(link, e, phase="download"):
+                self._persist()
+                self._broadcast("grabbed", link)
         except DownloadError as e:
             msg = str(e)
             if "cancel" in msg.lower():
