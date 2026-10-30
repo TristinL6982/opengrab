@@ -11,6 +11,7 @@ const S = {
   graph: [],               // [{t, bps}] last 60 s of aggregate speed
   conn: "connecting…",
   selected: new Set(),     // selected link ids (toolbar acts on these)
+  focusId: null,           // row that has keyboard focus
   lastClicked: null,
 };
 let terminalJobId = null;
@@ -291,7 +292,8 @@ function linkRow(l) {
   if (l.status === "paywall" && l.paywall_note) notes.push(`<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>`);
   if (l.extra?.archive_extraction) notes.push(`<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok-dark)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>`);
   const sub = l.status === "finished" && l.path ? l.path : (l.url + (l.plugin ? " · " + l.plugin : ""));
-  return `<div class="linkrow${sel}" data-lid="${l.id}" data-status="${esc(l.status)}" title="${esc(l.url)}">
+  return `<div class="linkrow${sel}" data-lid="${l.id}" data-status="${esc(l.status)}" title="${esc(l.url)}"
+    role="row" tabindex="${S.focusId === l.id ? 0 : -1}" aria-selected="${S.selected.has(l.id)}">
     <div class="c-title"><span class="sg ${esc(l.status)}"></span><span class="names">
       <div class="t">${esc(l.title || l.filename || l.url)}</div>
       <div class="u">${esc(sub)}</div>${notes.join("")}</span></div>
@@ -299,7 +301,7 @@ function linkRow(l) {
     <div class="c-status"><span class="st ${esc(l.status)}">${esc(statusText(l))}</span>${l.status === "waiting" && l.extra?.wait_reason ? `<span class="why" title="${esc(l.extra.wait_reason)}">${esc(l.extra.wait_reason)}</span>` : ""}</div>
     <div class="c-eta">${l.status === "downloading" ? humanEta(l.eta) : (l.status === "finished" ? humanTime(l.finished) : "")}</div>
     <div class="c-speed">${l.status === "downloading" ? humanBytes(l.speed) + "/s" : ""}</div>
-    <div class="c-prog"><div class="${barCls}"><i style="width:${pct}%"></i><span class="pct">${pct}%</span></div></div>
+    <div class="c-prog"><div class="${barCls}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i><span class="pct">${pct}%</span></div></div>
     <div class="c-actions">${rowActions(l)}</div>
     ${(l.status === "captcha" && !l.extra?.captcha_request_id) || l.status === "login" ? `<span class="inlineform" data-for="${l.id}"></span>` : ""}
     ${childrenBlock(l)}
@@ -372,7 +374,46 @@ function renderLists() {
   renderCounts();
   updateToolbar();
   renderFlowChrome();
+  restoreRowFocus();
 }
+
+/* keyboard: arrows move, Space selects, Enter resumes/starts, Home/End */
+function restoreRowFocus() {
+  if (!S.focusId || !document.activeElement?.classList?.contains("linkrow") && !S.keyboard) return;
+  const row = document.querySelector(`.listpane.active .linkrow[data-lid="${S.focusId}"]`);
+  if (row && document.activeElement !== row) row.focus({ preventScroll: true });
+}
+document.addEventListener("keydown", (ev) => {
+  const row = ev.target.closest?.(".linkrow");
+  if (!row) return;
+  const rows = $$(".listpane.active .linkrow");
+  const i = rows.indexOf(row);
+  let next = null;
+  if (ev.key === "ArrowDown") next = rows[i + 1];
+  else if (ev.key === "ArrowUp") next = rows[i - 1];
+  else if (ev.key === "Home") next = rows[0];
+  else if (ev.key === "End") next = rows[rows.length - 1];
+  else if (ev.key === " ") {
+    ev.preventDefault();
+    S.selected.has(row.dataset.lid) ? S.selected.delete(row.dataset.lid) : S.selected.add(row.dataset.lid);
+    S.focusId = row.dataset.lid; S.keyboard = true; renderLists(); return;
+  } else if (ev.key === "Enter") {
+    ev.preventDefault();
+    if (!S.selected.size) S.selected.add(row.dataset.lid);
+    $("#tb-resume").click(); return;
+  } else return;
+  ev.preventDefault();
+  if (next) {
+    S.focusId = next.dataset.lid; S.keyboard = true;
+    if (!ev.shiftKey && !ev.ctrlKey) { S.selected.clear(); }
+    S.selected.add(next.dataset.lid);
+    renderLists();
+  }
+});
+document.addEventListener("focusin", (ev) => {
+  const row = ev.target.closest?.(".linkrow");
+  if (row) S.focusId = row.dataset.lid;
+});
 
 function renderCounts() {
   const arr = Array.from(S.links.values());
@@ -418,6 +459,7 @@ document.addEventListener("click", (ev) => {
   } else {
     S.selected.clear(); S.selected.add(id); S.lastClicked = id;
   }
+  S.focusId = id; S.keyboard = false;
   renderLists();
 });
 
@@ -957,7 +999,7 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "torrent_listen_port", "torrent_open_files", "tracker_list_url",
   "plugin_sandbox_enabled", "plugin_index_url", "plugin_auto_update", "marketplace_url",
   "marketplace_require_signature", "anti_standby", "when_done", "when_done_delay_s", "when_done_once",
-  "hooks_enabled", "ui_theme", "ui_density", "ui_toolbar_labels", "allow_remote_http"];
+  "hooks_enabled", "ui_theme", "ui_density", "ui_toolbar_labels", "allow_remote_http", "ui_language"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1439,7 +1481,46 @@ function applyUi(prefs) {
 }
 try { applyUi(JSON.parse(localStorage.getItem("og_ui") || "{}")); } catch { applyUi({}); }
 systemDark?.addEventListener?.("change", () => applyUi({}));
+function syncLanguage(want) {
+  // the page is translated at load; a changed language needs one reload
+  let have = "auto";
+  try { have = localStorage.getItem("og_lang") || "auto"; } catch {}
+  if (want && want !== have) {
+    try { localStorage.setItem("og_lang", want); } catch {}
+    location.reload();
+  }
+}
+function maybeWelcome(s) {
+  if (s.onboarding_done || $("#welcome-dialog").open) return;
+  $("#wel-language").value = s.ui_language || "auto";
+  $("#wel-theme").value = s.ui_theme || "classic";
+  $("#wel-folder").value = s.download_dir || "";
+  $("#wel-clipboard").checked = !!s.clipboard_monitor_enabled;
+  $("#welcome-dialog").showModal();
+}
+async function finishWelcome(save) {
+  const body = { onboarding_done: true };
+  if (save) Object.assign(body, {
+    ui_language: $("#wel-language").value, ui_theme: $("#wel-theme").value,
+    download_dir: $("#wel-folder").value.trim(), clipboard_monitor_enabled: $("#wel-clipboard").checked,
+  });
+  try {
+    await api("/api/settings", "POST", body);
+    if (save && $("#wel-ocr").checked) {
+      await api("/api/settings", "POST", { captcha_ocr_enabled: true });
+      await api("/api/addons/ocr/install", "POST", {});
+      toast("Downloading the local OCR solver in the background", "ok");
+    }
+  } catch (e) { toast("Could not save: " + e.message, "err"); }
+  $("#welcome-dialog").close();
+  if (save) { applyUi({ ui_theme: body.ui_theme }); setFolderPill(body.download_dir); syncLanguage(body.ui_language); }
+}
+$("#wel-done").addEventListener("click", () => finishWelcome(true));
+$("#wel-skip").addEventListener("click", () => finishWelcome(false));
+$("#welcome-dialog").addEventListener("cancel", () => finishWelcome(false));
 function loadAppearance(s) {
+  syncLanguage(s.ui_language || "auto");
+  maybeWelcome(s);
   $("#set-ui_accent").value = s.ui_accent || "#1c5db8";
   $$("fieldset.cols [data-col]").forEach(c => c.checked = !(s.ui_hidden_columns || []).includes(c.dataset.col));
   $("#adv-proxies").value = (s.trusted_proxies || []).join(", ");
@@ -1601,6 +1682,7 @@ $("#btn-set-save").addEventListener("click", async () => {
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
     toast("Settings saved", "ok");
+    syncLanguage(body.ui_language);
   } catch (e) { toast("Save failed: " + e.message, "err"); }
 });
 

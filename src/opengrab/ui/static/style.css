@@ -15,7 +15,7 @@
   --text-dim: #5a6578;
   --ok: #26a033;          /* classic progress green */
   --ok-dark: #1b7a26;
-  --warn: #b86e00;
+  --warn: #9a5b00;          /* 4.6:1 on white (WCAG AA) */
   --err: #c42b1c;
   --paused: #8a95a8;
   --font: "Segoe UI", Tahoma, "Noto Sans", system-ui, sans-serif;

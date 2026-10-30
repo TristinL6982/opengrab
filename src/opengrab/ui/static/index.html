@@ -40,19 +40,19 @@
 
   <!-- ============================ toolbar =============================== -->
   <div class="toolbar" role="toolbar" aria-label="Download actions">
-    <button class="tb" id="tb-add" title="Add links (Ctrl+N)"><svg aria-hidden="true"><use href="#i-add"/></svg><span>Add links</span></button>
+    <button class="tb" id="tb-add" title="Add links (Ctrl+N)" aria-label="Add links"><svg aria-hidden="true"><use href="#i-add"/></svg><span>Add links</span></button>
     <span class="tb-sep"></span>
-    <button class="tb" id="tb-resume" title="Start or resume the selected downloads" disabled><svg aria-hidden="true"><use href="#i-resume"/></svg><span>Resume</span></button>
-    <button class="tb" id="tb-pause" title="Pause the selected downloads" disabled><svg aria-hidden="true"><use href="#i-pause"/></svg><span>Pause</span></button>
-    <button class="tb" id="tb-stop" title="Stop the selected downloads" disabled><svg aria-hidden="true"><use href="#i-stop"/></svg><span>Stop</span></button>
-    <button class="tb" id="tb-delete" title="Remove the selected downloads from the list (Del)" disabled><svg aria-hidden="true"><use href="#i-delete"/></svg><span>Remove</span></button>
+    <button class="tb" id="tb-resume" title="Start or resume the selected downloads" aria-label="Resume" disabled><svg aria-hidden="true"><use href="#i-resume"/></svg><span>Resume</span></button>
+    <button class="tb" id="tb-pause" title="Pause the selected downloads" aria-label="Pause" disabled><svg aria-hidden="true"><use href="#i-pause"/></svg><span>Pause</span></button>
+    <button class="tb" id="tb-stop" title="Stop the selected downloads" aria-label="Stop" disabled><svg aria-hidden="true"><use href="#i-stop"/></svg><span>Stop</span></button>
+    <button class="tb" id="tb-delete" title="Remove the selected downloads from the list (Del)" aria-label="Remove" disabled><svg aria-hidden="true"><use href="#i-delete"/></svg><span>Remove</span></button>
     <span class="tb-sep"></span>
-    <button class="tb" id="tb-startall" title="Start every waiting or paused download"><svg aria-hidden="true"><use href="#i-startall"/></svg><span>Start all</span></button>
-    <button class="tb" id="tb-pauseall" title="Pause every running download"><svg aria-hidden="true"><use href="#i-pauseall"/></svg><span>Pause all</span></button>
-    <button class="tb" id="btn-clear-finished" title="Remove finished downloads from the list"><svg aria-hidden="true"><use href="#i-clear"/></svg><span>Clear finished</span></button>
+    <button class="tb" id="tb-startall" title="Start every waiting or paused download" aria-label="Start all"><svg aria-hidden="true"><use href="#i-startall"/></svg><span>Start all</span></button>
+    <button class="tb" id="tb-pauseall" title="Pause every running download" aria-label="Pause all"><svg aria-hidden="true"><use href="#i-pauseall"/></svg><span>Pause all</span></button>
+    <button class="tb" id="btn-clear-finished" title="Remove finished downloads from the list" aria-label="Clear finished"><svg aria-hidden="true"><use href="#i-clear"/></svg><span>Clear finished</span></button>
     <span class="tb-sep"></span>
-    <button class="tb" id="tb-captchas" title="Captchas waiting for you"><svg aria-hidden="true"><use href="#i-captcha"/></svg><span>Captchas</span></button>
-    <button class="tb" id="tb-settings" title="Settings"><svg aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
+    <button class="tb" id="tb-captchas" title="Captchas waiting for you" aria-label="Captchas"><svg aria-hidden="true"><use href="#i-captcha"/></svg><span>Captchas</span></button>
+    <button class="tb" id="tb-settings" title="Settings" aria-label="Settings"><svg aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
   </div>
 
   <div id="whendone-banner" class="hidden">
@@ -62,7 +62,7 @@
 
   <div id="auth-banner" class="hidden">
     <span>This OpenGrab needs its access token. Paste it from the OpenGrab console:</span>
-    <input id="auth-token" type="password" placeholder="Access token">
+    <input id="auth-token" aria-label="Access token" type="password" placeholder="Access token">
     <button id="auth-save">Connect</button>
   </div>
 
@@ -218,10 +218,10 @@
         <p class="hint">For downloads behind a password prompt (Basic, Digest, NTLM or Negotiate) and for proxies that need a login.
         Use <code>*.example.com</code> to cover every subdomain. Passwords are protected with Windows DPAPI and never shown again.</p>
         <div class="formrow">
-          <input id="login-pattern" placeholder="Site, e.g. files.example.com">
-          <input id="login-user" placeholder="User name">
-          <input id="login-pass" type="password" placeholder="Password">
-          <select id="login-scheme"><option value="basic">Basic</option><option value="digest">Digest</option><option value="ntlm">NTLM</option><option value="negotiate">Negotiate</option></select>
+          <input id="login-pattern" aria-label="Site" placeholder="Site, e.g. files.example.com">
+          <input id="login-user" aria-label="User name" placeholder="User name">
+          <input id="login-pass" aria-label="Password" type="password" placeholder="Password">
+          <select id="login-scheme" aria-label="Login type"><option value="basic">Basic</option><option value="digest">Digest</option><option value="ntlm">NTLM</option><option value="negotiate">Negotiate</option></select>
           <label class="check"><input id="login-proxy" type="checkbox"> for a proxy</label>
           <button id="btn-login-add" class="primary">Add login</button>
         </div>
@@ -234,15 +234,15 @@
         <p class="hint">Regex or glob. Exclude rules always win. Once any include rule exists,
         only links that match an include rule get through.</p>
         <div class="formrow">
-          <select id="flt-kind">
+          <select id="flt-kind" aria-label="Filter kind">
             <option value="exclude">exclude</option>
             <option value="include">include</option>
           </select>
-          <select id="flt-type">
+          <select id="flt-type" aria-label="Pattern type">
             <option value="regex">regex</option>
             <option value="glob">glob</option>
           </select>
-          <input id="flt-pattern" placeholder="Pattern, e.g. *.exe">
+          <input id="flt-pattern" aria-label="Pattern" placeholder="Pattern, e.g. *.exe">
           <button id="btn-flt-add" class="primary">Add filter</button>
         </div>
         <div id="filters-list" class="linklist boxed"></div>
@@ -255,18 +255,18 @@
         Templates support <code>{name}</code>, <code>{stem}</code>, <code>{ext}</code> and <code>{host}</code>.
         Folders stay inside the download folder, and existing files are never overwritten.</p>
         <div class="formrow">
-          <input id="pack-name" type="text" placeholder="Rule name">
-          <input id="pack-pattern" type="text" placeholder="Match, e.g. *.zip">
-          <select id="pack-pattern-type"><option value="glob">glob</option><option value="regex">regex</option></select>
-          <input id="pack-subdir" type="text" placeholder="Folder (optional)">
-          <input id="pack-template" type="text" placeholder="File name template (optional)">
+          <input id="pack-name" aria-label="Rule name" type="text" placeholder="Rule name">
+          <input id="pack-pattern" aria-label="Match" type="text" placeholder="Match, e.g. *.zip">
+          <select id="pack-pattern-type" aria-label="Pattern type"><option value="glob">glob</option><option value="regex">regex</option></select>
+          <input id="pack-subdir" aria-label="Folder (optional)" type="text" placeholder="Folder (optional)">
+          <input id="pack-template" aria-label="File name template (optional)" type="text" placeholder="File name template (optional)">
           <button id="btn-pack-add" class="primary">Add rule</button>
         </div>
         <div id="packagizer-list" class="linklist boxed"></div>
         <h2>Try a rule</h2>
         <div class="formrow">
-          <input id="pack-preview-url" type="text" placeholder="Link">
-          <input id="pack-preview-name" type="text" placeholder="File name">
+          <input id="pack-preview-url" aria-label="Link" type="text" placeholder="Link">
+          <input id="pack-preview-name" aria-label="File name" type="text" placeholder="File name">
           <button id="btn-pack-preview">Preview</button>
         </div>
         <pre id="pack-preview-result" class="terminal-output" style="min-height:5em"></pre>
@@ -277,8 +277,8 @@
         <h2>Plugin marketplace</h2>
         <p class="hint">Plugins from the catalog address in Settings. OpenGrab installs only plugins signed by a
         publisher key you trust, and installing one approves exactly the access it lists.</p>
-        <div class="formrow"><input id="mk-search" type="text" placeholder="Search plugins" style="flex:1">
-          <select id="mk-sort"><option value="rating">Best rated</option><option value="name">Name</option></select>
+        <div class="formrow"><input id="mk-search" aria-label="Search plugins" type="text" placeholder="Search plugins" style="flex:1">
+          <select id="mk-sort" aria-label="Sort"><option value="rating">Best rated</option><option value="name">Name</option></select>
           <button id="btn-mk-search">Search</button></div>
         <div id="mk-list" class="linklist boxed"></div>
 
@@ -300,7 +300,7 @@
         <p class="hint">Runs commands as the OpenGrab user in the download folder.
         It is off until you allow it in Settings, and it only accepts the console token.</p>
         <div class="formrow">
-          <input id="terminal-command" type="text" placeholder="Command" style="flex:1">
+          <input id="terminal-command" aria-label="Command" type="text" placeholder="Command" style="flex:1">
           <button id="btn-terminal-run" class="primary">Run</button>
           <button id="btn-terminal-stop" class="danger" disabled>Stop</button>
         </div>
@@ -311,6 +311,7 @@
       <section id="tab-settings" class="tabpane pagepane settingspane">
         <h2>Appearance</h2>
         <div class="settings-grid groupbox">
+          <label>Language<select id="set-ui_language"><option value="auto">Follow Windows</option><option value="en">English</option><option value="zh-CN">简体中文 (Simplified Chinese)</option></select></label>
           <label>Theme<select id="set-ui_theme"><option value="classic">Classic (light)</option><option value="classic-dark">Classic dark</option><option value="system">Follow Windows</option></select></label>
           <label>Accent colour<input id="set-ui_accent" type="color" value="#1c5db8"></label>
           <label>Rows<select id="set-ui_density"><option value="compact">Compact</option><option value="normal">Normal</option><option value="comfortable">Comfortable</option></select></label>
@@ -410,7 +411,7 @@
           <table class="grid"><thead><tr><th>Site</th><th>Use (proxy address or "direct")</th><th></th></tr></thead><tbody id="proxyrule-body"></tbody></table>
           <div class="formrow"><button id="btn-proxyrule-add">Add site rule</button>
             <span class="grow"></span>
-            <input id="proxy-test-addr" type="text" placeholder="Proxy to test" style="flex:0 0 240px">
+            <input id="proxy-test-addr" aria-label="Proxy to test" type="text" placeholder="Proxy to test" style="flex:0 0 240px">
             <button id="btn-proxy-test">Test proxy</button><span id="proxy-test-result" class="hint"></span></div>
           <p id="proxy-status" class="hint"></p>
         </div>
@@ -481,8 +482,8 @@
         <div class="groupbox">
           <p class="hint">Downloads go to the Main queue unless you pick another one when adding links. Each queue has its own limit and can be paused on its own. Changes here apply right away.</p>
           <table class="grid"><thead><tr><th>Queue</th><th>At the same time</th><th>Paused</th><th></th></tr></thead><tbody id="queues-body"></tbody></table>
-          <div class="formrow"><input id="queue-new-name" type="text" placeholder="New queue name" style="flex:0 0 200px">
-            <input id="queue-new-max" type="number" min="1" max="32" value="1" style="width:5em"><button id="btn-queue-add">Create queue</button></div>
+          <div class="formrow"><input id="queue-new-name" aria-label="New queue name" type="text" placeholder="New queue name" style="flex:0 0 200px">
+            <input id="queue-new-max" aria-label="At the same time" type="number" min="1" max="32" value="1" style="width:5em"><button id="btn-queue-add">Create queue</button></div>
         </div>
 
         <h2>Categories</h2>
@@ -522,7 +523,7 @@
           <h2>Trackers</h2>
           <table class="grid"><thead><tr><th>Tracker</th><th>Works</th><th>Seeds</th><th>Peers</th><th>Last error</th><th></th></tr></thead><tbody id="trackers-body"></tbody></table>
           <div class="formrow">
-            <input id="tracker-add" type="text" placeholder="udp://tracker.example.org:1337/announce" style="flex:1">
+            <input id="tracker-add" aria-label="Tracker" type="text" placeholder="udp://tracker.example.org:1337/announce" style="flex:1">
             <button id="btn-tracker-add">Add tracker</button>
           </div>
           <div class="formrow">
@@ -599,7 +600,7 @@
           <summary>Edit every setting as JSON</summary>
           <p class="hint">For settings without a control on this page. Passwords, tokens and logins are not shown here.
           Changes are checked before they are saved.</p>
-          <textarea id="adv-json" rows="16" spellcheck="false"></textarea>
+          <textarea id="adv-json" aria-label="Settings as JSON" rows="16" spellcheck="false"></textarea>
           <div class="formrow"><button id="btn-adv-load">Reload</button><button id="btn-adv-save" class="primary">Save JSON</button>
             <span id="adv-result" class="hint"></span></div>
         </details>
@@ -686,9 +687,28 @@
   </div>
 </dialog>
 
-<div id="toasts"></div>
+<!-- ============================ first-run setup ============================ -->
+<dialog id="welcome-dialog" class="win" aria-labelledby="welcome-title">
+  <div class="win-title" id="welcome-title">Welcome to OpenGrab</div>
+  <div class="win-body">
+    <p class="hint">A few choices to start with. You can change all of them later in Settings.</p>
+    <div class="settings-grid">
+      <label>Language<select id="wel-language"><option value="auto">Follow Windows</option><option value="en">English</option><option value="zh-CN">简体中文 (Simplified Chinese)</option></select></label>
+      <label>Theme<select id="wel-theme"><option value="classic">Classic (light)</option><option value="classic-dark">Classic dark</option><option value="system">Follow Windows</option></select></label>
+      <label>Download folder<input id="wel-folder" type="text"></label>
+      <label class="check"><input id="wel-clipboard" type="checkbox"> Watch copied links (review before adding)</label>
+      <label class="check"><input id="wel-ocr" type="checkbox"> Install the local OCR captcha solver now (optional)</label>
+    </div>
+    <p class="hint">To send downloads from Chrome, Edge or Firefox to OpenGrab, add the OpenGrab browser extension and pair it under Settings, Paired devices.</p>
+    <div class="addrow"><span class="grow"></span><button type="button" id="wel-skip">Skip</button>
+      <button type="button" id="wel-done" class="primary">Start using OpenGrab</button></div>
+  </div>
+</dialog>
+
+<div id="toasts" role="status" aria-live="polite"></div>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
-<div id="palette" class="hidden" role="dialog" aria-label="Command palette"><input id="palette-input" type="text" placeholder="Search features, settings, downloads, actions… (Ctrl+K)" autocomplete="off"><ul id="palette-list"></ul></div>
+<div id="palette" class="hidden" role="dialog" aria-label="Command palette"><input id="palette-input" aria-label="Search features, settings, downloads, actions… (Ctrl+K)" type="text" placeholder="Search features, settings, downloads, actions… (Ctrl+K)" autocomplete="off"><ul id="palette-list"></ul></div>
 <script src="palette.js"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     include_package_data=True,
-    package_data={"opengrab": ["ui/static/*", "addons_lock.json"]},
+    package_data={"opengrab": ["ui/static/*", "ui/static/i18n/*", "addons_lock.json"]},
     entry_points={
         'console_scripts': [
             'opengrab=opengrab.cli:main',
