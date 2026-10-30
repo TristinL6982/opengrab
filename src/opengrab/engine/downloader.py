@@ -72,12 +72,21 @@ class _RateLimiter:
             self._bal = min(self._bal, new_rate)
             self._ts = time.monotonic()
 
-    def consume(self, n: int) -> None:
+    def consume(self, n: int, stop: Optional[threading.Event] = None) -> None:
+        """Block until ``n`` bytes may pass. Returns at once when the limit is
+        lifted meanwhile or ``stop`` is set: before 2026-10-30 a thread that
+        was already waiting here spun forever after the limit changed to
+        "none" (rate 0 never refills the bucket), which froze every download
+        and kept their worker slots busy."""
         if self.rate <= 0 or n <= 0:
             return
         remaining = n
         while remaining > 0:
+            if stop is not None and stop.is_set():
+                return
             with self._lock:
+                if self.rate <= 0:
+                    return
                 now = time.monotonic()
                 self._bal = min(self.rate,
                                 self._bal + (now - self._ts) * self.rate)
@@ -612,7 +621,7 @@ class LinkDownload:
                                     break
                                 if pos + len(piece) > limit:
                                     piece = piece[:limit - pos]
-                            self._limiter.consume(len(piece))
+                            self._limiter.consume(len(piece), self.stop_event)
                             f.write(piece)
                             pos += len(piece)
                             received += len(piece)
