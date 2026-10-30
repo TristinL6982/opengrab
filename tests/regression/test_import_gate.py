@@ -12,8 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 KNOWN_ORPHANS = {
-    "archives",
-    "avscan",
     "netconfig",
     "plugins.marketplace",
     "plugins.permissions",

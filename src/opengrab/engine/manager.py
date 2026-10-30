@@ -83,6 +83,8 @@ class DownloadManager:
         from .accounts_flow import AccountPolicy, AccountsView
         self.account_policy = AccountPolicy(self.accounts, self.client, self.data_dir, settings)
         self.accounts_view = AccountsView(self.accounts, self.account_policy)
+        from .postprocess import VirusScan
+        self.virus_scan = VirusScan(settings)  # W10
         self._deferred: set[str] = set()
         self._tick_done: dict[str, int] = {}
         self._schedule_paused = False
@@ -475,6 +477,45 @@ class DownloadManager:
         self._persist()
         self._broadcast("grabbed", link)
         return link.extra["hash"]
+
+    # ------------------------------------------------ W10 post-processing
+    def _extract(self, link: Link, path: Path) -> None:
+        from .postprocess import extract_ready, set_members
+        try:
+            result = extract_ready(self, link, path)
+        except Exception as exc:  # preserve the completed download
+            result = {"status": "failed", "message": str(exc)[:500]}
+        if result is None:
+            return
+        link.extra["archive_extraction"] = result
+        members = set_members(path)
+        if members is not None and result.get("status") != "waiting":
+            # one extraction covers every part: tell the sibling links
+            names = {n.lower() for n in members[1]}
+            for other in self.all_links():
+                if other.id != link.id and (other.filename or "").lower() in names:
+                    other.extra["archive_extraction"] = dict(result, part_of_set=True)
+                    self._broadcast("grabbed", other)
+
+    def _scan_link(self, link_id: str) -> None:
+        link = self.get(link_id)
+        if link is None or not link.path:
+            return
+        res = self.virus_scan.scan(link.path)
+        link.extra["avscan"] = {"status": res.status, "detail": res.detail[-300:], "code": res.code}
+        if res.flagged:
+            cfg = self.virus_scan.config()
+            if cfg.quarantine:
+                try:
+                    root = Path(self.settings.download_dir).expanduser().resolve()
+                    moved = self.virus_scan.quarantine(Path(link.path), root)
+                    link.path = str(moved)
+                    link.extra["avscan"]["quarantined"] = True
+                except OSError as exc:
+                    link.extra["avscan"]["quarantine_error"] = str(exc)
+            self.on_change("virus", link.to_public())
+        self._persist()
+        self._broadcast("grabbed", link)
 
     def _account_cookies(self, url: str) -> dict:
         """W9: cookies imported into the account for this host."""
@@ -974,20 +1015,7 @@ class DownloadManager:
             link.path = str(path)
             self._verify_hash(link, Path(path))
             if self.settings.auto_extract_archives:
-                from .archives import extract_archive, is_supported_archive
-                if is_supported_archive(Path(path)):
-                    try:
-                        link.extra["archive_extraction"] = extract_archive(
-                            Path(path),
-                            max_files=max(1, min(self.settings.archive_max_files, 100000)),
-                            max_bytes=max(1, self.settings.archive_max_expanded_gib)
-                            * 1024 * 1024 * 1024,
-                            password_file=self.settings.archive_password_file,
-                        )
-                    except Exception as exc:  # preserve the completed download
-                        link.extra["archive_extraction"] = {
-                            "status": "failed", "message": str(exc)[:500]
-                        }
+                self._extract(link, Path(path))
             try:
                 link.size = Path(path).stat().st_size
             except OSError:
@@ -999,6 +1027,8 @@ class DownloadManager:
             link.progress = 1.0
             self._retries.pop(link.id, None)
             self._broadcast("finished", link)
+            if self.virus_scan.enabled():  # W10: never blocks the queue
+                self._spawn(self._scan_link, link.id)
         except CaptchaRequired as e:
             # W2: a challenge page instead of the file
             if not self._handle_challenge(link, e, phase="download"):

@@ -321,6 +321,23 @@
             <input id="set-archive_max_expanded_gib" type="number" min="1" max="1024"></label>
           <label>Password list file (one password per line)
             <input id="set-archive_password_file" type="text"></label>
+          <label>7-Zip program (for split sets and RAR; blank = find it)
+            <input id="set-archive_7zip_path" type="text" placeholder="C:\Program Files\7-Zip\7z.exe"></label>
+        </div>
+
+        <h2>Virus scan</h2>
+        <div class="groupbox">
+          <p class="hint">Scans each finished download in the background, so the queue never waits.
+          Off unless you turn it on. <span id="av-defender"></span></p>
+          <div class="settings-grid">
+            <label class="check"><input id="av-enabled" type="checkbox"> Scan finished downloads</label>
+            <label>Scanner<select id="av-scanner"><option value="defender">Windows Defender</option><option value="custom">Another scanner (command line)</option></select></label>
+            <label>Command line ({path} is the file)<input id="av-command" type="text" placeholder='C:\ESET\ecls.exe "{path}"'></label>
+            <label>Exit codes that mean "infected"<input id="av-codes" type="text" value="2"></label>
+            <label>Give up after (seconds)<input id="av-timeout" type="number" min="10" value="300"></label>
+            <label class="check"><input id="av-quarantine" type="checkbox"> Move infected files to a quarantine folder</label>
+          </div>
+          <div class="formrow"><button id="btn-av-test">Test the scanner</button><span id="av-test-result" class="hint"></span></div>
         </div>
 
         <h2>Connection</h2>

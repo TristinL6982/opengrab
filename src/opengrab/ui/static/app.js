@@ -278,6 +278,9 @@ function linkRow(l) {
   const notes = [];
   if (l.status === "error" && l.error) notes.push(`<div class="u" style="color:var(--err)">${esc(l.error)}</div>`);
   if (l.status === "captcha" && l.extra?.captcha_request_id) notes.push(`<div class="u" style="color:var(--warn)">Waiting for a ${esc(l.captcha_kind)} check on ${esc((l.extra.captcha_site_url || l.url).split("/")[2] || "")}${l.extra.captcha_ray_id ? ", Ray ID " + esc(l.extra.captcha_ray_id) : ""}. Open Captchas to solve it.</div>`);
+  if (l.extra?.avscan && l.extra.avscan.status !== "skipped") notes.push(l.extra.avscan.status === "infected"
+    ? `<div class="u hashbad">Virus scan: infected${l.extra.avscan.quarantined ? ", moved to quarantine" : ""}</div>`
+    : `<div class="u ${l.extra.avscan.status === "clean" ? "hashok" : ""}">Virus scan: ${esc(l.extra.avscan.status)}</div>`);
   if (l.extra?.hash) notes.push(l.extra.hash.ok ? `<div class="u hashok">${esc(l.extra.hash.algo)} checksum OK</div>` : `<div class="u hashbad">Checksum ${l.extra.hash.error ? esc(l.extra.hash.error) : "mismatch"}</div>`);
   if (l.status === "paywall" && l.paywall_note) notes.push(`<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>`);
   if (l.extra?.archive_extraction) notes.push(`<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok-dark)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>`);
@@ -942,7 +945,7 @@ const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "captcha_ocr_enabled", "captcha_ocr_ignore_hardware", "toasts_enabled",
   "scheduler_enabled", "max_per_host", "categories_enabled", "hash_checksum_files",
   "proxy_use_system", "linkgrabber_online_check", "cnl_enabled", "cnl_port",
-  "spider_max_pages", "spider_delay_s", "spider_respect_robots"];
+  "spider_max_pages", "spider_delay_s", "spider_respect_robots", "archive_7zip_path"];
 
 
 /* ============================================================ W3-W5 flow control */
@@ -1179,6 +1182,29 @@ document.addEventListener("click", async (ev) => {
   } catch (e) { toast("Could not remove login: " + e.message, "err"); }
 });
 
+/* ============================================================ W10 virus scan */
+async function loadScanSettings(s) {
+  const av = s.avscan || {};
+  $("#av-enabled").checked = !!av.enabled;
+  $("#av-scanner").value = av.scanner || "defender";
+  $("#av-command").value = av.custom_command || "";
+  $("#av-codes").value = (av.infected_codes || [2]).join(" ");
+  $("#av-timeout").value = av.timeout_s || 300;
+  $("#av-quarantine").checked = !!av.quarantine;
+  try {
+    const r = await api("/api/avscan");
+    $("#av-defender").textContent = r.defender ? "Windows Defender was found on this PC." : "Windows Defender's command line was not found on this PC.";
+  } catch {}
+}
+$("#btn-av-test").addEventListener("click", async () => {
+  $("#av-test-result").textContent = "Scanning a harmless test file…";
+  try {
+    const r = await api("/api/avscan/test", "POST", {});
+    $("#av-test-result").textContent = r.status === "clean" ? "The scanner works (test file is clean)."
+      : `Scanner answered "${r.status}"${r.code != null ? " (exit code " + r.code + ")" : ""}. ${r.detail || ""}`;
+  } catch (e) { $("#av-test-result").textContent = e.message + " (save settings first)"; }
+});
+
 /* ============================================================ add-ons */
 let addonPoll = null;
 async function loadAddons() {
@@ -1235,6 +1261,7 @@ async function loadSettings() {
     await loadFlow();
     loadFlowSettings(s);
     loadNetSettings(s);
+    loadScanSettings(s);
     $("#clipboard-state").textContent = s.clipboard_monitor_enabled
       ? "Clipboard monitoring is on; new links wait here for your approval."
       : "Clipboard monitoring is off.";
@@ -1260,6 +1287,12 @@ $("#btn-set-save").addEventListener("click", async () => {
   body.confirm_delete = $("#set-confirm_delete").checked;
   collectFlowSettings(body);
   collectNetSettings(body);
+  body.avscan = {
+    enabled: $("#av-enabled").checked, scanner: $("#av-scanner").value,
+    custom_command: $("#av-command").value.trim(),
+    infected_codes: $("#av-codes").value.split(/[\s,]+/).filter(Boolean).map(Number).filter(n => !isNaN(n)),
+    timeout_s: +$("#av-timeout").value || 300, quarantine: $("#av-quarantine").checked,
+  };
   try {
     const res = await api("/api/settings", "POST", body);
     (res.warnings || []).forEach(w => toast("Not applied: " + w, "err"));

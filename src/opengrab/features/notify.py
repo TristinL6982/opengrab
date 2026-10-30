@@ -164,6 +164,13 @@ class NotifyService:
     def on_link_event(self, kind: str, payload) -> None:
         if not isinstance(payload, dict):
             return
+        if kind == "virus":  # W10: a finished file failed its virus scan
+            name = (payload.get("title") or payload.get("filename") or "download").strip()
+            av = (payload.get("extra") or {}).get("avscan") or {}
+            where = " It was moved to the quarantine folder." if av.get("quarantined") else ""
+            self.add("failed", "Virus found", f"{name} failed the virus scan.{where}",
+                     link_id=str(payload.get("id") or ""), label="virus")
+            return
         status = payload.get("status") or ""
         status = str(getattr(status, "value", status))
         link_id = str(payload.get("id") or "")

@@ -24,7 +24,7 @@ def is_supported_archive(path: Path) -> bool:
     name = path.name.lower()
     return (name.endswith((".zip", ".cbz", ".tar", ".tar.gz", ".tgz",
                            ".tar.bz2", ".tbz2", ".tar.xz", ".txz",
-                           ".7z", ".rar")))
+                           ".7z", ".rar", ".7z.001", ".zip.001", ".rar.001")))
 
 
 def _member_path(root: Path, name: str) -> Path:
@@ -49,9 +49,14 @@ def _member_path(root: Path, name: str) -> Path:
     return target
 
 
-def _passwords(password_file: str) -> list[bytes]:
+def _passwords(password_file: str, extra=()) -> list[bytes]:
+    """Package passwords (W10: from Click'n'Load) first, then the opt-in file."""
+    out: list[bytes] = []
+    for value in extra or ():
+        if isinstance(value, str) and value and value.encode("utf-8") not in out:
+            out.append(value.encode("utf-8"))
     if not password_file:
-        return []
+        return out
     path = Path(password_file).expanduser()
     if not path.is_file():
         raise ArchiveError("configured password list is not a regular file")
@@ -64,7 +69,10 @@ def _passwords(password_file: str) -> list[bytes]:
               if line.strip()]
     if len(values) > MAX_PASSWORDS:
         raise ArchiveError("password file contains more than 1000 entries")
-    return [value.encode("utf-8") for value in values]
+    for value in values:
+        if value.encode("utf-8") not in out:
+            out.append(value.encode("utf-8"))
+    return out
 
 
 def _copy_member(src, dst, expected: int, already_written: int,
@@ -84,7 +92,7 @@ def _copy_member(src, dst, expected: int, already_written: int,
 
 
 def _extract_zip(source: Path, stage: Path, max_files: int,
-                 max_bytes: int, password_file: str) -> tuple[int, int]:
+                 max_bytes: int, password_file: str, extra_passwords=()) -> tuple[int, int]:
     with zipfile.ZipFile(source) as archive:
         all_entries = archive.infolist()
         if len(all_entries) > max_files:
@@ -101,7 +109,7 @@ def _extract_zip(source: Path, stage: Path, max_files: int,
             if entry.file_size > max(1, entry.compress_size) * 1000:
                 raise ArchiveError("archive member compression ratio exceeds 1000:1")
         encrypted = any(entry.flag_bits & 1 for entry in entries)
-        attempts = _passwords(password_file) if encrypted else [None]
+        attempts = _passwords(password_file, extra_passwords) if encrypted else [None]
         if encrypted and not attempts:
             raise ArchiveError("archive is encrypted; configure an opt-in password list")
         last_error = None
@@ -210,7 +218,7 @@ def _clear_stage(stage: Path) -> None:
 
 
 def _extract_7z(source: Path, stage: Path, max_files: int,
-                max_bytes: int, password_file: str) -> tuple[int, int]:
+                max_bytes: int, password_file: str, extra_passwords=()) -> tuple[int, int]:
     import py7zr
 
     passwords = [None]
@@ -219,7 +227,7 @@ def _extract_7z(source: Path, stage: Path, max_files: int,
             infos = archive.list()
             encrypted = archive.needs_password()
     except py7zr.exceptions.PasswordRequired as exc:
-        passwords = _passwords(password_file)
+        passwords = _passwords(password_file, extra_passwords)
         if not passwords:
             raise ArchiveError(
                 "archive headers are encrypted; configure an opt-in password list"
@@ -237,7 +245,7 @@ def _extract_7z(source: Path, stage: Path, max_files: int,
         if infos is None:
             raise ArchiveError("no configured password unlocked the 7z headers") from exc
     if encrypted and passwords == [None]:
-        passwords = _passwords(password_file)
+        passwords = _passwords(password_file, extra_passwords)
         if not passwords:
             raise ArchiveError("archive is encrypted; configure an opt-in password list")
     expected = _validate_external_members(infos, stage, max_files, max_bytes)
@@ -261,7 +269,7 @@ def _extract_7z(source: Path, stage: Path, max_files: int,
 
 
 def _extract_rar(source: Path, stage: Path, max_files: int,
-                 max_bytes: int, password_file: str) -> tuple[int, int]:
+                 max_bytes: int, password_file: str, extra_passwords=()) -> tuple[int, int]:
     import rarfile
 
     with rarfile.RarFile(source) as archive:
@@ -284,7 +292,7 @@ def _extract_rar(source: Path, stage: Path, max_files: int,
                 raise ArchiveError("archive member compression ratio exceeds 1000:1")
             files.append(info)
         encrypted = any(info.needs_password() for info in files)
-        passwords = _passwords(password_file) if encrypted else [None]
+        passwords = _passwords(password_file, extra_passwords) if encrypted else [None]
         if encrypted and not passwords:
             raise ArchiveError("archive is encrypted; configure an opt-in password list")
         last_error = None
@@ -313,30 +321,130 @@ def _extract_rar(source: Path, stage: Path, max_files: int,
         raise ArchiveError("RAR extraction failed")
 
 
+SEVEN_ZIP_PATHS = (r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe")
+
+
+def find_7zip(configured: str = "") -> str:
+    """Path to an installed 7-Zip (7z.exe / 7z / 7zz), or ''."""
+    if configured and Path(configured).is_file():
+        return configured
+    for p in SEVEN_ZIP_PATHS:
+        if Path(p).is_file():
+            return p
+    return shutil.which("7z") or shutil.which("7zz") or shutil.which("7za") or ""
+
+
+def _7z_listing(exe: str, source: Path, password: str) -> list[tuple[str, int]]:
+    import subprocess
+    proc = subprocess.run([exe, "l", "-slt", "-p" + password, str(source)],
+                          capture_output=True, text=True, timeout=300,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if proc.returncode != 0:
+        raise ArchiveError("7-Zip could not read the archive (wrong password or damaged)")
+    members, path, size, is_dir = [], None, 0, False
+    started = False
+    for line in proc.stdout.splitlines():
+        if line.startswith("----------"):
+            started = True
+            continue
+        if not started:
+            continue
+        if not line.strip():
+            if path is not None and not is_dir:
+                members.append((path, size))
+            path, size, is_dir = None, 0, False
+        elif line.startswith("Path = "):
+            path = line[7:]
+        elif line.startswith("Size = "):
+            size = int(line[7:] or 0)
+        elif line.startswith("Folder = +") or line.startswith("Attributes = D"):
+            is_dir = True
+    if path is not None and not is_dir:
+        members.append((path, size))
+    return members
+
+
+def _extract_7zip(exe: str, source: Path, stage: Path, max_files: int, max_bytes: int,
+                  password_file: str, extra_passwords=()) -> tuple[int, int]:
+    """Extract with an installed 7-Zip, after checking the listing against the
+    limits and every member path; the output tree is audited again."""
+    import subprocess
+    from ..archives import seven_zip_command
+    candidates = [b""] + _passwords(password_file, extra_passwords)
+    last = None
+    for pw in candidates:
+        password = pw.decode("utf-8")
+        try:
+            members = _7z_listing(exe, source, password)
+        except ArchiveError as exc:
+            last = exc
+            continue
+        if len(members) > max_files:
+            raise ArchiveError("archive contains too many files")
+        if sum(max(0, s) for _, s in members) > max_bytes:
+            raise ArchiveError("archive expands beyond the configured size limit")
+        for name, _ in members:
+            _member_path(stage, name)
+        proc = subprocess.run(seven_zip_command(exe, str(source), str(stage), password),
+                              capture_output=True, text=True, timeout=3600,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if proc.returncode != 0:
+            _clear_stage(stage)
+            last = ArchiveError("7-Zip failed: " + (proc.stderr or proc.stdout).strip()[-200:])
+            continue
+        return _audit_extracted_tree(stage, max_files, max_bytes)
+    raise ArchiveError("no password unlocked the archive" if len(candidates) > 1
+                       else str(last or "7-Zip could not extract the archive"))
+
+
 def extract_archive(source: Path, *, max_files: int = DEFAULT_MAX_FILES,
                     max_bytes: int = DEFAULT_MAX_BYTES,
-                    password_file: str = "") -> dict:
+                    password_file: str = "", extra_passwords=(),
+                    seven_zip: str = "") -> dict:
     """Extract ZIP/TAR into a new sibling folder, with no overwrite or links."""
     source = Path(source).resolve(strict=True)
     if not source.is_file() or not is_supported_archive(source):
         raise ArchiveError("unsupported archive format")
+    name_low = source.name.lower()
+    split = name_low.endswith(".001")
     destination = source.with_suffix("")
+    if split:  # movie.7z.001 -> movie
+        destination = Path(str(destination)).with_suffix("")
+    elif name_low.endswith(".rar"):
+        from ..archives import volume_info
+        info = volume_info(source.name)
+        if info and info[0] != name_low:  # movie.part1.rar -> movie
+            destination = source.parent / info[0][:-4]
     if destination.exists():
         raise ArchiveError("extraction folder already exists; refusing to overwrite")
     stage = Path(tempfile.mkdtemp(prefix=".opengrab-extract-", dir=source.parent))
     try:
-        if source.suffix.lower() in {".zip", ".cbz"}:
+        sevenzip = find_7zip(seven_zip)
+        if split:
+            if not sevenzip:
+                raise ArchiveError("split archives need 7-Zip; install it from 7-zip.org")
+            files, size = _extract_7zip(sevenzip, source, stage, max_files, max_bytes,
+                                        password_file, extra_passwords)
+        elif source.suffix.lower() in {".zip", ".cbz"}:
             files, size = _extract_zip(source, stage, max_files, max_bytes,
-                                       password_file)
+                                       password_file, extra_passwords)
         elif source.name.lower().endswith((".tar", ".tar.gz", ".tgz",
                                            ".tar.bz2", ".tbz2", ".tar.xz", ".txz")):
             files, size = _extract_tar(source, stage, max_files, max_bytes)
         elif source.suffix.lower() == ".7z":
             files, size = _extract_7z(source, stage, max_files, max_bytes,
-                                      password_file)
+                                      password_file, extra_passwords)
         elif source.suffix.lower() == ".rar":
-            files, size = _extract_rar(source, stage, max_files, max_bytes,
-                                       password_file)
+            try:
+                files, size = _extract_rar(source, stage, max_files, max_bytes,
+                                           password_file, extra_passwords)
+            except Exception as exc:
+                # rarfile needs unrar; 7-Zip reads RAR (including volume sets)
+                if not sevenzip or isinstance(exc, ArchiveError) and "password" in str(exc):
+                    raise
+                _clear_stage(stage)
+                files, size = _extract_7zip(sevenzip, source, stage, max_files, max_bytes,
+                                            password_file, extra_passwords)
         else:
             raise ArchiveError("unsupported archive format")
         os.replace(stage, destination)

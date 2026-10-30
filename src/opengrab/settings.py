@@ -133,6 +133,8 @@ class Settings(BaseModel):
     archive_max_files: int = 10000
     archive_max_expanded_gib: int = 16
     archive_password_file: str = ""
+    archive_7zip_path: str = ""        # W10: 7-Zip for split sets and RAR (blank = find it)
+    avscan: dict = Field(default_factory=dict)  # W10: {enabled, scanner, custom_command, infected_codes, timeout_s, quarantine}
     packagizer_rules: list[dict] = Field(default_factory=list)
 
     # maintenance
