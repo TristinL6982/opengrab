@@ -267,9 +267,10 @@ begin
         Pct := StrToIntDef(Field(Line, 0), 0);
         OcrBar.Style := npbstNormal;
         OcrBar.Position := Pct;
-        ShowOcr(FmtMessage(CustomMessage('OcrProgress'),
-          [IntToStr(StrToInt64Def(Field(Line, 1), 0) div 1048576),
-           IntToStr(StrToInt64Def(Field(Line, 2), 0) div 1048576), IntToStr(Pct)]));
+        // (a line may not start with "[": Inno Setup would read it as a section)
+        ShowOcr(FmtMessage(CustomMessage('OcrProgress'), [
+          IntToStr(StrToInt64Def(Field(Line, 1), 0) div 1048576),
+          IntToStr(StrToInt64Def(Field(Line, 2), 0) div 1048576), IntToStr(Pct)]));
       end;
     end;
     if GetTickCount - Started > 20 * 60 * 1000 then
