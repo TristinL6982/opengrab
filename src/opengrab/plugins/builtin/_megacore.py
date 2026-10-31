@@ -78,13 +78,13 @@ class MegaApiError(PluginError):
 def quota_message(wait_s: Optional[int]) -> str:
     base = "Mega transfer quota exceeded"
     if wait_s and wait_s > 0:
+        # "wait N minutes" first: the engine reads the first number + unit
         mins = (int(wait_s) + 59) // 60
+        when = f"wait {mins} minutes"
         if mins >= 60:
             h, m = divmod(mins, 60)
-            when = f"{h} h {m} min" if m else f"{h} h"
-        else:
-            when = f"{mins} min"
-        return f"{base}; Mega asks to wait about {when} before downloading again"
+            when += f" (about {h} h {m} min)" if m else f" (about {h} h)"
+        return f"{base}; Mega asks to {when} before downloading again"
     return f"{base}; wait for the quota to reset (usually within a few hours)"
 
 

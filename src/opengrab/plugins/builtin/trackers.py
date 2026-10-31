@@ -197,8 +197,11 @@ class TapochekPlugin(SitePlugin):
 
     @staticmethod
     def _base(url: str) -> str:
+        # always https: the saved password and cookies go to this origin,
+        # even when the user pasted an http:// link
         p = urlparse(url)
-        return f"{p.scheme or 'https'}://{p.netloc}/"
+        port = f":{p.port}" if p.port and p.port not in (80, 443) else ""
+        return f"https://{(p.hostname or '').lower()}{port}/"
 
     @staticmethod
     def _logged_in(html: str) -> bool:

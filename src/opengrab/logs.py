@@ -2,6 +2,7 @@
 
 import logging
 import logging.handlers
+import re
 import sys
 import threading
 from pathlib import Path
@@ -9,6 +10,22 @@ from pathlib import Path
 from .settings import app_data_dir
 
 _hooks_installed = False
+
+
+# "scheme://user:password@host": links such as ftp://user:pass@host/file carry
+# a password; the log file only keeps the user name
+_URL_PASSWORD = re.compile(r"(\b[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@]*:)[^/\s@]+@")
+
+
+def redact(text: str) -> str:
+    return _URL_PASSWORD.sub(r"\1***@", text)
+
+
+class RedactingFormatter(logging.Formatter):
+    """Formatter that hides passwords embedded in URLs (also in tracebacks)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record))
 
 
 def logs_dir() -> Path:
@@ -60,7 +77,7 @@ def setup_logging(level: int = logging.INFO) -> Path:
     if not exists:
         handler = logging.handlers.RotatingFileHandler(
             log_file, maxBytes=1_000_000, backupCount=5, encoding="utf-8")
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        handler.setFormatter(RedactingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         root.addHandler(handler)
     root.setLevel(level)
     _install_hooks()

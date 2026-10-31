@@ -20,10 +20,12 @@ import zlib
 from urllib.parse import urlparse
 
 from ..base import LoginRequired, PluginContext, PluginError, ResolveResult, SitePlugin
-from .pastes import extract_links
+from .pastes import MAX_CHILDREN, extract_links
 
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ID_RE = re.compile(r"^(?:pasteid=)?([0-9a-f]{16})$")
+MAX_ITERATIONS = 2_000_000          # PrivateBin itself uses 100 000
+MAX_PLAIN = 20_000_000              # a link list never needs more than this
 
 
 def b58decode(s: str) -> bytes:
@@ -63,6 +65,10 @@ def decrypt_v2(paste: dict, key_b58: str, password: str = "") -> str:
     key = b58decode(key_b58)
     key = key.rjust(32, b"\0")[-32:]
     material = key + password.encode("utf-8")
+    if not 0 < int(iterations) <= MAX_ITERATIONS:
+        # the count comes from the server: a huge one would hang the worker
+        raise PluginError("this PrivateBin paste asks for an unreasonable key "
+                          "derivation; OpenGrab did not open it")
     derived = PBKDF2(material, base64.b64decode(salt_b64), dkLen=int(key_bits) // 8,
                      count=int(iterations), hmac_hash_module=SHA256)
     blob = base64.b64decode(paste.get("ct", ""))
@@ -77,7 +83,10 @@ def decrypt_v2(paste: dict, key_b58: str, password: str = "") -> str:
             raise LoginRequired(hint="the PrivateBin password saved for this site is wrong")
         raise LoginRequired(hint="this PrivateBin paste needs a password: add it as an account for this site")
     if compression == "zlib":
-        plain = zlib.decompress(plain, -15)
+        inflater = zlib.decompressobj(-15)
+        plain = inflater.decompress(plain, MAX_PLAIN)
+        if inflater.unconsumed_tail:
+            raise PluginError("this PrivateBin paste is too large to open")
     body = json.loads(plain.decode("utf-8"))
     return str(body.get("paste", ""))
 
@@ -110,6 +119,8 @@ class PrivateBinPlugin(SitePlugin):
             data = r.json()
         except ValueError:
             raise PluginError(f"the paste site did not answer like PrivateBin (HTTP {r.status_code})")
+        if not isinstance(data, dict):
+            raise PluginError("the paste site did not answer like PrivateBin")
         if data.get("status", 0) != 0:
             raise PluginError(f"PrivateBin: {data.get('message') or 'paste not found or expired'}")
         password = ""
@@ -118,8 +129,14 @@ class PrivateBinPlugin(SitePlugin):
             password = (getattr(acc, "password", "") or "") if acc else ""
         except Exception:
             password = ""
-        text = decrypt_v2(data, key, password)
+        try:
+            text = decrypt_v2(data, key, password)
+        except (LoginRequired, PluginError):
+            raise
+        except (ValueError, TypeError, KeyError, AttributeError, zlib.error):
+            raise PluginError("this PrivateBin paste is damaged or in a format OpenGrab cannot read")
         links = extract_links(text, base)
         if not links:
             raise PluginError("the PrivateBin paste has no download links in it")
-        return ResolveResult(url="", filename=f"paste {paste_id}", children=[[u, ""] for u in links])
+        return ResolveResult(url="", filename=f"paste {paste_id}",
+                             children=[[u, ""] for u in links[:MAX_CHILDREN]])

@@ -72,15 +72,13 @@ class RootzPlugin(SitePlugin):
         data, base = self._info(url, sid, ctx)
         page_url = f"{base}/d/{sid}"
         proxy = f"{base}/api/files/proxy-download/{quote(data['file_id'])}"
-        for _attempt in range(2):
+        for attempt in range(3):
             wait = self._rate_limit_wait(proxy, page_url, ctx)
             if wait is None:
                 break
-            if wait > MAX_WAIT:
-                raise PluginError(f"Rootz rate limit: the host asks to wait {wait // 60 or 1} minutes")
+            if wait > MAX_WAIT or attempt == 2:   # no point sleeping without a re-check
+                raise PluginError(f"Rootz rate limit: wait {max(1, -(-wait // 60))} minutes")
             sleep(max(wait, 1))
-        else:
-            raise PluginError("Rootz rate limit: the host still asks to wait")
         return ResolveResult(url=proxy, filename=data["name"], size=data["size"],
                              headers={"referer": page_url})
 
@@ -103,7 +101,9 @@ class RootzPlugin(SitePlugin):
             body = r2.json()
         except ValueError:
             raise PluginError(f"Rootz API answered HTTP {r2.status_code} without JSON")
-        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(body, dict):
+            body = {}
+        data = body.get("data")
         if not body.get("success") or not isinstance(data, dict) or not data.get("fileId"):
             err = str(body.get("error") or "no file data")
             if r2.status_code == 404 or "not found" in err.lower():

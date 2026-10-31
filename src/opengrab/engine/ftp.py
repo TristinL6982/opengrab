@@ -95,7 +95,8 @@ def child_url(base_url: str, name: str, is_dir: bool = False) -> str:
     """URL of an entry in a directory listing (keeps the login of the base)."""
     parts = urlsplit(base_url)
     path = parts.path if parts.path.endswith("/") else parts.path + "/"
-    path += quote(name) + ("/" if is_dir else "")
+    # safe="": a "/" in a server-sent name must not turn into extra path levels
+    path += quote(name, safe="") + ("/" if is_dir else "")
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 

@@ -57,7 +57,7 @@ def status(ctx: PluginContext, path: str) -> dict:
     except ValueError:
         body = None
     if r.status_code == 429:
-        raise PluginError("FileDitch status API rate limit; try again in a minute")
+        raise PluginError("FileDitch status API rate limit reached; wait 1 minute")
     if not isinstance(body, dict) or "status" not in body:
         raise PluginError(f"FileDitch status API answered HTTP {r.status_code}")
     return body

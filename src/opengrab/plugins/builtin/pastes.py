@@ -22,6 +22,7 @@ from urllib.parse import urljoin, urlparse
 from ..base import (GrabResult, PaywallRequired, PluginContext, PluginError,
                     ResolveResult, SitePlugin)
 from .direct import FILE_EXTS
+from ._hostflow import leaves_public_net
 from .dlproxy import is_direct_host
 from .trackers import page_text
 
@@ -69,7 +70,8 @@ def _clean_url(u: str) -> str:
 
 def extract_links(text: str, base: str = "") -> list[str]:
     """Every link in a piece of html or plain text, in order, deduplicated:
-    anchors (made absolute against ``base``) and bare URLs/magnets."""
+    anchors (made absolute against ``base``) and bare URLs/magnets. Links to
+    localhost or private addresses are dropped when ``base`` is public."""
     out: list[str] = []
     seen: set[str] = set()
 
@@ -81,6 +83,8 @@ def extract_links(text: str, base: str = "") -> list[str]:
             u = urljoin(base, u)
         if not re.match(r"^(?:https?|ftps?)://|^magnet:\?", u, re.I):
             return
+        if base and leaves_public_net(base, u):
+            return   # a public page pointing at this computer or the LAN
         key = u.rstrip("/")
         if key not in seen:
             seen.add(key)
