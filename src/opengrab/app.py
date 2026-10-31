@@ -146,6 +146,15 @@ def _start_clicknload(settings: Settings, server: ApiServer) -> None:
             notify.add("info", "Click'n'Load is off", status.get("error", ""), label="linkgrabber")
 
 
+def instance_lock_name() -> str:
+    """One running copy per data folder: the usual install shares one lock,
+    while a portable copy or a test with its own data folder runs alongside."""
+    import hashlib
+    from .settings import app_data_dir
+    key = str(app_data_dir().resolve()).lower().encode("utf-8")
+    return "OpenGrab-SingleInstance-" + hashlib.sha256(key).hexdigest()[:16]
+
+
 def run_gui_mode(settings: Optional[Settings] = None,
                  host: Optional[str] = None, port: Optional[int] = None,
                  urls=(), files=(), minimized: bool = False) -> None:
@@ -155,7 +164,7 @@ def run_gui_mode(settings: Optional[Settings] = None,
     from PIL import Image, ImageDraw
     
     # Handle single instance lock for GUI mode  
-    lock_handle = acquire()
+    lock_handle = acquire(instance_lock_name())
     if lock_handle is None:
         # Another instance is running, forward URLs to it and exit
         try:

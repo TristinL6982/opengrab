@@ -288,3 +288,18 @@ def test_cli_positional_targets_reach_the_gui(monkeypatch, tmp_path):
                      "opengrab://add?url=https%3A%2F%2Fh.example%2Fz"]) == 0
     assert seen == {"urls": ["magnet:?xt=urn:btih:abc", "https://h.example/z"],
                     "files": [str(job.resolve())], "minimized": True}
+
+
+def test_one_running_copy_per_data_folder(monkeypatch, tmp_path):
+    """The single-instance lock follows the data folder, so a portable copy
+    (or a test) with its own folder is not blocked by the installed app."""
+    from opengrab.app import instance_lock_name
+    monkeypatch.setenv("OPENGRAB_DATA_DIR", str(tmp_path / "a"))
+    a1 = instance_lock_name()
+    monkeypatch.setenv("OPENGRAB_DATA_DIR", str(tmp_path / "A"))  # same folder on Windows
+    a2 = instance_lock_name()
+    monkeypatch.setenv("OPENGRAB_DATA_DIR", str(tmp_path / "b"))
+    b = instance_lock_name()
+    assert a1.startswith("OpenGrab-SingleInstance-") and a1 != b
+    if sys.platform == "win32":
+        assert a1 == a2
