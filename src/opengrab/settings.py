@@ -146,6 +146,7 @@ class Settings(BaseModel):
     archive_max_expanded_gib: int = 16
     archive_password_file: str = ""
     archive_7zip_path: str = ""        # W10: 7-Zip for split sets and RAR (blank = find it)
+    virustotal: dict = Field(default_factory=dict)  # {enabled, api_key, upload_unknown, min_detections}
     avscan: dict = Field(default_factory=dict)  # W10: {enabled, scanner, custom_command, infected_codes, timeout_s, quarantine}
     # W11 BitTorrent (libtorrent add-on) and router reconnect
     torrent: dict = Field(default_factory=dict)       # {dht, pex, lsd, sequential, ratio_limit, seed_minutes}

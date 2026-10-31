@@ -231,6 +231,9 @@ function rowActions(l) {
     case "error":
       b.push(sm("Retry", "start"));
       break;
+    case "finished":
+      if (l.path && l.extra?.virustotal?.status !== "checking") b.push(sm("VirusTotal", "virustotal"));
+      break;
     case "captcha":
       if (l.extra?.captcha_request_id) b.push(sm("Solve in browser", "captcha-browser-link"), sm("Retry", "captcha-retry"));
       break;
@@ -281,6 +284,12 @@ function linkRow(l) {
   const notes = [];
   if (l.status === "error" && l.error) notes.push(`<div class="u" style="color:var(--err)">${esc(l.error)}</div>`);
   if (l.status === "captcha" && l.extra?.captcha_request_id) notes.push(`<div class="u" style="color:var(--warn)">Waiting for a ${esc(l.captcha_kind)} check on ${esc((l.extra.captcha_site_url || l.url).split("/")[2] || "")}${l.extra.captcha_ray_id ? ", Ray ID " + esc(l.extra.captcha_ray_id) : ""}. Open Captchas to solve it.</div>`);
+  const vt = l.extra?.virustotal;
+  if (vt) {
+    const cls = vt.status === "flagged" ? "hashbad" : vt.status === "clean" ? "hashok" : "";
+    const what = vt.status === "clean" || vt.status === "flagged" ? vt.detail : vt.status === "checking" ? "checking…" : vt.detail;
+    notes.push(`<div class="u ${cls}">VirusTotal: ${esc(what || vt.status)}${vt.link ? ` · <a href="${esc(vt.link)}" target="_blank" rel="noopener noreferrer">report</a>` : ""}</div>`);
+  }
   if (l.extra?.avscan && l.extra.avscan.status !== "skipped") notes.push(l.extra.avscan.status === "infected"
     ? `<div class="u hashbad">Virus scan: infected${l.extra.avscan.quarantined ? ", moved to quarantine" : ""}</div>`
     : `<div class="u ${l.extra.avscan.status === "clean" ? "hashok" : ""}">Virus scan: ${esc(l.extra.avscan.status)}</div>`);
@@ -691,6 +700,10 @@ async function act(action, el) {
   try {
     switch (action) {
       case "start": await api(`/api/links/${id}/start`, "POST"); break;
+      case "virustotal":
+        await api(`/api/links/${id}/virustotal`, "POST", {});
+        toast("Checking on VirusTotal", "ok");
+        break;
       case "pause": await api(`/api/links/${id}/pause`, "POST"); break;
       case "resume": await api(`/api/links/${id}/resume`, "POST"); break;
       case "stop":
@@ -1245,6 +1258,12 @@ async function loadScanSettings(s) {
   $("#av-codes").value = (av.infected_codes || [2]).join(" ");
   $("#av-timeout").value = av.timeout_s || 300;
   $("#av-quarantine").checked = !!av.quarantine;
+  const vt = s.virustotal || {};
+  $("#vt-enabled").checked = !!vt.enabled;
+  $("#vt-key").value = "";
+  $("#vt-key").placeholder = vt.api_key_set ? "saved (type to replace)" : "paste your key";
+  $("#vt-min").value = vt.min_detections || 2;
+  $("#vt-upload").checked = !!vt.upload_unknown;
   try {
     const r = await api("/api/avscan");
     $("#av-defender").textContent = r.defender ? "Windows Defender was found on this PC." : "Windows Defender's command line was not found on this PC.";
@@ -1675,6 +1694,10 @@ $("#btn-set-save").addEventListener("click", async () => {
     custom_command: $("#av-command").value.trim(),
     infected_codes: $("#av-codes").value.split(/[\s,]+/).filter(Boolean).map(Number).filter(n => !isNaN(n)),
     timeout_s: +$("#av-timeout").value || 300, quarantine: $("#av-quarantine").checked,
+  };
+  body.virustotal = {
+    enabled: $("#vt-enabled").checked, api_key: $("#vt-key").value.trim(),
+    min_detections: +$("#vt-min").value || 2, upload_unknown: $("#vt-upload").checked,
   };
   try {
     const res = await api("/api/settings", "POST", body);

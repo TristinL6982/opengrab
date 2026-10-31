@@ -558,18 +558,25 @@ class DownloadManager:
         link = self.get(link_id)
         if link is None or not link.path:
             return
-        res = self.virus_scan.scan(link.path)
-        link.extra["avscan"] = {"status": res.status, "detail": res.detail[-300:], "code": res.code}
-        if res.flagged:
+        flagged = False
+        if self.virus_scan.enabled():
+            res = self.virus_scan.scan(link.path)
+            link.extra["avscan"] = {"status": res.status, "detail": res.detail[-300:], "code": res.code}
+            flagged = res.flagged
+        if self.virus_scan.vt_enabled() and not flagged:
+            vt = self.virus_scan.vt_check(link.path)
+            link.extra["virustotal"] = vt.to_dict()
+            flagged = vt.flagged
+        if flagged:
             cfg = self.virus_scan.config()
             if cfg.quarantine:
                 try:
                     root = Path(self.settings.download_dir).expanduser().resolve()
                     moved = self.virus_scan.quarantine(Path(link.path), root)
                     link.path = str(moved)
-                    link.extra["avscan"]["quarantined"] = True
+                    link.extra.setdefault("avscan", {"status": "infected"})["quarantined"] = True
                 except OSError as exc:
-                    link.extra["avscan"]["quarantine_error"] = str(exc)
+                    link.extra.setdefault("avscan", {"status": "infected"})["quarantine_error"] = str(exc)
             self.on_change("virus", link.to_public())
         self._persist()
         self._broadcast("grabbed", link)
@@ -1112,7 +1119,7 @@ class DownloadManager:
             link.progress = 1.0
             self._retries.pop(link.id, None)
             self._broadcast("finished", link)
-            if self.virus_scan.enabled():  # W10: never blocks the queue
+            if self.virus_scan.enabled() or self.virus_scan.vt_enabled():  # W10: never blocks the queue
                 self._spawn(self._scan_link, link.id)
             if str(path).lower().endswith(".torrent") and getattr(self.settings, "torrent_open_files", True):
                 self.add_torrent_file(str(path), title=Path(path).stem)  # W11

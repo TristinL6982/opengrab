@@ -110,6 +110,27 @@ class VirusScan:
     def enabled(self) -> bool:
         return self.config().enabled
 
+    # -- VirusTotal (hash lookup, optional upload) ---------------------------
+    def vt_config(self):
+        from .. import virustotal
+        try:
+            return virustotal.config_from_dict(getattr(self.settings, "virustotal", None) or {})
+        except (TypeError, ValueError):
+            return virustotal.VtConfig()
+
+    def vt_enabled(self) -> bool:
+        cfg = self.vt_config()
+        return cfg.enabled and bool(cfg.api_key)
+
+    def vt_check(self, path: str):
+        from .. import virustotal
+        res = virustotal.VirusTotal(self.vt_config()).check(path)
+        with self._lock:
+            self.history.append({"path": path, "status": res.status, "code": None, "scanner": "virustotal",
+                                 "detail": res.detail, "link": res.link})
+            self.history = self.history[-200:]
+        return res
+
     def scan(self, path: str) -> avscan.ScanResult:
         res = avscan.Scanner(self.config(), self.runner, self.exists).scan(path)
         with self._lock:

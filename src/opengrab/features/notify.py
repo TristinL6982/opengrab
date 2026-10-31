@@ -168,7 +168,9 @@ class NotifyService:
             name = (payload.get("title") or payload.get("filename") or "download").strip()
             av = (payload.get("extra") or {}).get("avscan") or {}
             where = " It was moved to the quarantine folder." if av.get("quarantined") else ""
-            self.add("failed", "Virus found", f"{name} failed the virus scan.{where}",
+            vt = (payload.get("extra") or {}).get("virustotal") or {}
+            why = f" VirusTotal: {vt['detail']}." if vt.get("status") == "flagged" else ""
+            self.add("failed", "Virus found", f"{name} failed the virus scan.{why}{where}",
                      link_id=str(payload.get("id") or ""), label="virus")
             return
         status = payload.get("status") or ""

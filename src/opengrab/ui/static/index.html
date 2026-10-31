@@ -391,6 +391,17 @@
             <label class="check"><input id="av-quarantine" type="checkbox"> Move infected files to a quarantine folder</label>
           </div>
           <div class="formrow"><button id="btn-av-test">Test the scanner</button><span id="av-test-result" class="hint"></span></div>
+
+          <h2>VirusTotal</h2>
+          <p class="hint">Asks VirusTotal what about 70 antivirus engines think of a file. Only the file's fingerprint (SHA-256) is sent,
+          unless you allow uploads. Get a free API key from your account at virustotal.com. These settings can only be changed on this computer.</p>
+          <div class="settings-grid">
+            <label class="check"><input id="vt-enabled" type="checkbox"> Check every finished download on VirusTotal</label>
+            <label>API key<input id="vt-key" type="password" autocomplete="off" placeholder="paste your key"></label>
+            <label>Engines that must agree before a file counts as infected<input id="vt-min" type="number" min="1" max="20" value="2"></label>
+            <label class="check"><input id="vt-upload" type="checkbox"> Upload files VirusTotal has never seen (shares the file with VirusTotal)</label>
+          </div>
+          <p class="hint">Any finished download also has a <b>VirusTotal</b> button for a one-off check.</p>
         </div>
 
         <h2>Connection</h2>

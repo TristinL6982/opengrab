@@ -1073,6 +1073,9 @@ def _make_handler(srv: ApiServer):
                 d["download_dir"] = str(Path(mgr.settings.download_dir))
                 d.pop("api_token", None)  # Never include api_token in settings response
                 d.pop("site_credentials", None)  # protected secrets stay server-side
+                vt = dict(d.get("virustotal") or {})  # the VirusTotal key never leaves the server
+                vt["api_key_set"] = bool(vt.pop("api_key", ""))
+                d["virustotal"] = vt
                 return self._json(d)
             if p == "/api/diagnostics":
                 links = mgr.all_links()
@@ -1319,11 +1322,18 @@ def _make_handler(srv: ApiServer):
                 # this computer, never from LAN/remote clients (C4 lesson)
                 runs_programs = {"event_hooks", "reconnect", "avscan", "archive_7zip_path",
                                  "media_ffmpeg_path", "captcha_ffmpeg_path", "captcha_tesseract_path",
-                                 "allow_remote_http", "trusted_proxies"}
+                                 "allow_remote_http", "trusted_proxies",
+                                 "virustotal"}  # can send downloaded files to a third party
                 if not is_loopback(srv.access.client_ip(self.client_address[0], self.headers)):
                     forbidden = forbidden | runs_programs
                 known = set(type(mgr.settings).model_fields)
                 allowed = {k: v for k, v in body.items() if k in known and k not in forbidden}
+                if isinstance(allowed.get("virustotal"), dict):
+                    vt_new = dict(allowed["virustotal"])
+                    if not str(vt_new.get("api_key") or "").strip():  # blank keeps the saved key
+                        vt_new["api_key"] = (mgr.settings.virustotal or {}).get("api_key", "")
+                    vt_new.pop("api_key_set", None)
+                    allowed["virustotal"] = vt_new
                 ignored = sorted(k for k in body if k not in allowed)
                 try:
                     candidate = type(mgr.settings).model_validate(
