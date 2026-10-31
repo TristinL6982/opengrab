@@ -50,11 +50,51 @@ def _parser() -> argparse.ArgumentParser:
                         help="download and install an optional add-on (ocr, torrent) and exit")
     parser.add_argument("--enable-ocr", action="store_true",
                         help="with --install-addon ocr, also turn on the local OCR captcha solver")
+    parser.add_argument("--progress-file", metavar="FILE", default=None,
+                        help="with --install-addon, keep FILE updated as 'percent|done|total|step', "
+                             "then 'done' or 'error|message' (read by the setup wizard)")
     parser.add_argument("--minimized", action="store_true",
                         help="start in the tray without showing the window (used by autostart)")
     parser.add_argument("targets", nargs="*", metavar="LINK_OR_FILE",
                         help="links, magnet:/opengrab:// links or .torrent/.crawljob files to add")
     return parser
+
+
+def _progress_writer(path):
+    """Progress for the setup wizard: the whole file is replaced each time,
+    so a reader never sees half a line. Writes at most five times a second."""
+    import time
+    last, last_step = [0.0], [""]
+
+    def write(text: str) -> None:
+        if not path:
+            return
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="ascii", errors="replace") as fh:
+                fh.write(text)
+            os.replace(tmp, path)
+        except OSError:
+            pass
+
+    def report(state, error: str = "", finished: bool = False) -> None:
+        if error:
+            write("error|" + " ".join(error.split()).replace("|", "/")[:200])
+            return
+        if finished:
+            write("done")
+            return
+        now = time.monotonic()
+        step = str(state.get("step") or "")
+        if now - last[0] < 0.2 and step == last_step[0]:
+            return  # byte counts are throttled; a new step is always shown
+        last[0], last_step[0] = now, step
+        total = int(state.get("total") or 0)
+        done = int(state.get("done") or 0)
+        pct = min(100, done * 100 // total) if total else 0
+        write(f"{pct}|{done}|{total}|{state.get('step', '')}")
+
+    return report
 
 
 def _client_commands():
@@ -84,15 +124,18 @@ def main(argv=None) -> int:
     settings = load_settings()
     if args.install_addon:  # M14: offered by the installer
         from . import addons
+        report = _progress_writer(args.progress_file)
         try:
-            addons.install(args.install_addon)
+            addons.install(args.install_addon, progress=report)
         except Exception as exc:
             print(f"could not install the {args.install_addon} add-on: {exc}", file=sys.stderr)
+            report(None, error=str(exc))
             return 1
         if args.install_addon == "ocr" and args.enable_ocr:
             settings.captcha_ocr_enabled = True
             settings.save()
         print(f"{args.install_addon} add-on installed")
+        report(None, finished=True)
         return 0
     if os.environ.get("OPENGRAB_BASE_PATH") is not None:
         settings.base_path = os.environ["OPENGRAB_BASE_PATH"]

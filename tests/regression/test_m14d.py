@@ -30,7 +30,11 @@ def test_installer_offers_everything_the_spec_lists():
     assert r'DestDir: "{app}\app"' in iss and r'Name: "{app}\plugins"' in iss and r'Name: "{app}\models"' in iss
     for task in ("desktopicon", "autostart", "magnet", "opengrabproto", "torrent", "crawljob", "dlc", "ocr", r"ocr\on"):
         assert re.search(rf'^Name: "{re.escape(task)}"', iss, re.M), task
-    assert "--install-addon ocr --enable-ocr" in iss and "runasoriginaluser" in iss
+    # the add-on is fetched by OpenGrab as the signed-in user, with its own progress bar
+    assert "ExecAsOriginalUser" in iss and "'--install-addon ocr --progress-file" in iss
+    assert "' --enable-ocr'" in iss and r"WizardIsTaskSelected('ocr\on')" in iss
+    assert "OcrBar" in iss and "ProgressGauge" in iss and "PumpMessages" in iss
+    assert "runhidden" not in iss  # no silent step that makes the wizard look frozen
     assert r"{userappdata}\OpenGrab" in iss                      # data kept unless the user asks
     assert "uninsdeletekey" in iss and "uninsdeletevalue" in iss
     # the registry entries match what Settings, Windows integration writes
@@ -62,3 +66,31 @@ def test_no_private_key_is_committed():
         if p.suffix.lower() in (".png", ".ico", ".zip", ".exe", ".whl") or not p.is_file():
             continue
         assert marker not in p.read_text(encoding="utf-8", errors="ignore"), name
+
+
+def test_install_addon_progress_file_for_the_setup_wizard(monkeypatch, tmp_path):
+    from opengrab import addons
+    monkeypatch.setenv("OPENGRAB_DATA_DIR", str(tmp_path))
+    prog = tmp_path / "progress.txt"
+    seen = []
+
+    def fake_install(name, progress=None, **kw):
+        for done, step in ((0, "downloading a.whl"), (512 * 1024, "downloading a.whl"),
+                           (1024 * 1024, "unpacking a.whl")):
+            progress({"done": done, "total": 1024 * 1024, "step": step})
+            seen.append(prog.read_text())
+        return {"ok": True}
+
+    monkeypatch.setattr(addons, "install", fake_install)
+    assert cli.main(["--install-addon", "ocr", "--progress-file", str(prog)]) == 0
+    assert seen[0] == "0|0|1048576|downloading a.whl"
+    assert seen[-1] == "100|1048576|1048576|unpacking a.whl"  # a new step is always written
+    assert prog.read_text() == "done"
+
+    def failing(name, progress=None, **kw):
+        progress({"done": 10, "total": 100, "step": "downloading a.whl"})
+        raise RuntimeError("network down |" + chr(10) + "retry later")
+
+    monkeypatch.setattr(addons, "install", failing)
+    assert cli.main(["--install-addon", "ocr", "--progress-file", str(prog)]) == 1
+    assert prog.read_text() == "error|network down / retry later"

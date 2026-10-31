@@ -37,7 +37,7 @@ jobs:
         run: |
           $setup = Get-ChildItem build\release\OpenGrab-*-setup.exe | Select-Object -First 1
           $dir = "$env:RUNNER_TEMP\OpenGrabInstall"
-          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$dir","/TASKS=magnet,torrent" -Wait
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$dir","/TASKS=magnet,torrent,ocr,ocr\on","/LOG=$env:RUNNER_TEMP\setup.log" -Wait
           if (-not (Test-Path "$dir\app\OpenGrab.exe")) { throw "not installed" }
           if (-not (Test-Path "$dir\plugins") -or -not (Test-Path "$dir\models")) { throw "layout" }
           # a windowed exe: wait for it explicitly and read its exit code
@@ -45,6 +45,12 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "smoke test failed: $($p.ExitCode)" }
           $cmd = (Get-ItemProperty "HKCU:\Software\Classes\magnet\shell\open\command").'(default)'
           if ($cmd -notlike "*OpenGrab.exe*") { throw "magnet handler missing: $cmd" }
+          # the OCR add-on was downloaded by the wizard (second progress bar) and turned on
+          if (Select-String -Path "$env:RUNNER_TEMP\setup.log" -Pattern "OCR add-on:" -Quiet) {
+            Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40; throw "OCR add-on failed" }
+          if (-not (Test-Path "$env:APPDATA\OpenGrab\addons\ocr\site")) { throw "OCR add-on not installed" }
+          $s = Get-Content "$env:APPDATA\OpenGrab\settings.json" -Raw | ConvertFrom-Json
+          if (-not $s.captcha_ocr_enabled) { throw "OCR not turned on" }
           Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
           Start-Sleep 3
           if (Test-Path "$dir\app\OpenGrab.exe") { throw "uninstall left the program" }
