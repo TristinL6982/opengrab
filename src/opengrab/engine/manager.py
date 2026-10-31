@@ -832,6 +832,14 @@ class DownloadManager:
             return
         if link.status == LinkStatus.ERROR:
             link.error = ""
+        if not link.direct_url and not link.children:
+            # the lookup never finished, so there is nothing to download yet:
+            # look the link up again (the workers skip links without a file address)
+            link.status = LinkStatus.RESOLVING
+            self._persist()
+            self._broadcast("grabbed", link)
+            self._spawn(self._grab_and_queue, link.id, True)
+            return
         link.status = LinkStatus.WAITING
         self._persist()
         self._ready_put(link_id)

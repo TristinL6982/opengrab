@@ -141,3 +141,25 @@ def test_expired_host_link_is_refreshed_once_then_downloads():
             assert "404" in got2.error and Expiring.calls == 2  # refreshed once, then failed
     finally:
         site.close()
+
+
+def test_retry_after_a_failed_lookup_looks_the_link_up_again():
+    """A link whose lookup failed has no file address. Retry used to park it in
+    "waiting", where the workers skip it, so it stayed queued forever."""
+    site = FileSite()
+    try:
+        url = site.add("/f/later.bin", b"y" * 3000)
+        with running_server() as srv:
+            real = dict(srv.manager.registry.plugins)
+            srv.manager.registry.plugins = {"refuser": Refuser("127.0.0.1")}
+            link = srv.manager.add_url(url)
+            got = _wait(lambda: srv.manager.get(link.id).status.value == "error" and srv.manager.get(link.id))
+            assert not got.direct_url
+            srv.manager.registry.plugins = real  # e.g. an update brought a plugin for the site
+            srv.manager.start_download(link.id)
+            got = _wait(lambda: srv.manager.get(link.id).status.value in ("finished", "error")
+                        and srv.manager.get(link.id))
+            assert got.status.value == "finished", got.error
+            assert got.plugin != "refuser"
+    finally:
+        site.close()
