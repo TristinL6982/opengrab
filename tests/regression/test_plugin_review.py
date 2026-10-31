@@ -362,3 +362,24 @@ def test_browserpage_waits_for_the_lock_only_so_long(monkeypatch):
         assert browserpage.BrowserPage._busy.locked()
     finally:
         browserpage.BrowserPage._busy.release()
+
+
+def test_log_level_can_be_raised_for_test_builds(monkeypatch, tmp_path):
+    import logging
+    from opengrab import logs
+
+    monkeypatch.setenv("OPENGRAB_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENGRAB_LOG_LEVEL", "debug")
+    root = logging.getLogger()
+    before = root.level
+    try:
+        logs.setup_logging()
+        assert root.level == logging.DEBUG
+        monkeypatch.setenv("OPENGRAB_LOG_LEVEL", "nonsense")
+        logs.setup_logging()
+        assert root.level == logging.INFO
+    finally:
+        for h in [h for h in root.handlers if str(tmp_path) in str(getattr(h, "baseFilename", ""))]:
+            root.removeHandler(h)
+            h.close()
+        root.setLevel(before)

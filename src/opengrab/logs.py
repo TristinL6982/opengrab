@@ -2,6 +2,7 @@
 
 import logging
 import logging.handlers
+import os
 import re
 import sys
 import threading
@@ -65,7 +66,11 @@ def _install_hooks() -> None:
 
 
 def setup_logging(level: int = logging.INFO) -> Path:
-    """Add one rotating file handler to the root logger and return the log file path."""
+    """Add one rotating file handler to the root logger and return the log file path.
+
+    OPENGRAB_LOG_LEVEL (DEBUG, INFO, WARNING, ...) overrides ``level``."""
+    level = logging.getLevelNamesMapping().get(
+        os.environ.get("OPENGRAB_LOG_LEVEL", "").strip().upper(), level)
     log_file = logs_dir() / "opengrab.log"
     root = logging.getLogger()
     target = str(log_file.resolve())
