@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="opengrab",
-    version="0.1.2",
+    version="0.1.3",
     description="OpenGrab - A Better Internet Download Manager",
     license="MIT",
     url="https://github.com/TristinL6982/opengrab",

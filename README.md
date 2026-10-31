@@ -240,7 +240,7 @@ The command talks to the running app. Links, `magnet:` and `opengrab://` address
 
 ## Project status
 
-OpenGrab is at version 0.1.2. Every feature above is covered by automated tests (over 1,100 of them, run on every push on Windows, Linux, macOS and in Docker), and the Windows build is installed, started and uninstalled by the pipeline before it is published.
+OpenGrab is at version 0.1.3. Every feature above is covered by automated tests (over 1,100 of them, run on every push on Windows, Linux, macOS and in Docker), and the Windows build is installed, started and uninstalled by the pipeline before it is published.
 
 Things that are built but not yet verified against the real world, and the decisions still open, are listed in [the project spec, section 9](docs/project-spec.md#9-open-decisions-and-known-gaps-recorded-2026-10-30). The current verified state is in [docs/progress.md](docs/progress.md). Bug reports with a link that misbehaves are the most useful thing you can send.
 
