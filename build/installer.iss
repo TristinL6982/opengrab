@@ -1,5 +1,5 @@
 ﻿; OpenGrab setup (M14). Build after PyInstaller:
-;   iscc /DAppVersion=0.1.1 build\installer.iss
+;   iscc /DAppVersion=0.1.2 build\installer.iss
 ; Output: build\release\OpenGrab-<version>-setup.exe
 ;
 ; Layout: {app}\app\ (the program; the in-app updater swaps this folder),
@@ -8,7 +8,7 @@
 ; %APPDATA%\OpenGrab and is kept on uninstall unless the user asks.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.1.2"
 #endif
 
 [Setup]

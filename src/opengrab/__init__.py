@@ -7,6 +7,6 @@ captcha solvers (no service paywall), and TLS-fingerprint anti-bot
 handling via curl_cffi.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 APP_NAME = "OpenGrab"
 APP_ID = "opengrab"
