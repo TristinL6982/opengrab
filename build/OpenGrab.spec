@@ -31,7 +31,14 @@ a = Analysis(
     # Spec section 2: no ML packages in the base app. Local OCR is an add-on
     # downloaded on opt-in (src/opengrab/addons.py).
     excludes=["ddddocr", "onnxruntime", "cv2", "numpy", "torch", "tensorflow",
-              "libtorrent"],  # torrent engine is an add-on too (W11)
+              "libtorrent",  # torrent engine is an add-on too (W11)
+              # unused weight (2026-10-30): image codecs OpenGrab never opens,
+              # Tk, build tools, and pywebview's non-Windows backends
+              "PIL._avif", "PIL.AvifImagePlugin", "PIL._webp", "PIL.WebPImagePlugin",
+              "PIL._imagingcms", "PIL.ImageCms", "PIL._imagingtk", "PIL.ImageTk", "tkinter",
+              "lib2to3", "pydoc_data", "playwright",  # optional browser-solver fallback, never shipped
+              "webview.platforms.cocoa", "webview.platforms.gtk", "webview.platforms.qt",
+              "webview.platforms.android", "webview.platforms.cef"],
 )
 pyz = PYZ(a.pure)
 exe = EXE(

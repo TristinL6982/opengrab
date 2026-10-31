@@ -10,3 +10,5 @@ build/OpenGrab/dist/
 *.spec.bak
 .venv.bak
 build/build/
+.pytest_cache/
+*.pem

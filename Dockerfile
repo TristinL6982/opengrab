@@ -1,4 +1,8 @@
 FROM python:3.12-slim
+LABEL org.opencontainers.image.title="OpenGrab" \
+      org.opencontainers.image.description="OpenGrab - A Better Internet Download Manager (headless server and web UI)" \
+      org.opencontainers.image.source="https://github.com/TristinL6982/opengrab" \
+      org.opencontainers.image.licenses="MIT"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 OPENGRAB_BIND=0.0.0.0 OPENGRAB_PORT=5678 OPENGRAB_DATA_DIR=/config OPENGRAB_DOWNLOAD_DIR=/downloads
 WORKDIR /app
 COPY requirements.txt setup.py ./

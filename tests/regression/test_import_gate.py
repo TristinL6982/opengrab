@@ -1,8 +1,8 @@
 """Integration gate: every product module must be reachable from a runtime
 entry point (app, server, cli, smoke, __main__).
 
-KNOWN_ORPHANS lists the modules found unreachable by the 2026-10-30 audit
-(docs/plan/INTEGRATION_AUDIT.md). It may only shrink: a new module that no
+KNOWN_ORPHANS lists the modules found unreachable by the 2026-10-30
+integration audit. It may only shrink: a new module that no
 entry point imports fails this test, and a listed module that has been wired
 in must be removed from the list.
 """

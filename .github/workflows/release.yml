@@ -7,6 +7,7 @@ on:
     tags: ["v*"]
 permissions:
   contents: write
+  packages: write
 jobs:
   windows:
     runs-on: windows-latest
@@ -52,3 +53,26 @@ jobs:
             "build/release/OpenGrab-$VERSION-win64.zip" \
             "build/release/OpenGrab-$VERSION-win64.zip.sig" \
             "build/release/OpenGrab-$VERSION-setup.exe"
+
+  # Docker image on the GitHub Container Registry (shows under Packages).
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, check the health endpoint, push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          img="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build --label "org.opencontainers.image.version=$v" -t "$img:$v" -t "$img:latest" .
+          docker run -d --name og "$img:$v"
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' og)" = healthy ] && break
+            sleep 3
+          done
+          [ "$(docker inspect -f '{{.State.Health.Status}}' og)" = healthy ] || { docker logs og; exit 1; }
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$img:$v"
+          docker push "$img:latest"

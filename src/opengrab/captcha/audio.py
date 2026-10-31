@@ -1,4 +1,4 @@
-"""Offline transcriber for audio captchas (PROJECT_SPEC.md section 6d).
+"""Offline transcriber for audio captchas (docs/project-spec.md section 6d).
 
 Turns the bytes of an audio challenge (for example the MP3 behind a
 reCAPTCHA audio button) into text, fully offline:

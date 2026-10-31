@@ -5,3 +5,10 @@ __pycache__
 build/dist
 build/work
 tests
+docs
+build
+extension
+tools
+.github
+*.md
+.env

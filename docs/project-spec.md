@@ -46,14 +46,13 @@ Python core src/opengrab; pywebview native window loading the bundled local UI p
 | M13 | Automation | Event hooks, Folder Watch, Anti-Standby, shutdown, CLI, webhooks. | 4 | 2 |
 | M14 | Polish and distribution | Updates, onboarding, i18n, themes, accessibility, advanced settings, JD2 import, other platforms. | 12 | 5 |
 
-These replace all older milestone labels in PROGRESS.md. REVIEW.md section 5 calls M2-M5 'M1-M4'.
+These replace all older milestone labels in progress.md.
 For M2: Convert `tests/*.py` into pytest tests, keeping the scripts runnable. Add `pyproject.toml` with `[tool.pytest.ini_options] testpaths=["tests"]`. Rewrite `build/build.bat` to use `..\.venv\Scripts\python.exe -m PyInstaller`. Delete `run_opengrab.bat`, or rewrite it to call `.venv\Scripts\OpenGrab` or the built exe. Add a GitHub Actions workflow on `windows-latest` that runs pytest, builds the exe, and runs `OpenGrab.exe --smoke-test`.
 For M3: Persist per-chunk progress in a sidecar (`<file>.part.json` holding chunk ranges and bytes written, fsync'd periodically). On resume, read it and resume each chunk. Never finalize unless every chunk is complete and the size matches. When a chunk is cancelled, raise cancel out of `_parallel`, never finalize. Persist DOWNLOADING links (as PAUSED on load) and keep the `_load_links` recovery path. Pause must release the worker and the connection (stop the stream, keep the sidecar, requeue on resume). Bound `_stream` retries by `retry_max`. Cancel sibling chunks on fatal error. Sanitize the Content-Disposition name and honor RFC 5987 `filename*`. Apply `max_parallel` live.
 For M4: Remove `Access-Control-Allow-Origin: *`; send no CORS by default. Require the token on **every** `/api/*` request, including loopback. Hand the token to the pywebview window through `js_api` or an HttpOnly SameSite=Strict cookie set on first load with a per-launch nonce. Validate `Host` against `127.0.0.1` / `localhost` / configured names. Reject requests whose `Origin` is not same-origin. Stop returning `api_token` from `GET /api/settings`. Turn on `validate_assignment=True` in Settings and whitelist which keys `POST /api/settings` may change. On a bad `settings.json`, back it up and **do not** overwrite it. `terminal_enabled` may only be changed from the desktop UI (or remove the terminal). Remove-link must not delete files unless the user explicitly chooses "Remove and delete file". Fix account delete to use the id. Store credentials with Windows DPAPI or `keyring`.
 For M5: Single-instance lock: a named mutex on Windows; a second launch focuses the existing window or sends it `--grab` URLs. On Windows, bind with `SO_EXCLUSIVEADDRUSE` (override `server_bind`) and do not set SO_REUSEADDR. If 5678 is taken, show a clear dialog, or pick a free port **without persisting it**. Never write `api_port` from a CLI `--port` override (remove `settings.save()` at `app.py:42-43`). Before `create_window`, GET `/api/ping` and require a per-launch nonce to match. Otherwise abort with an error. `console=False` plus an `.ico`; write a log file under `%APPDATA%\OpenGrab\logs`. Detect a missing WebView2 runtime and show a message. Lazy or optional ddddocr to shrink the bundle.
 
 ## 6. Feature parity
-The full JD2 comparison is in docs/plan/FEATURES.md, plugin inventory docs/plan/JD2_PLUGIN_INVENTORY.md
 
 ### 6a. Required in the final release (IDM-class features, requested by Tristin 2026-10-27)
 - **Speed acceleration (M6/M11):** dynamic segmentation (split the remaining range of the slowest segment when a connection frees up, IDM-style), up to 8-16 connections per file when the server allows ranges, HTTP keep-alive and connection reuse per host, and a fallback to one connection when ranges aren't supported. Target: close to line speed on range-capable servers (IDM advertises 5-8x; measure against single-connection curl in a benchmark test).
@@ -121,10 +120,10 @@ Scheduled as M8 sub-tasks.
 Scheduled as M8 sub-tasks with 6d.
 
 ## 9. Open decisions and known gaps (recorded 2026-10-30)
-Items that need the owner's decision or input, or that are built but not yet verified. None of them is marked complete in PROGRESS.md.
+Items that need the owner's decision or input, or that are built but not yet verified. None of them is marked complete in progress.md.
 
 **Needs the owner**
-- **Release signing key.** The in-app updater installs only releases signed with a key listed in `updater.RELEASE_KEYS`, which is empty. Run `tools/release_key.py` once, put the printed public key in `RELEASE_KEYS`, and store the PEM as the GitHub secret `RELEASE_SIGNING_KEY`. Until then the updater reports new releases but refuses to install them.
+- **Release signing key.** Created 2026-10-30; the public key is in `updater.RELEASE_KEYS` and the private key is the `RELEASE_SIGNING_KEY` Actions secret. Keep an offline copy of the private key.
 - **Windows code signing (Authenticode).** The exe and setup are unsigned, so SmartScreen warns on first run. Needs a code-signing certificate.
 - **Delta updates.** The spec asks for "small delta updates when possible". Updates are the full zip (about 80 MB). Options: binary diff per file against the installed version, or keep full zips.
 - **DLC and CCF containers.** Decrypting DLC needs JDownloader's service keys, which are not public and would conflict with "never port JD2 code". RSDF works. Decision: leave DLC/CCF unsupported (current behaviour: a clear error) or find a licensed route.

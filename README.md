@@ -33,7 +33,7 @@
 - **Handles the hard sites.** Cloudflare and DDoS-Guard checks, captchas, logins and premium accounts are part of the normal flow, not an error message.
 - **Does the rest for you.** Extraction, checksums, virus scans, categories, renaming rules, scheduled speed windows, data caps, and "shut down when done".
 - **Yours to run anywhere.** A Windows desktop app with a tray icon, or a headless server in Docker that you control from your phone, the command line, or scripts.
-- **Light.** Around 80 MB on disk, no bundled AI models, no GPU needed. Optional add-ons such as the local captcha solver are downloaded only when you turn them on.
+- **Light.** About 70 MB on disk, no bundled AI models, no GPU needed. Optional add-ons such as the local captcha solver are downloaded only when you turn them on.
 
 ## See it in action
 
@@ -79,6 +79,14 @@ python -m opengrab --headless         # API and web UI only, any platform
 Python 3.12 or newer. On Linux and macOS the headless server and web UI are tested in CI; the native window and tray are Windows-only for now.
 
 ### Docker
+
+Each release publishes an image to the GitHub Container Registry:
+
+```bash
+docker run -d --name opengrab -p 5678:5678   -v ./config:/config -v ./downloads:/downloads   ghcr.io/tristinl6982/opengrab:latest
+```
+
+Or build it yourself with Compose:
 
 ```bash
 cp .env.example .env
@@ -135,6 +143,7 @@ An optional libtorrent add-on, installed from Settings in one click, adds magnet
 |---|---|
 | **Extraction** | ZIP, 7z and TAR archives are unpacked into their own folder, with a private password list for encrypted archives. RAR needs an `unrar` tool on your PATH. |
 | **Virus scan** | Optional scan of every finished file with Windows Defender or any command-line scanner. |
+| **VirusTotal** | Check finished files against about 70 antivirus engines with your free VirusTotal API key, automatically or with one click per download. Only the file's SHA-256 is sent unless you allow uploads of files VirusTotal has never seen. Flagged files can go straight to quarantine. |
 | **Categories** | Video, Music, Documents, Archives and Programs go into their own folders if you want. |
 | **Files and audio** | Browse the download folder from the app and play audio files right there. |
 
@@ -154,7 +163,7 @@ An optional libtorrent add-on, installed from Settings in one click, adds magnet
 |---|---|
 | **Classic look, modern build** | The layout you know from IDM and JDownloader 2: a toolbar, a category tree and a list with real progress bars. Light and dark themes, three row densities, your choice of columns and accent colour. |
 | **Dashboard** | Today's totals, the last 14 days, a live transfer graph, what is downloading now and your busiest sites, in panels you can rearrange. |
-| **Languages** | English and Simplified Chinese. Translations are plain JSON files, so adding a language needs no code. |
+| **Languages** | English and Simplified Chinese. Translations are plain JSON files, so adding a language is mostly translating. |
 | **Accessibility** | Full keyboard control of the download list, spoken names for every control, visible focus, and WCAG AA colour contrast. |
 | **Import from JDownloader 2** | Bring your download list, LinkGrabber links and main settings across in one step. JDownloader's files are never changed. |
 | **Updates** | One click checks GitHub for a new release, verifies its signature, tests it, and installs it. The previous version is kept so you can go back. |
@@ -206,11 +215,11 @@ The command talks to the running app. Links, `magnet:` and `opengrab://` address
 | Headless server, Docker, pairing for phones and scripts | Yes | No | Partial |
 | Command line and webhooks | Yes | No | Partial |
 | Runs without Java or a browser plugin | Yes | Yes | No |
-| Disk footprint | About 80 MB | Small | Several hundred MB |
+| Disk footprint | About 70 MB | Small | Several hundred MB |
 
 ## Privacy and security
 
-- Everything runs on your machine. OpenGrab contacts only the sites you download from, GitHub for update checks when you ask, and the solver services you configure.
+- Everything runs on your machine. OpenGrab contacts only the sites you download from, GitHub for update checks when you ask, and the services you configure yourself (captcha solvers, VirusTotal).
 - The local API listens on `127.0.0.1` and needs a token on every request. Other machines get in only with a paired device token over HTTPS, or over plain HTTP if you allow it explicitly.
 - Settings that make OpenGrab run programs (event hooks, reconnect scripts, scanner paths) can only be changed from the computer it runs on.
 - Updates are installed only when their Ed25519 signature matches the key built into the app.
@@ -219,7 +228,20 @@ The command talks to the running app. Links, `magnet:` and `opengrab://` address
 
 OpenGrab is at version 0.1.0. Every feature above is covered by automated tests (over 900 of them, run on every push on Windows, Linux, macOS and in Docker), and the Windows build is installed, started and uninstalled by the pipeline before it is published.
 
-Things that are built but not yet verified against the real world, and the decisions still open, are listed in [PROJECT_SPEC.md, section 9](PROJECT_SPEC.md#9-open-decisions-and-known-gaps-recorded-2026-10-30). The current verified state is in [PROGRESS.md](PROGRESS.md). Bug reports with a link that misbehaves are the most useful thing you can send.
+Things that are built but not yet verified against the real world, and the decisions still open, are listed in [the project spec, section 9](docs/project-spec.md#9-open-decisions-and-known-gaps-recorded-2026-10-30). The current verified state is in [docs/progress.md](docs/progress.md). Bug reports with a link that misbehaves are the most useful thing you can send.
+
+## Contributing
+
+OpenGrab is built in the open and gets better with every site template, translation and bug report. You don't need to be a Python expert to help:
+
+- **Found a link that doesn't work?** [Open a bug report](https://github.com/TristinL6982/opengrab/issues/new/choose) with the link and the diagnostics file. That alone is a big help.
+- **Know a file host well?** Most sites need only a small JSON template, no Python. [Request support for a site](https://github.com/TristinL6982/opengrab/issues/new/choose) or add the template yourself.
+- **Speak another language?** Translations are a single JSON file.
+- **Want to write code?** Look for issues labelled [good first issue](https://github.com/TristinL6982/opengrab/labels/good%20first%20issue), or pick anything from the [open decisions and known gaps](docs/project-spec.md#9-open-decisions-and-known-gaps-recorded-2026-10-30).
+
+Read the [contributor guide](.github/CONTRIBUTING.md) before your first pull request: it explains the setup, the tests that must pass, and the few rules for site support. Security problems go through the [security policy](.github/SECURITY.md), not public issues.
+
+If OpenGrab saves you time, a star on this repository helps other people find it.
 
 ## Development
 

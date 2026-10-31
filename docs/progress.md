@@ -1,6 +1,6 @@
 # OpenGrab: verified state
 
-> Status note, rewritten 2026-10-30 after M14. `PROJECT_SPEC.md` is the source of
+> Status note, rewritten 2026-10-30 after M14. [project-spec.md](project-spec.md) is the source of
 > truth; its section 9 lists open decisions and known gaps. Earlier versions of this
 > note are in git history. Each line below says how it was verified.
 
@@ -22,7 +22,7 @@ Platform skips on Linux and macOS cover Windows-only features only.
 |---|---|
 | Full test suite, Windows 11 | 929 passed, 1 xfailed (B1) |
 | CI on GitHub | Green on 2026-10-30: Windows (tests, exe, smoke test, setup built, silent install, smoke test of the installed copy, uninstall), Ubuntu (under a virtual display) and macOS test suites with Windows-only tests skipped, Docker image healthy and token-protected |
-| Onedir exe | 78 MB, no ML or libtorrent packages; `--smoke-test` passes; frozen exe answers the update, Windows integration and dashboard routes |
+| Onedir exe | 70 MB (unused image codecs, Tk and other platforms' webview backends excluded), no ML or libtorrent packages; `--smoke-test` passes; frozen exe answers the update, Windows integration and dashboard routes |
 | Import gate | every module under `src/opengrab` is imported by the running app (`tools/import_audit.py`, no known orphans) |
 
 ## Milestones
@@ -43,11 +43,12 @@ Platform skips on Linux and macOS cover Windows-only features only.
 | Classic UI (IDM / JDownloader 2 look) | Done | Live browser checks, light and dark |
 | M13 automation | Done | Event programs, signed webhooks, Folder Watch, keep-awake, when-done, CLI client |
 | M14a appearance, M14b English + Simplified Chinese, first-run setup, accessibility | Done | i18n coverage test, label and keyboard tests, live checks in Chinese |
+| VirusTotal check | Done | Hash lookup, opt-in upload, quarantine and notification tested against a fake VirusTotal API; not yet run against the real service |
 | M14c JDownloader 2 import, dashboard, link handlers, autostart | Done | Synthetic JD2 folder test; read-only detection of a real JD2 install; dashboard counted a real download; registry round trip in a scratch key |
-| M14d updates, installer, CI matrix, Docker | Done except the signing key | Updater tests run the real swap and rollback script; update check works against GitHub; installer and Docker verified in CI only; release signing key not yet created, so updates are reported but not installed |
+| M14d updates, installer, CI matrix, Docker | Done; first signed release pending | Updater tests run the real swap and rollback script; update check works against GitHub; installer and Docker verified in CI only; release key created and trusted; an install-update-rollback round trip with real releases is still to do |
 
 ## What still needs the owner
 
-See `PROJECT_SPEC.md` section 9. In short: create the release signing key and
+See [project-spec.md](project-spec.md) section 9. In short: create the release signing key and
 GitHub secret, decide on code signing, delta updates and DLC/CCF, and host a
 plugin catalog if wanted.

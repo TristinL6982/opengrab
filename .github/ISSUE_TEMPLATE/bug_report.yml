@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. Please remove private links, cookies and account names before posting.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what OpenGrab did instead.
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link that shows the problem
+      description: A public link, or a similar one from the same site.
+  - type: input
+    id: version
+    attributes:
+      label: OpenGrab version
+      description: Settings, About.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: How do you run OpenGrab?
+      options: [Windows app, Docker, From source on Linux, From source on macOS, From source on Windows]
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Settings, Diagnostics, Save diagnostics. Attach the file or paste its contents here.
+      render: text

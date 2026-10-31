@@ -9,7 +9,7 @@ Wires the M7 plugin tooling that had tests but no caller:
   ``PERMISSIONS = {"hosts": [...], "cookies": bool, "files": bool}`` and
   stays blocked until the user approves it. Builtin plugins are trusted.
   This guards network and cookie access only; a Python plugin can still
-  import anything (recorded as an open decision in PROJECT_SPEC.md).
+  import anything (recorded as an open decision in docs/project-spec.md).
 * plugins.updates - template updates from an index URL (sha256 + schema
   check), installed versions tracked in templates_installed.json.
 * plugins.sdk - template validation for the UI and the CLI.

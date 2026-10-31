@@ -1,0 +1,29 @@
+name: Site support
+description: A site that OpenGrab cannot download from yet
+labels: [site-support]
+body:
+  - type: input
+    id: site
+    attributes:
+      label: Site
+      placeholder: example-host.com
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Example link
+      description: A public link to a file on that site.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens now?
+      description: For example "the page is saved instead of the file" or "it asks for a captcha forever".
+  - type: checkboxes
+    id: account
+    attributes:
+      label: Accounts
+      options:
+        - label: The site needs an account or a premium membership for this file
