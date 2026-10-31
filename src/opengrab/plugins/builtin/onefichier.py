@@ -335,7 +335,11 @@ class OneFichierPlugin(SitePlugin):
         loc = r.headers.get("location", "")
         if r.status_code in (301, 302, 303, 307) and loc:
             target = urljoin(link, loc)
-            if file_id(target) is None and "1fichier.com/?c=" not in target:
+            # a download server is a subdomain; the site itself (login page,
+            # an expired session) is not a file even though it redirects
+            site = (urlsplit(target).hostname or "").lower() in (
+                (urlsplit(link).hostname or "").lower(), "1fichier.com", "www.1fichier.com")
+            if file_id(target) is None and "1fichier.com/?c=" not in target and not site:
                 return ResolveResult(url=target, headers={"referer": link})   # premium direct download
             r = ctx.client.get(target, detect_challenges=False)
         page = r.text

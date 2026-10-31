@@ -19,6 +19,7 @@ from urllib.parse import unquote, urlparse
 
 from ..base import (CaptchaRequired, GrabResult, PluginContext, PluginError,
                     ResolveResult, SitePlugin)
+from ._hostflow import leaves_public_net
 from .direct import _filename_from_cd
 
 DIRECT_HOSTS: tuple[str, ...] = (
@@ -36,7 +37,9 @@ def is_direct_host(url: str, patterns: tuple[str, ...] = DIRECT_HOSTS) -> bool:
 
 def _origin(url: str) -> str:
     p = urlparse(url)
-    return f"{p.scheme}://{p.netloc}/"
+    host = p.hostname or ""
+    port = f":{p.port}" if p.port else ""
+    return f"{p.scheme}://{host}{port}/"   # never the user:password part
 
 
 class DirectHostPlugin(SitePlugin):
@@ -54,7 +57,7 @@ class DirectHostPlugin(SitePlugin):
         return urlparse(url).scheme in ("http", "https") and is_direct_host(url, self.hosts)
 
     def grab(self, url: str, ctx: PluginContext) -> GrabResult:
-        host = urlparse(url).netloc
+        host = urlparse(url).hostname or ""
         referer = _origin(url)
         headers = {"referer": referer}
         try:
@@ -63,7 +66,7 @@ class DirectHostPlugin(SitePlugin):
         except CaptchaRequired:
             raise  # a challenge page: the engine parks the link (no bypass)
         except Exception as e:
-            raise PluginError(f"server did not answer: {e}")
+            raise PluginError(f"{host} did not answer ({type(e).__name__}); try again later")
         status = r.status_code
         if status in GONE_STATUSES:
             raise PluginError(f"file not found on {host} (HTTP {status})")
@@ -75,6 +78,9 @@ class DirectHostPlugin(SitePlugin):
         # 403/405/5xx on HEAD: many file servers only allow GET; the
         # downloader probes with a ranged GET, so still hand the URL over.
         final = str(r.url or url) if status < 400 else url
+        if leaves_public_net(url, final):
+            raise PluginError(f"{host} redirected the download to a local network "
+                              "address; OpenGrab did not follow it")
         fname = _filename_from_cd(cd) or unquote(urlparse(final).path.rsplit("/", 1)[-1])
         if fname and "." not in fname and ct and not ct.startswith("application/octet-stream"):
             ext = mimetypes.guess_extension(ct.split(";", 1)[0].strip()) or ""

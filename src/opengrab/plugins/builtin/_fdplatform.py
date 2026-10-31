@@ -248,8 +248,9 @@ class FdPlatformPlugin(SitePlugin):
                 urls = data.get("downloadUrls") or []
             if urls:
                 first = urls[0]
-                direct = first.get("url") if isinstance(first, dict) else str(first)
-                return ResolveResult(url=direct, filename=name, size=size, headers=referer)
+                direct = str((first.get("url") if isinstance(first, dict) else first) or "")
+                if direct.startswith(("http://", "https://")):
+                    return ResolveResult(url=direct, filename=name, size=size, headers=referer)
             raise PluginError(f"{self.label}: premium account returned no download link")
         if info.get("premiumOnlyDownload"):
             raise PaywallRequired(note=f"{self.label}: the uploader allows premium downloads only")
@@ -271,7 +272,7 @@ class FdPlatformPlugin(SitePlugin):
             if str(res.get("error_name")) == "invalid_captcha" or (res.get("errors") or {}).get("captcha"):
                 raise PluginError(f"{self.label} rejected the captcha answer")
             self._fail(status, res, "captcha")
-        wait = int(res.get("delay") or 0)
+        wait = int(res.get("delay")) if str(res.get("delay", "")).isdigit() else 0
         if wait > MAX_WAIT:
             raise PluginError(f"{self.label} free download limit: wait {_wait_text(wait)}")
         if wait > 0:

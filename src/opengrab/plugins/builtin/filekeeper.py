@@ -234,7 +234,7 @@ class FileKeeperPlugin(SitePlugin):
             raise
         except Exception:
             return None  # API unreachable or not JSON: the page flow still works
-        if int(r.get("status") or 0) != 200:
+        if not isinstance(r, dict) or str(r.get("status")) != "200":
             return None  # e.g. the key's account may not fetch this file through the API
         res = r.get("result")
         url = res.get("url") if isinstance(res, dict) else res if isinstance(res, str) else ""

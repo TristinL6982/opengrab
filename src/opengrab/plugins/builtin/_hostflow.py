@@ -13,6 +13,7 @@ it). Everything here is page parsing and one careful probe of a direct link:
 from __future__ import annotations
 
 import html as _html
+import ipaddress
 import mimetypes
 import re
 import time
@@ -139,6 +140,28 @@ def host_of(url: str) -> str:
         return ""
 
 
+def is_local_host(host: str) -> bool:
+    """True for localhost and loopback, private, link-local or unspecified IPs."""
+    host = (host or "").strip("[]").lower().rstrip(".")
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified
+
+
+def leaves_public_net(src_url: str, dst_url: str) -> bool:
+    """True when a link found on (or redirected from) a public site points at
+    this computer or the local network. Links the user added themselves to a
+    LAN address are not affected: src_url is then local too."""
+    return is_local_host(host_of(dst_url)) and not is_local_host(host_of(src_url))
+
+
+SECRET_HEADERS = ("cookie", "authorization")
+
+
 def name_from_url(url: str) -> str:
     return unquote(urlsplit(url).path.rsplit("/", 1)[-1])
 
@@ -169,6 +192,12 @@ def probe_direct(url: str, ctx, headers: dict | None = None, *, expired: str = E
             nxt = urljoin(cur, loc)
             if is_site_page is not None and is_site_page(nxt):
                 raise PluginError(expired)
+            if leaves_public_net(cur, nxt):
+                raise PluginError(f"{host} redirected the download to a local network "
+                                  "address; OpenGrab did not follow it")
+            if host_of(nxt) != host:
+                # account cookies and tokens stay with the host they were meant for
+                headers = {k: v for k, v in headers.items() if k.lower() not in SECRET_HEADERS}
             cur = nxt
             continue
         if status in (404, 410):

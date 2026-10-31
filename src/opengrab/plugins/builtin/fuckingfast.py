@@ -103,7 +103,7 @@ class FuckingFastPlugin(SitePlugin):
         if r.status_code == 404 or DEAD_MARK in page.lower():
             raise PluginError("FuckingFast file is offline (not found or deleted)")
         if r.status_code == 429 or re.search(r"rate limit", page, re.I):
-            raise PluginError("FuckingFast rate limit; the host asks to wait a few minutes")
+            raise PluginError("FuckingFast rate limit reached; wait 5 minutes")
         if r.status_code >= 400:
             raise PluginError(f"FuckingFast page answered HTTP {r.status_code}")
         name = fragment_name(url) or page_name(page)
@@ -122,17 +122,17 @@ class FuckingFastPlugin(SitePlugin):
         headers = {"hx-request": "true", "hx-current-url": share_url, "origin": origin,
                    "referer": page_url, "content-type": "application/x-www-form-urlencoded"}
         r = ctx.client.post(go, data={}, headers=headers, follow=False)
-        link = self._redirect(r)
+        link = self._redirect(r, go)
         if link:
             return link
         if r.status_code == 429:
-            raise PluginError("FuckingFast rate limit; the host asks to wait a few minutes")
+            raise PluginError("FuckingFast rate limit reached; wait 5 minutes")
         sitekey = re.search(r'data-sitekey="([^"]+)"', page)
         if sitekey and (r.status_code in (400, 401, 403) or "captcha" in r.text.lower()):
             token = ctx.solve_captcha(kind="turnstile", sitekey=sitekey.group(1), site_url=page_url)
             r = ctx.client.post(go, data={"cf-turnstile-response": token}, headers=headers,
                                 follow=False)
-            link = self._redirect(r)
+            link = self._redirect(r, go)
             if link:
                 return link
             raise PluginError("FuckingFast refused the captcha answer")
@@ -142,6 +142,6 @@ class FuckingFastPlugin(SitePlugin):
                           f"(download button answered HTTP {r.status_code} without a link)")
 
     @staticmethod
-    def _redirect(r) -> str:
+    def _redirect(r, base: str) -> str:
         target = (r.headers.get("hx-redirect") or r.headers.get("location") or "").strip()
-        return target if "/dl/" in target else ""
+        return urljoin(base, target) if "/dl/" in target else ""  # may be relative

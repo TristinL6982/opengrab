@@ -21,6 +21,7 @@ from . import cdp
 from .browser_solver import BrowserSolverUnavailable, CdpDriver
 
 PORT = 9223  # the Cloudflare solver uses 9222; both may run
+LOCK_WAIT = 180  # seconds to wait for another page to finish with the browser
 
 
 class BrowserPageError(Exception):
@@ -42,6 +43,7 @@ class BrowserPage:
         self._clock, self._sleep = clock, sleep
         self.driver = None
         self.page: Optional[cdp.CdpClient] = None
+        self._owns_lock = False
 
     def _default_driver(self):
         from .settings import app_data_dir
@@ -50,7 +52,11 @@ class BrowserPage:
 
     # -- lifecycle ------------------------------------------------------------
     def __enter__(self) -> "BrowserPage":
-        BrowserPage._busy.acquire()
+        # one browser at a time (one profile, one port); a hung holder must
+        # not block every later listing forever
+        if not BrowserPage._busy.acquire(timeout=LOCK_WAIT):
+            raise BrowserPageError("the built-in browser is busy with another page; try again later")
+        self._owns_lock = True
         try:
             self.driver = self._driver_factory()
             self.page = cdp.CdpClient(self._transport_factory(self._page_ws()))
@@ -66,7 +72,7 @@ class BrowserPage:
         try:
             if self.page is not None:
                 self.page.close()
-        except (cdp.CdpError, OSError):
+        except Exception:
             pass
         try:
             if self.driver is not None:
@@ -74,11 +80,9 @@ class BrowserPage:
         except Exception:
             pass
         self.page = self.driver = None
-        if BrowserPage._busy.locked():
-            try:
-                BrowserPage._busy.release()
-            except RuntimeError:
-                pass
+        if self._owns_lock:   # only the instance that took the lock releases it
+            self._owns_lock = False
+            BrowserPage._busy.release()
 
     def _page_ws(self) -> str:
         deadline = self._clock() + 15

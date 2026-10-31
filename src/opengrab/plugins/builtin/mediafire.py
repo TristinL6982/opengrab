@@ -197,13 +197,16 @@ class MediaFirePlugin(SitePlugin):
             if qk:
                 out.append([file_page_url(qk, fname), prefix + (fname or qk)])
         for sub in self._chunks(key, "folders", ctx):
+            if len(out) >= MAX_ITEMS:
+                return
             sk = str(sub.get("folderkey") or "")
             if sk:
                 self._walk(sk, f"{prefix}{sub.get('name') or sk}/", ctx, out, depth + 1)
 
     def _chunks(self, key: str, content_type: str, ctx: PluginContext):
-        chunk = 1
-        while True:
+        # MediaFire pages 100 entries per chunk; the cap stops a listing that
+        # keeps saying "more_chunks" (or a huge folder) from running forever
+        for chunk in range(1, MAX_ITEMS // 100 + 2):
             body = _api(ctx, "folder/get_content.php",
                         f"folder_key={key}&content_type={content_type}&chunk={chunk}")
             if body.get("result") != "Success":
@@ -212,7 +215,6 @@ class MediaFirePlugin(SitePlugin):
             yield from content.get(content_type) or []
             if str(content.get("more_chunks", "no")).lower() != "yes":
                 return
-            chunk += 1
 
     def _captcha_then_link(self, page: str, page_url: str, ctx: PluginContext) -> str:
         m = re.search(r'data-sitekey="([^"]+)"', page)

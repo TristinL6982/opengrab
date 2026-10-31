@@ -129,9 +129,11 @@ class VikingFilePlugin(SitePlugin):
             body = r2.json()
         except ValueError:
             raise PluginError(f"VikingFile answered HTTP {r2.status_code} without a link")
-        link = str((body or {}).get("link") or "")
+        if not isinstance(body, dict):
+            body = {}
+        link = str(body.get("link") or "")
         if not link:
-            err = str((body or {}).get("error") or "no link in the answer")
+            err = str(body.get("error") or "no link in the answer")
             if re.search(r"captcha", err, re.I):
                 raise PluginError("VikingFile refused the captcha answer")
             raise PluginError(f"VikingFile: {err}")

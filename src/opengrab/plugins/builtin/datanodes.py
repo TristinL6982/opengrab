@@ -30,6 +30,7 @@ import time
 from urllib.parse import quote, unquote, urlsplit
 
 from ..base import GrabResult, PluginContext, PluginError, ResolveResult, SitePlugin
+from ._hostflow import text as page_text, wait_message
 
 HOST = "datanodes.to"
 BASE = "https://datanodes.to"
@@ -121,17 +122,19 @@ class DataNodesPlugin(SitePlugin):
             body = r.json()
         except ValueError:
             return None
-        status = body.get("status") if isinstance(body, dict) else None
+        if not isinstance(body, dict):
+            return None
+        status = body.get("status")
         if status == 404 or "not found" in str(body.get("msg", "")).lower():
             raise PluginError("DataNodes file is offline (not found or deleted)")
         if status != 200:
             return None   # premium-only on this account, bad key: use the page flow
-        result = body.get("result") or {}
-        link = str(result.get("url") or "")
+        result = body.get("result")
+        link = str(result.get("url") or "") if isinstance(result, dict) else ""
         if not link:
             return None
-        size = result.get("size")
-        return ResolveResult(url=link, filename=name, size=int(size) if size else None,
+        size = str(result.get("size") or "")
+        return ResolveResult(url=link, filename=name, size=int(size) if size.isdigit() else None,
                              headers={"referer": BASE + "/"})
 
     # -- the page a visitor sees ----------------------------------------------
@@ -155,7 +158,7 @@ class DataNodesPlugin(SitePlugin):
             name = "" if name.lower() == "download" else name
         wait = countdown(page)
         if wait > MAX_WAIT:
-            raise PluginError(f"the host asks to wait {wait // 60 or 1} minutes")
+            raise PluginError(f"DataNodes asks to wait {max(1, -(-wait // 60))} minutes")
         form = {"op": "download2" if op in ("", "download1") else op,
                 "id": _attr(page, "id") or code,
                 "rand": _attr(page, "rand"),
@@ -177,7 +180,9 @@ class DataNodesPlugin(SitePlugin):
             if "wrong captcha" in text or "verification failed" in text:
                 raise PluginError("DataNodes refused the captcha answer")
             if re.search(r"you have to wait|download limit|reached the limit", text):
-                raise PluginError("DataNodes download limit reached; the host asks to wait")
+                secs = wait_message(page_text(r2.text)) or 3600
+                raise PluginError("DataNodes download limit reached: "
+                                  f"wait {max(1, -(-secs // 60))} minutes")
             raise PluginError("DataNodes needs the browser download flow "
                               f"(form answered HTTP {r2.status_code} without a link)")
         return ResolveResult(url=link, filename=name, headers={"referer": BASE + "/"})
