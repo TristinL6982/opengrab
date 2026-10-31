@@ -87,6 +87,7 @@ class PrivateBinPlugin(SitePlugin):
     name = "PrivateBin pastes"
     site = ""
     origin = "builtin"
+    dedicated = True
     supports_captcha = False
     supports_login = True
     description = "PrivateBin pastes (encrypted link lists): decrypts with the key in the link, one child per link."

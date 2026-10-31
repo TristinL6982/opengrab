@@ -215,6 +215,8 @@ class SitePlugin:
     supports_captcha: bool = True
     supports_login: bool = False
     universal: bool = False          # True = catch-all fallback (lowest priority)
+    dedicated: bool = False          # True = ranks as a site plugin whenever supports() is True
+                                     # (for plugins that own many hosts, e.g. storage servers)
     description: str = ""
 
     def supports(self, url: str) -> bool:

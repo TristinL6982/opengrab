@@ -161,8 +161,8 @@ class PluginRegistry:
         def specificity(p: SitePlugin) -> tuple:
             host = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(url).netloc.lower()
             s = (p.site or "").lower()
-            if s and (host == s or host.endswith("." + s)):
-                tier = 0                       # dedicated site plugin
+            if (s and (host == s or host.endswith("." + s))) or getattr(p, "dedicated", False):
+                tier = 0                       # dedicated site plugin (or one that owns many hosts)
             elif getattr(p, "universal", False):
                 tier = 3                       # catch-all fallback
             elif p.origin == "bridge" or type(p).__name__.endswith("BridgePlugin"):
