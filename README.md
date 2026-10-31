@@ -133,6 +133,20 @@ The web UI is on port 5678. The API token is written to `./config/settings.json`
 | **Proxies and logins** | HTTP, HTTPS and SOCKS proxies, per-site or global, with failover. Basic and Digest logins for servers and proxies. |
 | **Router reconnect** | Trigger a router reconnect for a fresh IP when a host says "wait 30 minutes". |
 
+### Supported sites
+
+Dedicated plugins, with official APIs where the host offers one:
+
+| Kind | Sites |
+|---|---|
+| **File hosts** | GoFile, MediaFire, Mega, transfer.it, 1fichier, Rapidgator, Turbobit, Hitfile, FileKeeper, DataNodes, FuckingFast, VikingFile, Rootz, FileDitch, Buzzheavier, 1cloudfile, mdiaload, chomikuj.pl, pixeldrain, Google Drive, Dropbox, GitHub releases |
+| **Video** | Mixdrop, plus thousands of video sites through yt-dlp (YouTube, Vimeo, Twitch, ...) |
+| **Link lists** | PrivateBin pastes (decrypted locally with the key in the link), paste sites, pages that list many hoster links |
+| **Torrents** | magnet links, `.torrent` files, 1337x, Rutor and Tapochek topic pages, zetrrent |
+| **Other** | FTP and FTPS with resume, direct storage-server links copied from the browser, any page with file links |
+
+A site that isn't listed still works when its page links to the file. Premium accounts are used automatically once you add them under Accounts. If a site stops working, [report it](https://github.com/TristinL6982/opengrab/issues/new/choose): most fixes are a small change to one plugin.
+
 ### BitTorrent
 
 An optional libtorrent add-on, installed from Settings in one click, adds magnet links and `.torrent` files to the same queue: per-file selection and priorities, a built-in tracker list, UPnP and NAT-PMP port mapping, seeding limits by ratio or time, and the same speed profiles as everything else. Finished `.torrent` downloads can open themselves.

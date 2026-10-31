@@ -43,6 +43,7 @@ Platform skips on Linux and macOS cover Windows-only features only.
 | Classic UI (IDM / JDownloader 2 look) | Done | Live browser checks, light and dark |
 | M13 automation | Done | Event programs, signed webhooks, Folder Watch, keep-awake, when-done, CLI client |
 | M14a appearance, M14b English + Simplified Chinese, first-run setup, accessibility | Done | i18n coverage test, label and keyboard tests, live checks in Chinese |
+| Site plugins (2026-10-30) | Done, mostly offline-tested | 28 host, paste and tracker plugins plus FTP; live-verified: MediaFire, Mega single files, chomikuj up to the captcha, GoFile listing; the rest are tested against fixtures because no legitimate public test files were found. A failing plugin now hands the link to the next one (fixed known bug B1) |
 | VirusTotal check | Done | Hash lookup, opt-in upload, quarantine and notification tested against a fake VirusTotal API; not yet run against the real service |
 | M14c JDownloader 2 import, dashboard, link handlers, autostart | Done | Synthetic JD2 folder test; read-only detection of a real JD2 install; dashboard counted a real download; registry round trip in a scratch key |
 | M14d updates, installer, CI matrix, Docker | Done; first signed release pending | Updater tests run the real swap and rollback script; update check works against GitHub; installer and Docker verified in CI only; release key created and trusted; an install-update-rollback round trip with real releases is still to do |
