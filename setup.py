@@ -3,6 +3,11 @@ from setuptools import setup, find_packages
 setup(
     name="opengrab",
     version="0.1.0",
+    description="OpenGrab - A Better Internet Download Manager",
+    license="MIT",
+    url="https://github.com/TristinL6982/opengrab",
+    classifiers=["License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3.12",
+                 "Operating System :: Microsoft :: Windows", "Topic :: Internet :: WWW/HTTP"],
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     include_package_data=True,

@@ -18,6 +18,7 @@
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/headless-Linux%20%7C%20macOS%20%7C%20Docker-555" alt="Headless on Linux, macOS and Docker">
   <img src="https://img.shields.io/badge/python-3.12-3776ab" alt="Python 3.12">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT licence"></a>
 </p>
 
 <p align="center">
@@ -232,4 +233,4 @@ The code is plain Python 3.12 with a vanilla JavaScript UI and no build step. Si
 
 ## License
 
-OpenGrab is free software. See [LICENSE](LICENSE).
+OpenGrab is released under the [MIT License](LICENSE). Site support is written from public site behaviour; no code is taken from other download managers. yt-dlp and libtorrent keep their own licences.
