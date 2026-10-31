@@ -1374,6 +1374,7 @@ async function renderMarketplace() {
   try {
     const q = encodeURIComponent($("#mk-search").value.trim());
     const r = await api(`/api/marketplace?q=${q}&sort=${$("#mk-sort").value}`);
+    if (r.configured === false) { el.innerHTML = `<div class="empty">${esc(r.note)}</div>`; return; }
     el.innerHTML = r.listings.length ? r.listings.map(l => `<div class="krow">
       <span class="grow"><b>${esc(l.name)}</b> ${esc(l.version)} <span class="hint">by ${esc(l.author || "unknown")}</span>
       <div class="hint">${esc(l.description)}</div>
@@ -1637,6 +1638,7 @@ async function loadSettings() {
   loadDevices();
   loadAddons();
   loadIntegration();
+  syncTerminalSwitch();
   loadUpdate(false);
   try {
     const s = await api("/api/settings");
@@ -2186,3 +2188,24 @@ async function refreshLinkGrabberBadge() {
   } catch { /* banner shown on 401 */ }
 }
 setTimeout(refreshLinkGrabberBadge, 1500);
+
+
+/* ============================================================ desktop-only settings */
+// The web terminal may only be switched in the desktop app (pywebview js_api),
+// never through the web API, so a browser tab cannot turn on a shell.
+function desktopApi() { return window.pywebview?.api?.set_terminal_enabled ? window.pywebview.api : null; }
+function syncTerminalSwitch() {
+  const box = $("#set-terminal_enabled"), note = $("#terminal-desktop-note");
+  if (!box) return;
+  const desk = desktopApi();
+  box.disabled = !desk;
+  if (note) note.classList.toggle("hidden", !!desk);
+}
+$("#set-terminal_enabled")?.addEventListener("change", async (ev) => {
+  const desk = desktopApi();
+  if (!desk) return;
+  try { await desk.set_terminal_enabled(ev.target.checked); toast(ev.target.checked ? "Web terminal allowed" : "Web terminal turned off", "ok"); }
+  catch (e) { ev.target.checked = !ev.target.checked; toast("Could not change it: " + e, "err"); }
+});
+window.addEventListener("pywebviewready", syncTerminalSwitch);
+syncTerminalSwitch();

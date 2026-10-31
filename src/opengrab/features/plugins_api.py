@@ -52,6 +52,10 @@ def setup(srv):
     r.post(r"/api/plugins/update", update, action="settings_write")
 
     def catalog(req):
+        if not getattr(mgr.settings, "marketplace_url", ""):
+            # not an error: nothing is set up yet, so say how instead of failing
+            return {"listings": [], "configured": False,
+                    "note": "No plugin catalog is set up. Add its address in Settings, Plugins, Marketplace catalog."}
         try:
             listings = pol.catalog()
         except (OSError, ValueError, mkt.MarketplaceError) as exc:

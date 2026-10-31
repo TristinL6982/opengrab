@@ -155,6 +155,19 @@ def instance_lock_name() -> str:
     return "OpenGrab-SingleInstance-" + hashlib.sha256(key).hexdigest()[:16]
 
 
+class DesktopApi:
+    """Calls only the desktop window can make (pywebview's js_api), for
+    settings the web API must never change, such as the web terminal."""
+
+    def __init__(self, settings: Settings):
+        self._settings = settings
+
+    def set_terminal_enabled(self, on) -> bool:
+        self._settings.terminal_enabled = bool(on)
+        self._settings.save()
+        return self._settings.terminal_enabled
+
+
 def run_gui_mode(settings: Optional[Settings] = None,
                  host: Optional[str] = None, port: Optional[int] = None,
                  urls=(), files=(), minimized: bool = False) -> None:
@@ -231,7 +244,8 @@ def run_gui_mode(settings: Optional[Settings] = None,
         try:
             window = webview.create_window(
                 "OpenGrab", f"http://127.0.0.1:{bound_port}{settings.base_path}/#token={server.token}",
-                min_size=(900, 600), hidden=minimized  # autostart: tray only
+                min_size=(900, 600), hidden=minimized,  # autostart: tray only
+                js_api=DesktopApi(settings),
             )
             
             def on_closing():
