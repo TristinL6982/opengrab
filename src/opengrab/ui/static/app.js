@@ -2164,10 +2164,24 @@ async function loadUpdate(check) {
   try { showUpdate(await api("/api/update" + (check ? "?check=1" : ""))); } catch (e) { $("#upd-status").textContent = e.message; }
 }
 $("#btn-upd-check")?.addEventListener("click", () => { $("#upd-status").textContent = "Checking…"; loadUpdate(true); });
+const UPD_STEPS = {
+  downloading: "Downloading the update…",
+  testing: "Checking the new version…",
+};
 $("#btn-upd-install")?.addEventListener("click", async () => {
-  $("#upd-status").textContent = "Downloading and testing the update…";
+  const btn = $("#btn-upd-install");
+  btn.disabled = true;
+  $("#upd-status").textContent = UPD_STEPS.downloading;
+  // the install request only answers at the end, so show its step meanwhile
+  const poll = setInterval(async () => {
+    try {
+      const busy = (await api("/api/update")).busy;
+      if (busy) $("#upd-status").textContent = UPD_STEPS[busy] || `Waiting for you to allow the update in the Windows administrator prompt (look for the shield on the taskbar)…`;
+    } catch { /* the install answer reports errors */ }
+  }, 1500);
   try { const r = await api("/api/update/install", "POST", {}); $("#upd-status").textContent = `Installing ${r.version}. OpenGrab restarts in a moment.`; }
-  catch (e) { $("#upd-status").textContent = e.message; }
+  catch (e) { $("#upd-status").textContent = e.message; btn.disabled = false; }
+  finally { clearInterval(poll); }
 });
 $("#btn-upd-rollback")?.addEventListener("click", async () => {
   if (!confirm("Go back to the previous version? OpenGrab restarts.")) return;

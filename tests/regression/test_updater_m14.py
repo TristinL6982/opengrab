@@ -205,3 +205,35 @@ def test_no_published_release_means_up_to_date():
         raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)
     with pytest.raises(urllib.error.HTTPError):
         updater.check(fetch=down)
+
+
+def test_install_says_it_waits_for_the_administrator_prompt(monkeypatch, tmp_path):
+    import threading
+
+    rel = {"tag_name": "v99.0.0", "html_url": "", "body": "", "assets": [
+        {"name": n, "browser_download_url": f"https://example.invalid/{n}"}
+        for n in ("OpenGrab-99.0.0-win64.zip", "OpenGrab-99.0.0-win64.zip.sig")]}
+    asked, answer = threading.Event(), threading.Event()
+
+    def prompt(*a):  # ShellExecute "runas" only returns once the user answers
+        asked.set()
+        answer.wait(10)
+
+    monkeypatch.setattr(updater, "is_frozen", lambda: True)
+    monkeypatch.setattr(updater, "RELEASE_KEYS", ["k"])
+    monkeypatch.setattr(updater, "_get", lambda url, timeout=30: json.dumps(rel).encode() if url == updater.API else b"x")
+    monkeypatch.setattr(updater, "stage", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(updater, "writable", lambda folder: False)
+    monkeypatch.setattr(updater, "launch_swap", prompt)
+    with running_server() as srv:
+        srv.features["automation"].exit_app = lambda: None
+        done = []
+        t = threading.Thread(target=lambda: done.append(req(srv, "POST", "/api/update/install", body={})))
+        t.start()
+        assert asked.wait(10)
+        assert "administrator prompt" in req(srv, "GET", "/api/update")[1]["busy"]
+        st, res = req(srv, "POST", "/api/update/install", body={})
+        assert st == 409 and "administrator prompt" in res["error"]
+        answer.set()
+        t.join(10)
+        assert done[0][0] == 200 and done[0][1]["version"] == "99.0.0"

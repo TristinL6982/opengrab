@@ -231,7 +231,10 @@ def launch_swap(root: Path, incoming: Path, keep: Path) -> None:
                          | getattr(subprocess, "DETACHED_PROCESS", 0))
         return
     import ctypes  # Program Files: ask for administrator rights
-    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{script}"', str(script.parent), 0)
+    # without an owner window Windows only flashes the prompt on the taskbar;
+    # the window the user just clicked "Install" in brings it to the front
+    owner = ctypes.windll.user32.GetForegroundWindow() or None
+    rc = ctypes.windll.shell32.ShellExecuteW(owner, "runas", "cmd.exe", f'/c "{script}"', str(script.parent), 0)
     if rc <= 32:
         raise UpdateError("administrator rights are needed to replace the program files")
 

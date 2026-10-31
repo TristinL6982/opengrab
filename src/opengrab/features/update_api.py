@@ -58,7 +58,7 @@ def setup(srv):
         if not updater.RELEASE_KEYS:
             return 400, {"error": "this build has no release signing key, so updates cannot be verified"}
         if state["busy"]:
-            return 409, {"error": "an update is already being installed"}
+            return 409, {"error": f"an update is already being installed ({state['busy']})"}
         state["busy"] = "downloading"
         try:
             data = json.loads(updater._get(updater.API))
@@ -70,6 +70,8 @@ def setup(srv):
             state["busy"] = "testing"
             root = updater.install_dir()
             new = updater.stage(zip_bytes, sig, updater.staging_dir())
+            if not updater.writable(updater.install_dir().parent):
+                state["busy"] = "waiting for you to allow it in the Windows administrator prompt"
             updater.launch_swap(root, new, root.with_name(root.name + ".old"))
         except updater.UpdateError as exc:
             return 400, {"error": str(exc)}
