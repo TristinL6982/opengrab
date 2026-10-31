@@ -147,3 +147,50 @@ def test_spider_keeps_keys_in_mega_and_gofile_links():
     assert extract_links(html, "https://src.example/") == [
         "https://mega.nz/file/AbC#keyXYZ", "https://gofile.io/d/abc#file=f1",
         "https://transfer.it/t/xyz#file=n1", "https://example.com/page"]
+
+
+class _Resp:
+    def __init__(self, body, status=200):
+        self.body, self.status_code = body, status
+
+    def json(self):
+        return self.body
+
+
+class _ApiCtx:
+    """A ctx whose account carries a GoFile API token and whose client
+    answers like api.gofile.io."""
+
+    def __init__(self, body, token="premTok"):
+        from types import SimpleNamespace
+        self.acc = SimpleNamespace(data={"api_token": token}, password="", premium=True)
+        self.body, self.calls = body, []
+        self.client = SimpleNamespace(get=self._get)
+
+    def _get(self, url, headers=None, **kw):
+        self.calls.append((url, (headers or {}).get("authorization")))
+        return _Resp(self.body)
+
+    def account_for(self, site=None, url=None):
+        return self.acc if site == "gofile.io" else None
+
+
+def test_premium_token_uses_the_official_api_without_a_browser(monkeypatch):
+    gofile._cache.clear()
+    monkeypatch.setattr(gofile, "PAGE_FACTORY", lambda: (_ for _ in ()).throw(AssertionError("browser opened")))
+    ctx = _ApiCtx({"status": "ok", "data": {"type": "folder", "canAccess": True,
+                                             "children": {"f1": file_item(1, "doc.pdf", 500)}}})
+    r = gofile.GoFilePlugin().resolve("https://gofile.io/d/abc", ctx)
+    assert r.filename == "doc.pdf" and r.headers["cookie"] == "accountToken=premTok"
+    assert ctx.calls[0] == ("https://api.gofile.io/contents/abc?pageSize=1000&maxdepth=1", "Bearer premTok")
+
+
+def test_non_premium_token_falls_back_to_the_website(monkeypatch):
+    use({"token": "guest", "data": {"type": "folder", "canAccess": True,
+                                    "children": {"f1": file_item(1, "x.bin")}}}, monkeypatch)
+    ctx = _ApiCtx({"status": "error-notPremium"})
+    r = gofile.GoFilePlugin().resolve("https://gofile.io/d/abc", ctx)
+    assert r.headers["cookie"] == "accountToken=guest" and FakePage.opened == ["https://gofile.io/d/abc"]
+    with pytest.raises(LoginRequired):
+        gofile._cache.clear()
+        gofile.GoFilePlugin().resolve("https://gofile.io/d/abc", _ApiCtx({"status": "error-token"}))

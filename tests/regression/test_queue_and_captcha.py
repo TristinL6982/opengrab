@@ -12,7 +12,8 @@ def test_c6_remove_link_keeps_file():
     assert False, "Line not found"
 
 
-@pytest.mark.xfail(strict=True, reason="B1: generic page with file links ends in ERROR")
+# B1 (fixed 2026-10-30): when the generic grabber cannot finish a page that
+# lists file links, the multi-link plugin turns each link into a download.
 def test_b1_generic_page_with_links_not_error():
     for line in misc_output.splitlines():
         if line.startswith("B. page with 2 file links"):

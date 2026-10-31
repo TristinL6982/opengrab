@@ -493,3 +493,31 @@ def test_registry_discovers_the_four_plugins():
         assert reg.for_url(url)[0].id == pid
     assert not any(k.endswith(("_fdplatform", "onefichier", "turbobit", "hitfile", "filekeeper"))
                    for k in reg.errors)
+
+
+def test_filekeeper_api_key_gets_the_direct_link_and_falls_back_to_the_page():
+    """filekeeper.net/pages/integrations: /api/file/info and /api/file/direct_link."""
+    from types import SimpleNamespace
+    from opengrab.plugins.builtin import filekeeper as fk
+
+    class Client:
+        def __init__(self, direct):
+            self.direct, self.urls = direct, []
+
+        def get(self, url, **kw):
+            self.urls.append(url)
+            if "/api/file/info" in url:
+                return SimpleNamespace(json=lambda: {"status": 200, "result": [
+                    {"status": 200, "filecode": "abc123def456", "name": "Document.pdf", "size": "2048576"}]})
+            return SimpleNamespace(json=lambda: self.direct)
+
+    acc = SimpleNamespace(id="a1", data={"api_key": "K3Y"}, username="", password="", premium=True)
+    ctx = SimpleNamespace(client=Client({"status": 200, "result": {"url": "https://s1.filekeeper.net/d/xyz/Document.pdf"}}),
+                          account_for=lambda site=None, url=None: acc)
+    r = fk.FileKeeperPlugin()._api_direct_link(ctx, acc, "abc123def456")
+    assert r.url.endswith("/Document.pdf") and r.filename == "Document.pdf" and r.size == 2048576
+    assert "key=K3Y" in ctx.client.urls[1] and "file_code=abc123def456" in ctx.client.urls[1]
+    refused = SimpleNamespace(client=Client({"status": 403, "msg": "no access"}), account_for=ctx.account_for)
+    assert fk.FileKeeperPlugin()._api_direct_link(refused, acc, "abc123def456") is None  # page flow next
+    no_key = SimpleNamespace(id="a2", data={}, username="", password="", premium=False)
+    assert fk.FileKeeperPlugin()._api_direct_link(ctx, no_key, "abc123def456") is None

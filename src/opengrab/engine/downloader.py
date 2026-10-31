@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..models import Link, LinkStatus
+from . import ftp as _ftp  # FTP hook used at the top of LinkDownload.run()
 
 try:
     from curl_cffi import requests as _crl
@@ -417,6 +418,11 @@ class LinkDownload:
         """Execute the download; returns final file path. Raises
         DownloadError on failure/cancel."""
         self.dest_dir.mkdir(parents=True, exist_ok=True)
+        # FTP hook: ftp:// and ftps:// links are transferred by engine/ftp.py
+        # (ftplib, SIZE + REST resume) with this object's stop/pause events,
+        # rate limiter and progress counters. Everything below is HTTP only.
+        if _ftp.is_ftp_url(self.url):
+            return _ftp.download(self)
         probe = self._probe()
         # A probe length of 0 (some servers answer HEAD that way) is not proof
         # of an empty file: stream it and let the body decide.

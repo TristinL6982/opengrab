@@ -1,7 +1,9 @@
 """GoFile (gofile.io) folders and files.
 
-GoFile's API only answers its own web client, which signs each request with
-a token generated in the page. So OpenGrab opens the folder page in a real
+With a GoFile premium account (its API token added under Accounts) the
+listing comes straight from the official API (gofile.io/api, premium-only).
+Free visitors get listings only through GoFile's own web client, which signs
+each request with a token generated in the page. So OpenGrab opens the folder page in a real
 browser window (see opengrab.browserpage), lets GoFile's own code fetch the
 listing, and reads it back: names, sizes, MD5 checksums and the download
 links on GoFile's storage servers. Downloads then use the visitor's
@@ -81,6 +83,51 @@ def fetch_listing(code: str, clock=time.time) -> dict:
         return hit
 
 
+def fetch_listing_api(code: str, token: str, client, clock=time.time) -> Optional[dict]:
+    """Official API (gofile.io/api): GET /contents/{code} answers premium
+    accounts directly. Returns None for non-premium tokens (use the website)."""
+    key = f"api:{code}"
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and clock() - hit["at"] < CACHE_SECONDS:
+            return hit
+    r = client.get(f"https://api.gofile.io/contents/{code}?pageSize=1000&maxdepth=1",
+                   headers={"authorization": f"Bearer {token}"}, detect_challenges=False)
+    try:
+        body = r.json()
+    except ValueError:
+        raise PluginError(f"GoFile's API answered HTTP {r.status_code}")
+    status = str(body.get("status") or "")
+    if status == "error-notPremium":
+        return None
+    if status == "error-token":
+        raise LoginRequired(hint="GoFile rejected the API token in your account")
+    if status == "error-notFound":
+        raise PluginError("this GoFile link does not exist or was deleted")
+    if status == "error-rateLimit":
+        raise PluginError("GoFile's rate limit was reached; wait 5 minutes")
+    if status != "ok":
+        raise PluginError(f"GoFile's API refused the listing: {status or r.status_code}")
+    data = body.get("data") or {}
+    if data.get("canAccess") is False:
+        raise LoginRequired(hint="this GoFile folder is password protected")
+    hit = {"at": clock(), "data": data, "token": token, "ua": ""}
+    with _cache_lock:
+        _cache[key] = hit
+    return hit
+
+
+def _account_token(ctx) -> str:
+    try:
+        acc = ctx.account_for(site="gofile.io") if ctx is not None else None
+    except Exception:
+        acc = None
+    if acc is None:
+        return ""
+    data = getattr(acc, "data", None) or {}
+    return str(data.get("api_token") or data.get("api_key") or getattr(acc, "password", "") or "").strip()
+
+
 def _download(item: dict, listing: dict) -> ResolveResult:
     if not item.get("link"):
         raise PluginError(f"GoFile gave no download link for {item.get('name', 'the file')}")
@@ -111,7 +158,10 @@ class GoFilePlugin(SitePlugin):
         code, file_id = parse(url)
         if code is None:
             raise PluginError("not a GoFile link")
-        listing = fetch_listing(code)
+        token = _account_token(ctx)
+        listing = fetch_listing_api(code, token, ctx.client) if token else None
+        if listing is None:
+            listing = fetch_listing(code)  # free visitors: GoFile's own page in the browser
         data = listing["data"]
         children = list((data.get("children") or {}).values())
         if data.get("type") == "file":

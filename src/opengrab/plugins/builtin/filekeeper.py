@@ -208,6 +208,43 @@ class FileKeeperPlugin(SitePlugin):
         except Exception:
             return None
 
+    @staticmethod
+    def _api_key(acc) -> str:
+        data = getattr(acc, "data", None) or {}
+        return str(data.get("api_key") or data.get("api_token") or "").strip()
+
+    def _api_direct_link(self, ctx, acc, code: str):
+        """The official API (filekeeper.net/pages/integrations): with the API
+        key from the user's account settings, /api/file/direct_link returns
+        the download link without the page flow. None means "use the page"."""
+        key = self._api_key(acc)
+        if not key:
+            return None
+        from urllib.parse import quote
+        try:
+            info = ctx.client.get(f"{ORIGIN}/api/file/info?key={quote(key)}&file_code={quote(code)}",
+                                  detect_challenges=False).json()
+            files = info.get("result") or []
+            meta = files[0] if isinstance(files, list) and files else {}
+            if int(meta.get("status") or info.get("status") or 0) == 404:
+                raise PluginError("FileKeeper: file not found (offline)")
+            r = ctx.client.get(f"{ORIGIN}/api/file/direct_link?key={quote(key)}&file_code={quote(code)}",
+                               detect_challenges=False).json()
+        except PluginError:
+            raise
+        except Exception:
+            return None  # API unreachable or not JSON: the page flow still works
+        if int(r.get("status") or 0) != 200:
+            return None  # e.g. the key's account may not fetch this file through the API
+        res = r.get("result")
+        url = res.get("url") if isinstance(res, dict) else res if isinstance(res, str) else ""
+        if not url:
+            return None
+        size = meta.get("size") or (res.get("size") if isinstance(res, dict) else None)
+        return ResolveResult(url=str(url), filename=str(meta.get("name") or ""),
+                             size=int(size) if str(size or "").isdigit() else None,
+                             headers={"referer": ORIGIN + "/"})
+
     def _login(self, ctx, acc) -> None:
         if self._sessions.get(acc.id, 0) > time.time() - 6 * 3600:
             return
@@ -264,6 +301,9 @@ class FileKeeperPlugin(SitePlugin):
         acc = self._account(ctx)
         premium = False
         if acc is not None:
+            via_api = self._api_direct_link(ctx, acc, code)
+            if via_api is not None:
+                return via_api
             self._login(ctx, acc)
             premium = bool(acc.premium)
         start = f"{ORIGIN}/{code}"
