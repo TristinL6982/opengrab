@@ -46,7 +46,7 @@ class LinkGrabberService:
             known = {c["url"] for c in self.srv._clipboard_candidates.values()}
             for raw in urls or []:
                 url = str(raw).strip().rstrip(".,;:!?)]}")
-                if not url.lower().startswith(("http://", "https://", "magnet:?")):
+                if not url.lower().startswith(("http://", "https://", "ftp://", "ftps://", "magnet:?")):
                     continue
                 if url in existing or url in known:
                     continue
@@ -199,18 +199,15 @@ def spider_default_exts() -> tuple:
 
 def setup(srv):
     svc = LinkGrabberService(srv)
-    original = srv.capture_clipboard_text
 
     def capture(text):
-        n = original(text)
-        if n:
-            with srv._clipboard_candidates_lock:
-                fresh = [cid for cid, c in srv._clipboard_candidates.items() if "state" not in c]
-                for cid in fresh:
-                    srv._clipboard_candidates[cid].update(source="clipboard", package="", passwords=[],
-                                                          state="unchecked", size=None, filename="")
-            svc.check(fresh)
-        return n
+        """Copied links go the same way as pasted ones: filtered, de-duplicated,
+        announced to the UI (so it can say so) and checked online."""
+        if not srv.settings.clipboard_monitor_enabled or not isinstance(text, str) or not text:
+            return 0
+        import re
+        found = re.findall(r"(?:https?://|ftps?://|magnet:\?)[^\s<>\"']+", text, flags=re.IGNORECASE)
+        return len(svc.add(found, "clipboard"))
 
     srv.capture_clipboard_text = capture
     r = srv.router

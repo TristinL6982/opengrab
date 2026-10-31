@@ -22,6 +22,7 @@ from ...media import presets as media_presets
 log = logging.getLogger("opengrab.ytbridge")
 
 _ydl = None
+REFUSING_IES = {"KnownPiracyIE", "KnownDRMIE", "KnownLiabilityIE"}
 _supported_cache: list[str] | None = None
 
 
@@ -50,7 +51,11 @@ def _supported_domains() -> list[str]:
         return _supported_cache
     try:
         import yt_dlp
-        ies = yt_dlp.gen_extractors()
+        # yt-dlp keeps stub extractors for sites it refuses to support
+        # (KnownPiracyIE, KnownDRMIE, KnownLiabilityIE). Claiming those
+        # domains would only end in yt-dlp's refusal, so leave them to
+        # OpenGrab's own site plugins and the generic page grabber.
+        ies = [ie for ie in yt_dlp.gen_extractors() if type(ie).__name__ not in REFUSING_IES]
         doms: set[str] = set()
         # Each extractor has a `_VALID_URL` regex (or list of regexes);
         # pull any literal domains out.

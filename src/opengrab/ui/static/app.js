@@ -132,6 +132,12 @@ function onEvent(kind, payload) {
   if (kind === "addon") { loadAddons(); return; }
   if (kind === "linkgrabber") {
     if ($("#tab-linkgrabber")?.classList.contains("active")) renderLinkGrabber();
+    else if (payload?.added) {
+      const what = payload.source === "clipboard" ? "copied link" : "link";
+      toast(`${payload.added} ${what}${payload.added === 1 ? "" : "s"} added to the LinkGrabber. Click to review.`, "ok",
+            () => $('.tab[data-tab="linkgrabber"]').click());
+    }
+    refreshLinkGrabberBadge();
     return;
   }
   if (kind === "spider") {
@@ -1907,10 +1913,14 @@ $("#btn-pack-preview").addEventListener("click", async () => {
 });
 
 /* ============================================================ toasts */
-function toast(msg, kind = "") {
+function toast(msg, kind = "", onClick = null) {
   const t = document.createElement("div");
   t.className = "toast " + kind;
   t.textContent = msg;
+  if (onClick) {
+    t.style.cursor = "pointer";
+    t.addEventListener("click", () => { onClick(); t.remove(); });
+  }
   $("#toasts").appendChild(t);
   setTimeout(() => { t.classList.add("leaving"); setTimeout(() => t.remove(), 350); }, 4200);
 }
@@ -2162,3 +2172,17 @@ $("#btn-upd-rollback")?.addEventListener("click", async () => {
   try { await api("/api/update/rollback", "POST", {}); $("#upd-status").textContent = "Going back to the previous version. OpenGrab restarts in a moment."; }
   catch (e) { $("#upd-status").textContent = e.message; }
 });
+
+
+/* ============================================================ LinkGrabber badge */
+async function refreshLinkGrabberBadge() {
+  try {
+    const items = await api("/api/linkgrabber");
+    const n = Array.isArray(items) ? items.length : 0;
+    const b = $("#lg-badge");
+    if (!b) return;
+    b.textContent = n;
+    b.classList.toggle("hidden", n === 0);
+  } catch { /* banner shown on 401 */ }
+}
+setTimeout(refreshLinkGrabberBadge, 1500);

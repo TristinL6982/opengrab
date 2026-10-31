@@ -735,6 +735,14 @@
     [
       "^You have OpenGrab (\\S+)\\.$",
       "当前版本为 OpenGrab $1。"
+    ],
+    [
+      "^(\\d+) copied links? added to the LinkGrabber\\. Click to review\\.$",
+      "已将 $1 个复制的链接添加到链接抓取器。点击查看。"
+    ],
+    [
+      "^(\\d+) links? added to the LinkGrabber\\. Click to review\\.$",
+      "已将 $1 个链接添加到链接抓取器。点击查看。"
     ]
   ]
 }

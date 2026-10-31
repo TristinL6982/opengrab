@@ -119,7 +119,9 @@ class HttpClient:
     def _store_cookies(self, url: str, headers) -> None:
         import http.cookiejar as _cj
         raw = None
-        if hasattr(headers, "getlist"):
+        if hasattr(headers, "get_list"):  # curl_cffi and httpx: one entry per Set-Cookie
+            raw = headers.get_list("set-cookie")
+        elif hasattr(headers, "getlist"):
             raw = headers.getlist("set-cookie")
         elif hasattr(headers, "get_all"):
             raw = headers.get_all("set-cookie")
@@ -377,8 +379,26 @@ def _iter_read(raw, chunk_size: int = 262144):
 
 
 class _FakeRequest:
+    """The parts of urllib.request.Request that http.cookiejar reads."""
+    unverifiable = False
+
     def __init__(self, url: str):
         self.url = url
+        self.host = urlparse(url).netloc
+        self.origin_req_host = urlparse(url).hostname or ""
+        self.type = urlparse(url).scheme or "http"
+
+    def has_header(self, name):
+        return False
+
+    def get_header(self, name, default=None):
+        return default
+
+    def header_items(self):
+        return []
+
+    def get_origin_req_host(self):
+        return self.origin_req_host
 
     def get_full_url(self):
         return self.url
@@ -407,3 +427,9 @@ class _FakeResponse:
         if k.lower() == "set-cookie":
             return self._sc[0] if self._sc else default
         return default
+
+    def get_all(self, name, default=None):
+        # Python 3.12's cookiejar reads headers through get_all()
+        if name.lower() in ("set-cookie", "set-cookie2"):
+            return list(self._sc) if name.lower() == "set-cookie" else (default or [])
+        return default if default is not None else []

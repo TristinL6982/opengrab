@@ -127,18 +127,19 @@ class PluginContext:
             return self.manual_code
         if self.captcha_chain is None:
             raise CaptchaRequired(image_b64=image_b64, kind=kind,
-                                  site_url=site_url)
+                                  site_url=site_url, sitekey=sitekey)
         req = CaptchaRequest(image_b64=image_b64, image_url=image_url,
                              kind=kind, site_url=site_url,
                              recaptcha_sitekey=sitekey)
         res = self.captcha_chain.solve(req)
         if res.text == "__MANUAL__":
             raise CaptchaRequired(image_b64=image_b64, kind=kind,
-                                  site_url=site_url, image_url=image_url)
+                                  site_url=site_url, sitekey=sitekey,
+                                  extra={"image_url": image_url} if image_url else None)
         if not res.ok:
             raise CaptchaRequired(image_b64=image_b64, kind=kind,
-                                  site_url=site_url, image_url=image_url,
-                                  extra={"solver_error": res.error})
+                                  site_url=site_url, sitekey=sitekey,
+                                  extra={"solver_error": res.error, "image_url": image_url})
         return res.text
 
     # manual_code is set by the engine on the retry after the UI submitted
@@ -230,6 +231,12 @@ class SitePlugin:
     def resolve(self, url: str, ctx: PluginContext) -> ResolveResult:
         """Produce the final direct download URL (may solve captchas etc.)"""
         raise NotImplementedError
+
+    # Optional: finalize(self, path, link, ctx) -> path
+    # Called after the transfer finishes, before checksums and extraction.
+    # Hosts that serve files encrypted (Mega, transfer.it) decrypt here,
+    # using values the plugin stored in link.extra during resolve. Raise
+    # PluginError to fail the download with a message.
 
 
 class BridgePlugin(SitePlugin):

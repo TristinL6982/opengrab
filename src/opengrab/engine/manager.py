@@ -292,6 +292,96 @@ class DownloadManager:
             raise PluginError(f"no plugin supports this url: {link.url}")
         return plugins[0]
 
+    def _refresh_expired_link(self, link: Link, msg: str) -> bool:
+        """Hosts like Mega and GoFile hand out download links that expire. When
+        one answers 401/403/404/410 (often after a restart or a long pause),
+        ask the plugin once for a fresh link instead of failing."""
+        import re as _re
+        if not _re.match(r"HTTP (401|403|404|410)\b", msg) or link.plugin in ("", "direct", "generic"):
+            return False
+        if link.extra.get("link_refreshed"):
+            link.extra.pop("link_refreshed", None)  # refreshed once already: a real failure
+            return False
+        plugin = self.registry.get(link.plugin)
+        if plugin is None:
+            return False
+        link.extra["link_refreshed"] = True
+        link.direct_url, link.direct_headers = None, {}
+        link.status, link.error = LinkStatus.RESOLVING, ""
+        self._broadcast("grabbed", link)
+
+        def refresh():
+            try:
+                self._resolve(link, plugin, self._ctx_for(plugin))
+                if link.status == LinkStatus.WAITING and link.direct_url:
+                    self._ready_put(link.id)
+                    self._broadcast("queued", link)
+                    return
+                raise PluginError("the host gave no new link")
+            except CaptchaRequired as e:
+                self._handle_challenge(link, e, phase="download")
+            except LoginRequired as e:
+                link.status, link.login_hint = LinkStatus.LOGIN, e.hint
+            except PaywallRequired as e:
+                link.status, link.paywall_note = LinkStatus.PAYWALL, e.note
+            except Exception as e:  # noqa: BLE001
+                link.extra.pop("link_refreshed", None)
+                self._fail(link, f"{msg}; asking the host for a new link failed: {e}", False)
+            self._persist()
+            self._broadcast("grabbed", link)
+
+        self._spawn(refresh)
+        return True
+
+    def _plugin_finalize(self, link: Link, path: Path) -> Path:
+        """Let the plugin finish the file after the transfer, e.g. decrypt a
+        Mega download (hosts that send files encrypted). The plugin returns
+        the final path; an error fails the download with its message."""
+        plugin = self.registry.get(link.plugin) if link.plugin else None
+        fin = getattr(plugin, "finalize", None)
+        if fin is None:
+            return path
+        out = fin(path, link, self._ctx_for(plugin))
+        return Path(out) if out else path
+
+    def _grab_with_fallback(self, link: Link) -> None:
+        """Try the plugins that claim the link, most specific first. When one
+        fails outright (an extractor refusing the site, a page it cannot
+        read), the next one gets the link, ending with the generic page
+        grabber. Captchas, logins and paywalls stop the search: they are
+        answers, not failures."""
+        plugins = self.registry.for_url(link.url)
+        if not plugins:
+            raise PluginError(f"no plugin supports this url: {link.url}")
+        first_error: Optional[Exception] = None
+        for plugin in plugins:
+            link.plugin = plugin.id
+            ctx = self._ctx_for(plugin)
+            try:
+                try:
+                    g = plugin.grab(link.url, ctx)
+                except (CaptchaRequired, LoginRequired, PaywallRequired):
+                    raise
+                except (NotImplementedError, PluginError):
+                    g = None  # metadata is optional: resolve may still work
+                if g is not None:
+                    self._apply_grab(link, plugin.id, g)
+                if link.status not in (LinkStatus.CAPTCHA, LinkStatus.LOGIN,
+                                       LinkStatus.PAYWALL, LinkStatus.SKIPPED):
+                    self._resolve(link, plugin, ctx)
+                if link.status != LinkStatus.ERROR:
+                    return
+                failure: Exception = PluginError(link.error or "failed")
+            except (CaptchaRequired, LoginRequired, PaywallRequired):
+                raise
+            except PluginError as e:
+                failure = e
+            log.info("%s could not handle %s (%s); trying the next plugin", plugin.id, link.url, failure)
+            first_error = first_error or failure
+            link.status, link.error = LinkStatus.RESOLVING, ""
+            link.direct_url, link.direct_headers = None, {}
+        raise first_error or PluginError("no plugin could handle this link")
+
     def _plugin_for(self, link: Link):
         """Registered plugin for the link, falling back to url matching."""
         p = self.registry.get(link.plugin) if link.plugin else None
@@ -304,18 +394,7 @@ class DownloadManager:
         if link is None:
             return
         try:
-            plugin = self._pick_plugin(link)
-            link.plugin = plugin.id
-            ctx = self._ctx_for(plugin)
-            try:
-                g = plugin.grab(link.url, ctx)
-            except (NotImplementedError, PluginError):
-                g = None
-            if g is not None:
-                self._apply_grab(link, plugin.id, g)
-            if link.status not in (LinkStatus.CAPTCHA, LinkStatus.LOGIN,
-                                   LinkStatus.PAYWALL, LinkStatus.SKIPPED):
-                self._resolve(link, plugin, ctx)
+            self._grab_with_fallback(link)
         except CaptchaRequired as e:
             if self._handle_challenge(link, e, phase="grab"):
                 return
@@ -689,6 +768,8 @@ class DownloadManager:
         except Exception as e:
             self.registry.record_result(pid, False, str(e))
             raise
+        if r.extra:
+            link.extra.update(r.extra)  # e.g. a decryption key for finalize()
         if r.url:
             link.direct_url = r.url
             link.direct_headers = dict(r.headers or {})
@@ -1104,6 +1185,7 @@ class DownloadManager:
                     if acct:
                         self.account_policy.finish(acct)
             path = self._finish_media(link, Path(path))
+            path = self._plugin_finalize(link, Path(path))
             link.path = str(path)
             self._verify_hash(link, Path(path))
             if self.settings.auto_extract_archives:
@@ -1114,6 +1196,7 @@ class DownloadManager:
                 pass
             link.downloaded = link.size or link.downloaded
             link.status = LinkStatus.FINISHED
+            link.extra.pop("link_refreshed", None)
             link.finished = time.time()
             link.speed = 0.0
             link.progress = 1.0
@@ -1139,6 +1222,8 @@ class DownloadManager:
                 # already PAUSED: keep its note ("paused by user", app closed)
                 self._persist()
                 self._broadcast("stopped", link)
+            elif self._refresh_expired_link(link, msg):
+                pass  # the plugin is asked for a fresh link; the download is requeued
             else:
                 self._fail(link, msg, e.transient)
         except Exception as e:

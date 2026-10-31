@@ -28,6 +28,9 @@ class _LinkParser(HTMLParser):
                     self.links.append(value)
 
 
+_KEEPS_FRAGMENT = re.compile(r"^https?://(?:[a-z0-9-]+\.)*(?:mega\.nz|mega\.co\.nz|mega\.io|mega\.app|transfer\.it|gofile\.io)/", re.I)
+
+
 def extract_links(html: str, base_url: str) -> list:
     parser = _LinkParser()
     parser.feed(html)
@@ -35,8 +38,11 @@ def extract_links(html: str, base_url: str) -> list:
     result = []
     for link in parser.links:
         full_url = urljoin(base_url, link)
-        # Remove fragment
-        full_url, _ = urldefrag(full_url)
+        # Remove the fragment, except where it carries part of the link: Mega
+        # and transfer.it keep the decryption key there, GoFile the file id.
+        defragged, fragment = urldefrag(full_url)
+        if not (fragment and _KEEPS_FRAGMENT.search(defragged)):
+            full_url = defragged
         # Keep only http and https URLs
         if not full_url.startswith(('http://', 'https://')):
             continue
