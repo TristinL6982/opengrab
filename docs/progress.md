@@ -16,11 +16,13 @@ Tests may not be deleted, skipped to hide a failure, or marked xfail. The one
 xfail is known bug B1 (a generic page with file links ends in ERROR).
 Platform skips on Linux and macOS cover Windows-only features only.
 
-## Latest verification (2026-10-30)
+## Latest verification (2026-10-31, v0.1.1)
 
 | Check | Result |
 |---|---|
-| Full test suite, Windows 11 | 929 passed, 1 xfailed (B1) |
+| Full test suite, Windows 11 | 1184 passed, no xfail (B1 fixed) |
+| UI click-through | every view, toolbar button and dialog driven in a browser against a test instance; 85 settings saved and reloaded; language switch and add-on install checked |
+| Plugin review | security and robustness fixes for the site plugins, each with a test in `tests/regression/test_plugin_review.py` |
 | CI on GitHub | Green on 2026-10-30: Windows (tests, exe, smoke test, setup built, silent install, smoke test of the installed copy, uninstall), Ubuntu (under a virtual display) and macOS test suites with Windows-only tests skipped, Docker image healthy and token-protected |
 | Onedir exe | 70 MB (unused image codecs, Tk and other platforms' webview backends excluded), no ML or libtorrent packages; `--smoke-test` passes; frozen exe answers the update, Windows integration and dashboard routes |
 | Import gate | every module under `src/opengrab` is imported by the running app (`tools/import_audit.py`, no known orphans) |

@@ -1028,8 +1028,9 @@ def _make_handler(srv: ApiServer):
 
         def _api_get(self, u, p: str, q: dict):
             if p in ("/api/ping", "/api/health"):
+                from . import __version__
                 return self._json({"ok": True, "app": "OpenGrab",
-                                   "version": "0.1.0", "nonce": srv.nonce})
+                                   "version": __version__, "nonce": srv.nonce})
             if p == "/api/terminal":
                 if not self._terminal_authorized():
                     return
