@@ -135,6 +135,10 @@
         <p class="hint">Cloudflare, DDoS-Guard and captcha widgets that need a person. One entry covers
         every download from the same site. <em>Solve in browser</em> opens the site in Edge; once the
         check passes, the waiting downloads continue. Image captchas are answered in the download's row.</p>
+        <div class="formrow">
+          <button id="btn-captcha-verify-all" class="primary" title="Open one Edge window and pass the checks of all waiting downloads at once. Each download gets its own token.">Verify all</button>
+          <span id="captcha-verify-hint" class="hint"></span>
+        </div>
         <div id="captcha-list" class="linklist boxed"></div>
         <h2>Saved site clearances</h2>
         <div id="clearance-list" class="linklist boxed"></div>
@@ -318,6 +322,11 @@
 
       <!-- ============================ SETTINGS =========================== -->
       <section id="tab-settings" class="tabpane pagepane settingspane">
+        <div class="sfbar">
+          <input id="settings-search" type="search" aria-label="Search settings" placeholder="Search settings… (Ctrl+F)" autocomplete="off" spellcheck="false">
+          <button id="settings-search-clear" type="button" class="hidden" aria-label="Clear search" title="Clear search (Esc)">×</button>
+        </div>
+        <p id="settings-search-empty" class="hint hidden" role="status" aria-live="polite"></p>
         <h2>Appearance</h2>
         <div class="settings-grid groupbox">
           <label>Language<select id="set-ui_language"><option value="auto">Follow Windows</option><option value="en">English</option><option value="zh-CN">简体中文 (Simplified Chinese)</option></select></label>
@@ -449,6 +458,7 @@
             <input id="set-captcha_capmonster_key" type="password"></label>
           <label>CapSolver API key
             <input id="set-captcha_capsolver_key" type="password"></label>
+          <label class="check"><input id="set-captcha_browser_enabled" type="checkbox"> Solve captchas automatically in a real Edge window (starts out of view; comes forward only if a click is needed)</label>
         </div>
 
         <h2>Local OCR captcha solver (optional)</h2>
@@ -602,6 +612,10 @@
         <h2>Windows integration</h2>
         <div class="groupbox" id="win-integration">
           <p class="hint" id="win-int-note">Let Windows hand these links and files to OpenGrab. This changes only your own Windows account and can be undone here.</p>
+          <p class="hint">Magnet links open in: <b id="win-h-magnet">…</b></p>
+          <p class="hint">.torrent files open in: <b id="win-h-torrent">…</b></p>
+          <div class="formrow"><button id="btn-win-default" type="button">Make OpenGrab the default…</button></div>
+          <p class="hint">Windows asks you to confirm: pick OpenGrab for magnet links and .torrent in the page that opens.</p>
           <div class="settings-grid">
             <label class="check"><input type="checkbox" data-proto="magnet"> Open magnet: links</label>
             <label class="check"><input type="checkbox" data-proto="opengrab"> Open opengrab:// links (from web pages and the browser extension)</label>
@@ -755,6 +769,24 @@
     <div id="files-dialog-list" class="linklist boxed" style="max-height:50vh;overflow:auto"></div>
     <div class="addrow"><span class="grow"></span><button type="button" id="files-cancel">Cancel</button>
       <button type="button" id="files-save" class="primary">Download selected files</button></div>
+  </div>
+</dialog>
+
+<dialog id="peers-dialog" class="win" aria-labelledby="peers-title" style="width:min(860px,96vw)">
+  <div class="win-title" id="peers-title">Peers of this torrent<button type="button" class="win-x" id="peers-close" aria-label="Close">×</button></div>
+  <div class="win-body">
+    <div id="peers-countries" class="ccounts"></div>
+    <div class="peers-wrap">
+      <table class="grid" id="peers-table">
+        <thead><tr><th scope="col">Address</th><th scope="col">Client</th><th scope="col">Download</th><th scope="col">Upload</th>
+          <th scope="col">Progress</th><th scope="col">Flags</th>
+          <th scope="col">Country <button type="button" id="peers-geo-install" class="sm" hidden>Install country lookup</button></th></tr></thead>
+        <tbody id="peers-body"></tbody>
+      </table>
+    </div>
+    <div class="addrow"><span class="hint grow">Peers: <span id="peers-count"></span>. Countries come from a database on this PC. Peer addresses are never sent to any online service.
+      <span id="peers-attr" hidden><a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">IP geolocation by DB-IP</a></span></span>
+      <button type="button" id="peers-done">Close</button></div>
   </div>
 </dialog>
 

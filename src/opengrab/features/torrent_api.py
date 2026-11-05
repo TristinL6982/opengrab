@@ -36,7 +36,38 @@ def setup(srv):
             return 409, {"error": str(exc) or "the file list is not known yet"}
         return {"priorities": prios}
 
+    def peers(req):
+        from .. import geoip
+        if mgr.get(req.params["lid"]) is None:
+            return 404, {"error": "link not found"}
+        geo = geoip.load_db()
+        out = ts.peers(req.params["lid"], geo)
+        if out is None:
+            return 409, {"error": "this torrent is not running"}
+        out["geo"] = {"installed": geo is not None, "attribution": geoip.ATTRIBUTION if geo else "",
+                      "attribution_url": geoip.ATTRIBUTION_URL if geo else ""}
+        return out
+
+    def geo_status(_req):
+        from .. import geoip
+        return geoip.status()
+
+    def geo_install(_req):
+        from .. import geoip
+
+        def done(ok, err):
+            srv.broadcast("addon", {"name": "geoip", "ok": ok, "error": err})
+        return 202, {"job": geoip.install_async(on_done=done)}
+
+    def geo_remove(_req):
+        from .. import geoip
+        return {"removed": geoip.remove()}
+
     r.get(r"/api/torrents", torrents)
+    r.get(r"/api/torrents/(?P<lid>[^/]+)/peers", peers)
+    r.get(r"/api/geoip", geo_status)
+    r.post(r"/api/geoip/install", geo_install, action="settings_write")
+    r.post(r"/api/geoip/remove", geo_remove, action="settings_write")
     r.get(r"/api/torrents/(?P<lid>[^/]+)/files", files)
     r.post(r"/api/torrents/(?P<lid>[^/]+)/files", select)
 

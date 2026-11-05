@@ -36,6 +36,7 @@
   }
   const SKIP = new Set(["SCRIPT", "STYLE", "CODE", "PRE", "TEXTAREA", "svg"]);
   const ATTRS = ["placeholder", "title", "aria-label"];
+  const orig = new WeakMap();   // text node -> English original (used by settings search)
   function translate(root) {
     if (lang === "en" || !root) return;
     if (root.nodeType === 3) {
@@ -45,7 +46,7 @@
         if (r !== null) {
           const k = v.replace(/\s+/g, " ").trim();
           const lead = v.match(/^\s*/)[0], trail = v.match(/\s*$/)[0];
-          if (r !== k) root.nodeValue = lead + r + trail;
+          if (r !== k) { orig.set(root, k); root.nodeValue = lead + r + trail; }
         }
       }
       return;
@@ -56,7 +57,7 @@
     }
     for (const c of Array.from(root.childNodes)) translate(c);
   }
-  window.OG_I18N = { lang, t: (s) => { const r = tr(s); return r === null ? s : r; }, translate };
+  window.OG_I18N = { lang, original: (n) => orig.get(n), t: (s) => { const r = tr(s); return r === null ? s : r; }, translate };
   if (lang === "en") return;
   translate(document.body);
   new MutationObserver((muts) => {

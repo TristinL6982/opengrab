@@ -527,8 +527,30 @@ class TesseractSolver(BaseSolver):
 
 class BrowserCaptchaSolver(BaseSolver):
     id = "browser"; name = "Real browser (Edge CDP / Camoufox)"; kinds = ("turnstile", "hcaptcha", "recaptcha"); priority = 30; needs_key = False
-    def __init__(self, settings, store=None, make=None): super().__init__(settings); self.store = store; self.make = make
+    def __init__(self, settings, store=None, make=None):
+        super().__init__(settings); self.store = store; self.make = make
+        # set by the engine: a WidgetBatcher, so many links share one browser window
+        self.batcher = None
     def enabled(self): return bool(self.settings.captcha_browser_enabled)
+
+    def _driver_factory(self, hidden=False):
+        from .. import browser_solver as bs
+        make = self.make
+        if make is None:
+            make = bs.make_stealth_driver if (self.settings.captcha_browser_engine or "edge").lower() == "camoufox" else bs.make_driver
+            if hidden and make is bs.make_driver:
+                # automatic widget solve: start Edge out of the way, shown only if a click is needed
+                return lambda: bs.make_driver(hidden=True)
+        return make
+
+    def solve_batch(self, page_url, kind, sitekey, count, on_token, hidden=True):
+        """Render `count` widgets in ONE browser page; on_token gets each token. The caller holds the browser lock."""
+        from .. import browser_solver as bs
+        host = urllib.parse.urlsplit(page_url).hostname or ""
+        bs.widgets_page(kind, sitekey, host, count)      # validates before a browser is started
+        timeout = max(60.0, float(self.settings.captcha_manual_timeout_s or 120))
+        return bs.solve_widgets_in_browser(page_url, kind, sitekey, count, self._driver_factory(hidden)(), on_token, timeout=timeout)
+
     def solve(self, req, timeout_s=90.0, client=None):
         from .. import browser_solver as bs      # import INSIDE solve, and always call bs.solve_in_browser / bs.make_driver / bs.make_stealth_driver through the module so tests can monkeypatch them
         if not req.site_url: return CaptchaResult(ok=False, provider=self.id, error="no site url")
@@ -536,6 +558,17 @@ class BrowserCaptchaSolver(BaseSolver):
         if make is None:
             make = bs.make_stealth_driver if (self.settings.captcha_browser_engine or "edge").lower() == "camoufox" else bs.make_driver
         if req.recaptcha_sitekey:
+            if self.batcher is not None:
+                # one window for all links of this host: each link gets its own token
+                host = urllib.parse.urlsplit(req.site_url).hostname or ""
+                try: bs.widgets_page(req.kind, req.recaptcha_sitekey, host, 1)
+                except ValueError as e: return CaptchaResult(ok=False, provider=self.id, error=str(e))
+                token = self.batcher.request(host, req.kind, req.recaptcha_sitekey, req.site_url)
+                if not token: return CaptchaResult(ok=False, provider=self.id, error="timeout")
+                return CaptchaResult(ok=True, text=token, provider=self.id)
+            if self.make is None and make is bs.make_driver:
+                # automatic widget solve: start Edge out of the way, shown only if a click is needed
+                make = lambda: bs.make_driver(hidden=True)
             # a widget in a site's form: show it on the site's own address, return its token
             try: token = bs.solve_widget_in_browser(req.site_url, req.kind, req.recaptcha_sitekey, make(), timeout=timeout_s)
             except (bs.BrowserSolverUnavailable, ValueError) as e: return CaptchaResult(ok=False, provider=self.id, error=str(e))
@@ -544,6 +577,16 @@ class BrowserCaptchaSolver(BaseSolver):
         if req.kind != "turnstile": return CaptchaResult(ok=False, provider=self.id, error="no sitekey")
         store = self.store if self.store is not None else (req.extra or {}).get("clearance_store")
         if store is None: return CaptchaResult(ok=False, provider=self.id, error="no clearance store")
+        if self.batcher is None:
+            return self._clearance(bs, req, store, make, timeout_s)
+        with self.batcher.browser_lock:       # one Edge at a time; a link that waited may find the work already done
+            try:
+                if store.get(urllib.parse.urlsplit(req.site_url).hostname or "") is not None:
+                    return CaptchaResult(ok=True, text="__CLEARANCE__", provider=self.id)
+            except Exception: pass
+            return self._clearance(bs, req, store, make, timeout_s)
+
+    def _clearance(self, bs, req, store, make, timeout_s):
         try: c = bs.solve_in_browser(req.site_url, store, make(), timeout=timeout_s)
         except bs.BrowserSolverUnavailable as e: return CaptchaResult(ok=False, provider=self.id, error=str(e))
         if c is None: return CaptchaResult(ok=False, provider=self.id, error="timeout")

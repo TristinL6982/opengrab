@@ -23,11 +23,12 @@ import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from ..accounts import AccountManager
 from ..captcha.chain import SolverChain
@@ -42,6 +43,29 @@ from .downloader import DownloadError, LinkDownload, _RateLimiter
 from ..sessiondb import SessionDB
 
 log = logging.getLogger("opengrab.engine")
+
+_WIN_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _local_torrent_path(url: str) -> Optional[Path]:
+    """The filesystem path of a local .torrent given as file:// or a Windows path.
+
+    None for anything else.  A file:// URL that is not a .torrent raises ValueError:
+    local files are never read, fetched or forwarded except as torrents."""
+    from urllib.request import url2pathname
+    if url[:5].lower() == "file:":
+        parts = urlparse(url)
+        if not parts.path.lower().endswith(".torrent"):
+            raise ValueError("only local .torrent files can be added from a file:// link")
+        path = parts.path
+        if parts.netloc and parts.netloc.lower() != "localhost":
+            path = "//" + parts.netloc + path  # file://server/share/x.torrent (UNC)
+        elif re.match(r"^/[A-Za-z]:", path):
+            path = path[1:]  # /C:/x -> C:/x on any OS
+        return Path(unquote(path) if _WIN_PATH.match(path) else url2pathname(path))
+    if _WIN_PATH.match(url) and url.lower().endswith(".torrent"):
+        return Path(url)
+    return None
 
 
 class DownloadManager:
@@ -73,6 +97,14 @@ class DownloadManager:
         self.captcha_inbox = CaptchaInbox(
             max_pending=max(1, int(getattr(settings, "captcha_inbox_max_pending", 50) or 50)))
         self.captcha_chain = SolverChain(settings, self.client, clearance_store=self.clearance)
+        # many links on one host share one browser window: each widget captcha gets
+        # its own token from one page (see captcha/batcher.py); one Edge at a time
+        from ..captcha.batcher import WidgetBatcher
+        self.captcha_batcher = None
+        browser = next((x for x in self.captcha_chain.solvers if x.id == "browser"), None)
+        if browser is not None:
+            self.captcha_batcher = WidgetBatcher(browser.solve_batch)
+            browser.batcher = self.captcha_batcher
         # W3-W5: scheduler, host limits, queues, speed profiles, data cap
         from .flow import FlowControl
         from .net import NetPolicy
@@ -207,6 +239,9 @@ class DownloadManager:
         url = (url or "").strip()
         if not url:
             raise ValueError("empty url")
+        local = _local_torrent_path(url)  # file:///x.torrent or C:\x.torrent; other file:// raises
+        if local is not None:
+            return self._add_local_torrent(url, local, priority, title, queue)
         extra: dict = {}
         if queue:
             extra["queue"] = self.flow.queues.get(queue).name  # KeyError: unknown queue
@@ -258,6 +293,47 @@ class DownloadManager:
         if paused and link is not None and link.status != LinkStatus.ERROR:
             self.torrents.pause(link_id)
             link.status = LinkStatus.PAUSED
+
+    def _add_local_torrent(self, url: str, path: Path, priority: int, title: str, queue: str) -> Link:
+        """A file:// (or plain path) .torrent: validate it, keep a private copy in the
+        app data dir (so the download survives the original being moved or deleted)
+        and load it as a torrent file, never as a URL."""
+        import hashlib
+        try:
+            if not path.is_file():
+                raise ValueError(f"torrent file not found: {path}")
+            if path.stat().st_size > 32 * 1024 * 1024:
+                raise ValueError(f"not a valid torrent file (too large): {path.name}")
+            data = path.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"cannot read the torrent file {path.name}: {exc.strerror or exc}") from exc
+        if not data.startswith(b"d"):
+            raise ValueError(f"not a valid torrent file: {path.name}")
+        from .torrents import libtorrent_available
+        if libtorrent_available():
+            import libtorrent as lt
+            try:
+                lt.torrent_info(lt.bdecode(data))
+            except Exception as exc:  # noqa: BLE001
+                raise ValueError(f"not a valid torrent file: {path.name} ({exc})") from exc
+        extra: dict = {}
+        if queue:
+            extra["queue"] = self.flow.queues.get(queue).name
+        copy_dir = self.data_dir / "torrents"
+        copy_dir.mkdir(parents=True, exist_ok=True)
+        copy = copy_dir / (hashlib.sha1(data).hexdigest() + ".torrent")
+        if not copy.exists():
+            copy.write_bytes(data)
+        # recorded up front so a retry or a restart finds the file even if the first start fails
+        extra["torrent"] = {"info_hash": "", "magnet": "", "torrent_file": str(copy), "save_path": ""}
+        link = Link(url=url, title=title or path.stem, priority=priority,
+                    status=LinkStatus.RESOLVING, plugin="torrent", extra=extra)
+        with self._lock:
+            self._links[link.id] = link
+        self._persist()
+        self._broadcast("grabbed", link)
+        self._spawn(self._start_torrent, link.id, "", str(copy))
+        return link
 
     def add_torrent_file(self, path: str, title: str = "") -> Link:
         link = Link(url=Path(path).as_uri(), title=title or Path(path).stem,
@@ -528,6 +604,28 @@ class DownloadManager:
             else:
                 self.submit_captcha(link.id, answer)
         return len(links)
+
+    def widget_captcha_groups(self) -> dict:
+        """Pending widget captchas by (host, kind, sitekey): the links waiting
+        (each needs its own token) and the inbox requests that cover them."""
+        from ..challenge import WIDGET_KINDS
+        groups: dict = {}
+        for req in self.captcha_inbox.pending():
+            if req.kind not in WIDGET_KINDS or not req.sitekey:
+                continue
+            links = self.links_for_captcha(req.id)
+            if not links:
+                continue
+            g = groups.setdefault((req.host, req.kind, req.sitekey),
+                                  {"page_url": req.page_url, "links": [], "requests": []})
+            g["requests"].append(req.id)
+            g["links"].extend(l for l in links if l not in g["links"])
+        return groups
+
+    def give_captcha_token(self, link: Link, token: str) -> None:
+        """Hand one widget token to one parked link (it retries with exactly this token)."""
+        link.extra.pop("challenge_auto_tried", None)
+        self.submit_captcha(link.id, token)
 
     def captcha_request_skipped(self, request_id: str) -> int:
         links = self.links_for_captcha(request_id)

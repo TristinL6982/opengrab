@@ -40,6 +40,90 @@ def libtorrent_available() -> bool:
     return addons.importable("libtorrent")
 
 
+def _num(v, default=0):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def torrent_stats(st, total_pieces: int = 0, eta=None) -> dict:
+    """The numbers the row shows, from a libtorrent torrent_status (or a fake)."""
+    seeds, conn = _num(getattr(st, "num_seeds", 0)), _num(getattr(st, "num_peers", 0))
+    done = _num(getattr(st, "total_wanted_done", 0))
+    up = _num(getattr(st, "all_time_upload", 0))
+    raw = str(getattr(st, "state", "")).split(".")[-1]
+    if getattr(st, "paused", False):
+        state = "paused"
+    elif not getattr(st, "has_metadata", True) or raw == "downloading_metadata":
+        state = "metadata"
+    elif raw in ("checking_files", "checking_resume_data", "allocating"):
+        state = "checking"
+    elif getattr(st, "is_seeding", False) or raw in ("seeding", "finished"):
+        state = "seeding"
+    else:
+        state = "downloading"
+    copies = getattr(st, "distributed_copies", -1)
+    complete, incomplete = _num(getattr(st, "num_complete", -1), -1), _num(getattr(st, "num_incomplete", -1), -1)
+    return {
+        "peers": conn, "seeds": seeds,                      # connected, seeds included in peers (kept for older rows)
+        "connected_seeds": seeds, "connected_peers": max(0, conn - seeds),
+        "swarm_seeds": _num(getattr(st, "list_seeds", 0)), "swarm_peers": _num(getattr(st, "list_peers", 0)),
+        "tracker_seeds": complete if complete >= 0 else None,
+        "tracker_peers": incomplete if incomplete >= 0 else None,
+        "download_rate": _num(getattr(st, "download_rate", 0)),
+        "upload_rate": _num(getattr(st, "upload_rate", 0)), "uploaded": up,
+        "ratio": round(up / done, 3) if done else 0.0,
+        "copies": round(float(copies), 3) if copies is not None and copies >= 0 else None,
+        "state": state,
+        "pieces_done": _num(getattr(st, "num_pieces", 0)), "pieces_total": _num(total_pieces),
+        "eta": eta,
+    }
+
+
+MAX_PEERS = 200
+
+
+def _peer_flags(p) -> list[str]:
+    """Labels from libtorrent's peer_info bit flags (the attributes are the bit values)."""
+    flags = _num(getattr(p, "flags", 0))
+
+    def has(name):
+        bit = _num(getattr(p, name, 0))
+        return bool(bit and flags & bit)
+
+    out = []
+    if has("seed") or _num(getattr(p, "progress_ppm", 0)) >= 1_000_000:
+        out.append("seed")
+    if has("rc4_encrypted") or has("plaintext_encrypted"):
+        out.append("encrypted")
+    if getattr(p, "local_connection", None) is not None:
+        out.append("outgoing" if has("local_connection") else "incoming")
+    if has("utp_socket"):
+        out.append("utp")
+    return out
+
+
+def peer_rows(infos, geo=None, limit: int = MAX_PEERS) -> list[dict]:
+    """Peer table rows from ``handle.get_peer_info()`` (fast peers first)."""
+    rows = []
+    for p in infos:
+        ip = getattr(p, "ip", ("", 0))
+        host, port = (ip[0], _num(ip[1])) if isinstance(ip, (tuple, list)) else (str(ip), 0)
+        client = getattr(p, "client", "")
+        if isinstance(client, bytes):
+            client = client.decode("utf-8", "replace")
+        row = {"ip": host, "port": port, "client": str(client).strip(),
+               "down_speed": _num(getattr(p, "payload_down_speed", getattr(p, "down_speed", 0))),
+               "up_speed": _num(getattr(p, "payload_up_speed", getattr(p, "up_speed", 0))),
+               "progress": round(float(getattr(p, "progress", 0.0)) * 100, 1),
+               "flags": _peer_flags(p)}
+        row["country"] = geo.lookup(host) if geo is not None else ""
+        rows.append(row)
+    rows.sort(key=lambda r: (-(r["down_speed"] + r["up_speed"]), r["ip"]))
+    return rows[:limit]
+
+
 class LtHandle:
     def __init__(self, handle):
         self.h = handle
@@ -79,6 +163,8 @@ class LtSession:
             params = lt.add_torrent_params()
             params.ti = lt.torrent_info(str(spec["torrent_file"]))
         else:
+            if not str(spec.get("magnet") or "").lower().startswith("magnet:"):
+                raise ValueError("no magnet link or .torrent file to load")  # never hand a URL to libtorrent
             params = lt.parse_magnet_uri(spec["magnet"])
         params.save_path = str(spec["save_path"])
         if not self.pex:
@@ -217,6 +303,7 @@ class TorrentService:
         if not self.ensure_session():
             link.status = LinkStatus.ERROR
             link.error = NOT_INSTALLED
+            link.extra["fix_setting"] = "addon-torrent"  # the UI offers a jump to Settings, BitTorrent
             return
         save = Path(self.settings.download_dir).expanduser().resolve()
         save.mkdir(parents=True, exist_ok=True)
@@ -301,6 +388,20 @@ class TorrentService:
                  "selected": (prios[i] if i < len(prios) else 4) > 0}
                 for i in range(fs.num_files()) if not fs.file_flags(i) & pad]  # hide padding files
 
+    def peers(self, link_id: str, geo=None, limit: int = MAX_PEERS) -> Optional[dict]:
+        """Current peers of a torrent (None when it is not running)."""
+        h = self.handle_for(link_id)
+        if h is None:
+            return None
+        try:
+            infos = h.h.get_peer_info()
+        except Exception:
+            infos = []
+        rows = peer_rows(infos, geo, limit=len(infos) or 1)
+        from .. import geoip
+        return {"peers": rows[:limit], "total": len(rows), "shown": min(len(rows), limit),
+                "countries": geoip.summarize([r["country"] for r in rows]) if geo is not None else []}
+
     def select_files(self, link_id: str, selected: list[int]) -> list:
         h = self.handle_for(link_id)
         if h is None or h.h.torrent_file() is None:
@@ -360,11 +461,11 @@ class TorrentService:
         link.progress = float(st.total_wanted_done) / st.total_wanted if st.total_wanted else 0.0
         link.speed = float(st.download_rate)
         link.eta = ((st.total_wanted - st.total_wanted_done) / st.download_rate) if st.download_rate else None
-        link.extra["torrent"].update(peers=int(st.num_peers), seeds=int(st.num_seeds),
-                                     upload_rate=int(st.upload_rate), uploaded=int(st.all_time_upload),
-                                     ratio=round(st.all_time_upload / st.total_wanted_done, 3)
-                                     if st.total_wanted_done else 0.0,
-                                     state=str(st.state).split(".")[-1])
+        total_pieces = 0
+        if meta:
+            ti = h.h.torrent_file()
+            total_pieces = int(ti.num_pieces()) if ti is not None else 0
+        link.extra["torrent"].update(torrent_stats(st, total_pieces=total_pieces, eta=link.eta))
         if not meta:
             link.status = LinkStatus.RESOLVING
         elif st.is_seeding or st.is_finished or (st.total_wanted and st.total_wanted_done >= st.total_wanted):

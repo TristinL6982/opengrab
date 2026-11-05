@@ -46,7 +46,8 @@
     "ArrowUp",
     "End",
     "Home",
-    "VirusTotal"
+    "VirusTotal",
+    "uTP"
   ],
   "strings": {
     "Remove downloads": "移除下载",
@@ -634,14 +635,68 @@
     "Windows Defender was found on this PC.": "已在此电脑上找到 Windows Defender。",
     "Windows Defender's command line was not found on this PC.": "未在此电脑上找到 Windows Defender 命令行工具。",
     "Windows integration": "Windows 集成",
+    "Magnet links open in:": "磁力链接的打开方式：",
+    ".torrent files open in:": ".torrent 文件的打开方式：",
+    "Not set": "未设置",
+    "Make OpenGrab the default…": "将 OpenGrab 设为默认…",
+    "Windows asks you to confirm: pick OpenGrab for magnet links and .torrent in the page that opens.": "Windows 会要求您确认：请在打开的页面中为磁力链接和 .torrent 选择 OpenGrab。",
+    "Could not open Default apps:": "无法打开“默认应用”：",
     "Windows settings updated": "Windows 设置已更新",
     "Worked": "成功",
     "Works": "可用",
     "You can also paste a checksum in the Add links dialog. A file that fails its check is deleted and marked as an error so a retry downloads it again.": "也可以在“添加链接”对话框中粘贴校验值。校验失败的文件会被删除并标记为错误，重试时会重新下载。",
     "You have OpenGrab": "当前版本 OpenGrab",
-    "Your own plugins and templates run in a sandbox: they can reach only the sites you allow. Built-in plugins are trusted.": "你自己的插件和模板在沙箱中运行：只能访问你允许的网站。内置插件受信任。"
+    "Your own plugins and templates run in a sandbox: they can reach only the sites you allow. Built-in plugins are trusted.": "你自己的插件和模板在沙箱中运行：只能访问你允许的网站。内置插件受信任。",
+    "Search settings": "搜索设置",
+    "Search settings… (Ctrl+F)": "搜索设置…（Ctrl+F）",
+    "Clear search": "清除搜索",
+    "Clear search (Esc)": "清除搜索（Esc）",
+    "No settings match \"{q}\".": "没有符合“{q}”的设置。",
+    "Install BitTorrent": "安装 BitTorrent",
+    "Verify all": "全部验证",
+    "Nothing is waiting for a check": "没有等待验证的项目",
+    "Open one Edge window and pass the checks of all waiting downloads at once. Each download gets its own token.": "打开一个 Edge 窗口，一次性通过所有等待中下载的验证。每个下载会得到各自的令牌。",
+    "Solve captchas automatically in a real Edge window (starts out of view; comes forward only if a click is needed)": "在真实的 Edge 窗口中自动解决验证码（窗口先在视野外启动；只有需要点击时才会移到前台）",
+    "Checking files": "正在检查文件",
+    "Client": "客户端",
+    "Connected peers (peers known in the swarm)": "已连接的节点（括号内为种子群中已知的节点）",
+    "Connected seeds (seeds known in the swarm)": "已连接的种子（括号内为种子群中已知的种子）",
+    "Copies": "副本数",
+    "Country": "国家/地区",
+    "Country lookup installed": "国家/地区查询已安装",
+    "Distributed copies: how many complete copies the swarm holds": "分布式副本数：种子群中完整副本的数量",
+    "Download": "下载",
+    "Download and upload speed": "下载和上传速度",
+    "Encrypted": "加密",
+    "Fetching metadata": "正在获取元数据",
+    "Flags": "标志",
+    "IP geolocation by DB-IP": "IP 地理位置数据来自 DB-IP",
+    "Incoming": "入站",
+    "Install country lookup": "安装国家/地区查询",
+    "Outgoing": "出站",
+    "Peers of this torrent": "此种子的节点",
+    "Peers:": "节点：",
+    "Pieces": "分块",
+    "Ratio": "分享率",
+    "Seed": "做种",
+    "Seeding": "正在做种",
+    ". Countries come from a database on this PC. Peer addresses are never sent to any online service.": "。国家/地区信息来自本机上的数据库，节点地址不会发送到任何在线服务。",
+    "Downloading the country database from db-ip.com. Peer addresses are never sent anywhere.": "正在从 db-ip.com 下载国家/地区数据库。节点地址不会被发送到任何地方。",
+    "No peers connected yet.": "尚无已连接的节点。"
   },
   "patterns": [
+    [
+      "^(\\d+) download\\(s\\) wait for a check\\.$",
+      "$1 个下载在等待验证。"
+    ],
+    [
+      "^Verifying (\\d+) download\\(s\\)\\. A browser window opens and closes by itself\\.$",
+      "正在验证 $1 个下载。浏览器窗口会自动打开，完成后自动关闭。"
+    ],
+    [
+      "^(\\d+) captcha\\(s\\) waiting\\. Open Captchas, then press Verify all\\.$",
+      "有 $1 个验证码在等待。打开“验证码”，然后点击“全部验证”。"
+    ],
     [
       "^Remove (\\d+) downloads\\?$",
       "要移除 $1 个下载吗？"

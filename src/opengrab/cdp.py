@@ -240,5 +240,10 @@ def find_browser(candidates=None, exists=os.path.exists) -> str:
     return ""
 
 
-def browser_args(exe: str, port: int, user_data_dir: str, url: str = "about:blank") -> list:
-    return [exe, "--remote-debugging-port=%d" % port, "--user-data-dir=" + user_data_dir, "--no-first-run", "--no-default-browser-check", url]
+HIDDEN_WINDOW_ARGS = ["--window-position=-2400,-2400", "--window-size=480,640"]
+
+
+def browser_args(exe: str, port: int, user_data_dir: str, url: str = "about:blank", hidden: bool = False) -> list:
+    # hidden: start the (still real, never headless) window off-screen; see CdpDriver.show()
+    extra = list(HIDDEN_WINDOW_ARGS) if hidden else []
+    return [exe, "--remote-debugging-port=%d" % port, "--user-data-dir=" + user_data_dir, "--no-first-run", "--no-default-browser-check"] + extra + [url]

@@ -8,11 +8,15 @@ import os
 import subprocess
 import tempfile
 import time
+import logging
 import urllib.parse
 from typing import Dict, List, Optional
 
 from opengrab.clearance import Clearance, from_browser_cookies
 from opengrab import cdp
+
+
+log = logging.getLogger(__name__)
 
 
 class BrowserSolverUnavailable(Exception):
@@ -37,6 +41,9 @@ class BrowserDriver:
 
     def evaluate(self, session: str, expression: str):
         raise BrowserSolverUnavailable("this browser cannot show a captcha on the site's own page")
+
+    def show(self) -> None:
+        """Bring the window forward so the user can click; no-op if it is already visible."""
 
     def close(self) -> None:
         raise NotImplementedError
@@ -116,7 +123,7 @@ class PlaywrightDriver(BrowserDriver):
 class CdpDriver(BrowserDriver):
     """Real visible Edge/Chrome driven over CDP (no Playwright, never headless)."""
 
-    def __init__(self, port: int = 9222, user_data_dir: Optional[str] = None, exe: Optional[str] = None, find=None, popen=None, discover=None, transport_factory=None, sleep=time.sleep, attempts: int = 50):
+    def __init__(self, port: int = 9222, user_data_dir: Optional[str] = None, exe: Optional[str] = None, find=None, popen=None, discover=None, transport_factory=None, sleep=time.sleep, attempts: int = 50, hidden: bool = False):
         find = find or cdp.find_browser
         popen = popen or subprocess.Popen
         discover = discover or cdp.discover_ws_url
@@ -128,7 +135,9 @@ class CdpDriver(BrowserDriver):
         
         self.user_data_dir = user_data_dir or os.path.join(tempfile.gettempdir(), "opengrab-cdp-profile")
         
-        self._proc = popen(cdp.browser_args(exe, port, self.user_data_dir))
+        self.hidden = hidden
+        self._target = ""
+        self._proc = popen(cdp.browser_args(exe, port, self.user_data_dir, hidden=hidden))
         
         ws = ""
         last = None
@@ -156,8 +165,26 @@ class CdpDriver(BrowserDriver):
     def open_page(self, url: str) -> str:
         """Open url in a new tab and return a session id for evaluate()."""
         target = self._client.call("Target.createTarget", {"url": url}).get("targetId", "")
-        return self._client.call("Target.attachToTarget",
-                                 {"targetId": target, "flatten": True}).get("sessionId", "")
+        self._target = target
+        self._session = self._client.call("Target.attachToTarget",
+                                          {"targetId": target, "flatten": True}).get("sessionId", "")
+        return self._session
+
+    def show(self) -> None:
+        """Move a hidden (off-screen) window onto the screen and in front, so the user can click."""
+        if not self.hidden or not self._target:
+            return
+        try:
+            win = self._client.call("Browser.getWindowForTarget", {"targetId": self._target})
+            self._client.call("Browser.setWindowBounds", {
+                "windowId": win.get("windowId"),
+                "bounds": {"windowState": "normal", "left": 120, "top": 80, "width": 560, "height": 720}})
+            self._client.call("Target.activateTarget", {"targetId": self._target})
+            if self._session:
+                self._client.call("Page.bringToFront", session_id=self._session)
+        except cdp.CdpError as e:
+            log.info("could not bring the browser window forward: %s", e)
+        self.hidden = False
 
     def evaluate(self, session: str, expression: str):
         res = self._client.call("Runtime.evaluate", {"expression": expression, "returnByValue": True},
@@ -173,7 +200,7 @@ class CdpDriver(BrowserDriver):
     def close(self) -> None:
         try:
             self._client.call("Browser.close", timeout=5.0)
-        except cdp.CdpError:
+        except (cdp.CdpError, OSError):
             pass
             
         try:
@@ -251,6 +278,7 @@ def solve_widget_in_browser(
     poll: float = 1.0,
     clock=time.monotonic,
     sleep=time.sleep,
+    show_after: float = 8.0,
 ) -> Optional[str]:
     """Show a site's captcha widget on the site's own address and return its token.
 
@@ -258,7 +286,9 @@ def solve_widget_in_browser(
     so the widget is drawn into a page of that site (its robots.txt, replaced
     in the browser): the site's own pages are not needed, and a page that
     depends on the download's cookies (DataNodes' /download) is never shown
-    out of context. Returns None on timeout. Always closes the driver."""
+    out of context. A driver started hidden is brought forward (driver.show())
+    once, if no token has arrived after show_after seconds: the check needs a
+    click. Returns None on timeout. Always closes the driver."""
     import json as _json
     p = urllib.parse.urlsplit(page_url)
     origin = f"{p.scheme}://{p.netloc}"
@@ -273,23 +303,127 @@ def solve_widget_in_browser(
                 return None
             sleep(poll / 4)
         driver.evaluate(session, f"document.open();document.write({_json.dumps(html)});document.close();true")
+        shown = False
         while True:
             token = driver.evaluate(session, "window.__ogToken || ''")
             if token:
                 return str(token)
-            if clock() - start >= timeout:
+            waited = clock() - start
+            if waited >= timeout:
                 return None
+            if not shown and waited >= show_after:
+                shown = True
+                driver.show()
             sleep(poll)
     finally:
         driver.close()
 
 
-def make_driver(cdp_factory=None, playwright_factory=None) -> BrowserDriver:
+# explicit-render API of each widget: (script url with ?render=explicit&onload=, JS global, render call)
+EXPLICIT = {"turnstile": ("https://challenges.cloudflare.com/turnstile/v0/api.js", "turnstile"),
+            "hcaptcha": ("https://js.hcaptcha.com/1/api.js", "hcaptcha"),
+            "recaptcha": ("https://www.google.com/recaptcha/api.js", "grecaptcha")}
+MAX_WIDGETS = 200
+
+
+def widgets_page(kind: str, sitekey: str, host: str, count: int) -> str:
+    """A page that renders `count` widgets of one site key (explicit render API).
+    Each answer is appended to window.__ogTokens; the heading counts progress."""
+    import html as _html
+    import json as _json
+    import re as _re
+    if kind not in EXPLICIT:
+        raise ValueError(f"unsupported captcha kind: {kind}")
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{1,100}", sitekey or ""):
+        raise ValueError("invalid sitekey")
+    count = int(count)
+    if not 1 <= count <= MAX_WIDGETS:
+        raise ValueError("invalid widget count")
+    script, api = EXPLICIT[kind]
+    h = _html.escape(host)
+    js_host = _json.dumps(host).replace("<", "\\u003c")
+    cells = "".join(f"<div class='ogw' id='ogw{i}' style='display:inline-block;margin:4px;min-width:300px'></div>"
+                    for i in range(count))
+    return (f"<!doctype html><html><head><meta charset='utf-8'><title>OpenGrab: 0 of {count} checks done for {h}</title></head>"
+            "<body style='font-family:Segoe UI,sans-serif;padding:24px'>"
+            f"<h3 id='ogp'>OpenGrab: 0 of {count} checks done for {h}</h3>"
+            "<p>These checks often pass by themselves; if one asks, complete it here.</p>"
+            f"{cells}"
+            "<script>window.__ogTokens=[];"
+            f"window.__ogHost={js_host};window.__ogN={count};"
+            "window.__ogProgress=function(){var t='OpenGrab: '+window.__ogTokens.length+' of '+window.__ogN"
+            "+' checks done for '+window.__ogHost;document.title=t;document.getElementById('ogp').textContent=t};"
+            "window.__ogReady=function(){for(var i=0;i<window.__ogN;i++){(function(i){setTimeout(function(){"
+            f"{api}.render(document.getElementById('ogw'+i),{{sitekey:'{sitekey}',callback:function(t){{window.__ogTokens.push(t);"
+            "window.__ogProgress()}})},i*100)})(i)}};</script>"
+            f"<script src='{script}?render=explicit&onload=__ogReady' async defer></script></body></html>")
+
+
+def solve_widgets_in_browser(
+    page_url: str,
+    kind: str,
+    sitekey: str,
+    count: int,
+    driver: BrowserDriver,
+    on_token,
+    timeout: float = 120.0,
+    poll: float = 0.5,
+    clock=time.monotonic,
+    sleep=time.sleep,
+    show_after: float = 8.0,
+) -> int:
+    """Render `count` widgets on ONE page of the site and hand every token to
+    on_token(token) as it arrives (tokens work once and expire after about five
+    minutes, so each is used at once). A driver started hidden is brought
+    forward (driver.show()) once if not all tokens are in after show_after
+    seconds. Returns how many tokens were delivered. Always closes the driver."""
+    import json as _json
+    p = urllib.parse.urlsplit(page_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    html = widgets_page(kind, sitekey, p.hostname or "", count)   # validates kind, sitekey and count
+    delivered = 0
+    try:
+        session = driver.open_page(origin + "/robots.txt")
+        start = clock()
+        ready = f"location.origin === {_json.dumps(origin)} && document.readyState !== 'loading'"
+        while not driver.evaluate(session, ready):
+            if clock() - start >= timeout:
+                return 0
+            sleep(poll / 4)
+        driver.evaluate(session, f"document.open();document.write({_json.dumps(html)});document.close();true")
+        shown = False
+        while delivered < count:
+            raw = driver.evaluate(session, f"JSON.stringify((window.__ogTokens||[]).slice({delivered}))")
+            try:
+                fresh = _json.loads(raw) if raw else []
+            except (TypeError, ValueError):
+                fresh = []
+            for token in fresh[:count - delivered]:
+                delivered += 1
+                try:
+                    on_token(str(token))
+                except Exception:  # noqa: BLE001 - one bad consumer must not stop the others
+                    log.exception("a captcha token consumer failed")
+            if delivered >= count:
+                break
+            waited = clock() - start
+            if waited >= timeout:
+                break
+            if not shown and waited >= show_after:
+                shown = True
+                driver.show()
+            sleep(poll)
+        return delivered
+    finally:
+        driver.close()
+
+
+def make_driver(cdp_factory=None, playwright_factory=None, hidden: bool = False) -> BrowserDriver:
     """Return a CdpDriver (visible Edge over CDP); fall back to PlaywrightDriver if CDP is unavailable."""
     cdp_factory = cdp_factory or CdpDriver
     playwright_factory = playwright_factory or PlaywrightDriver
     try:
-        return cdp_factory()
+        return cdp_factory(hidden=True) if hidden else cdp_factory()
     except BrowserSolverUnavailable as e1:
         first = str(e1)
     try:

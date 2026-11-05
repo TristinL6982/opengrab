@@ -33,6 +33,7 @@ class CaptchaService:
         self.inbox = self.mgr.captcha_inbox
         self._keys: dict[str, str] = {}  # request id -> harvest key
         self._busy: set[str] = set()     # request ids with a browser open
+        self._verifying: set[str] = set()  # link ids a "Verify all" run is working on
         self._lock = threading.Lock()
 
     # -- events -------------------------------------------------------------
@@ -91,7 +92,13 @@ class CaptchaService:
 
         def run():
             from .. import browser_solver as bs
+            # one browser at a time: the automatic batches and this window share a lock
+            batcher = getattr(self.mgr, "captcha_batcher", None)
+            lock = batcher.browser_lock if batcher is not None else threading.Lock()
+            have_lock = False
             try:
+                lock.acquire()
+                have_lock = True
                 factory = make
                 if factory is None:
                     factory = (bs.make_stealth_driver
@@ -120,12 +127,69 @@ class CaptchaService:
                 log.info("browser solve failed: %s", exc)
                 self._report(req, False, str(exc)[:300])
             finally:
+                if have_lock:
+                    lock.release()
                 with self._lock:
                     self._busy.discard(rid)
                 self._done()
 
         threading.Thread(target=run, name=f"captcha-browser-{rid[:8]}", daemon=True).start()
         return 202, {"ok": True, "started": True}
+
+    def verify_all(self) -> tuple[int, dict]:
+        """Start visible batch solves for every pending widget captcha (the user asked):
+        one browser page per (host, kind, sitekey), one token per waiting link."""
+        batcher = getattr(self.mgr, "captcha_batcher", None)
+        if batcher is None:
+            return 409, {"error": "the browser solver is not available"}
+        fresh = {}
+        with self._lock:
+            for key, g in self.mgr.widget_captcha_groups().items():
+                links = [l for l in g["links"] if l.id not in self._verifying]
+                if links:
+                    fresh[key] = {**g, "links": links}
+                    self._verifying.update(l.id for l in links)
+        started = sum(len(g["links"]) for g in fresh.values())
+        if started:
+            threading.Thread(target=self._verify_run, args=(fresh, batcher),
+                             name="captcha-verify-all", daemon=True).start()
+        return 200, {"ok": True, "started": started, "groups": len(fresh)}
+
+    def _verify_run(self, groups: dict, batcher) -> None:
+        notify = self.srv.features.get("notify")
+        for (host, kind, sitekey), g in groups.items():
+            links, total, given = list(g["links"]), len(g["links"]), 0
+            if notify is not None:
+                notify.add("info", f"Verifying {total} download(s) on {host}",
+                           "A browser window opens and closes by itself when the checks are done.",
+                           label="captcha")
+            for i in range(0, total, batcher.max_batch):
+                chunk = links[i:i + batcher.max_batch]
+                waiting, mx = list(chunk), threading.Lock()
+
+                def on_token(token, waiting=waiting, mx=mx):
+                    with mx:
+                        link = waiting.pop(0) if waiting else None
+                    if link is not None:
+                        self.mgr.give_captcha_token(link, token)
+
+                try:
+                    given += batcher.run_now(g["page_url"], kind, sitekey, len(chunk), on_token, hidden=False)
+                except Exception as exc:  # noqa: BLE001
+                    log.info("verify all failed for %s: %s", host, exc)
+                with self._lock:
+                    self._verifying.difference_update(l.id for l in chunk)
+            for rid in g["requests"]:       # a request with no parked link left is done
+                if not self.mgr.links_for_captcha(rid):
+                    self.inbox.solve(rid, "__VERIFIED__")
+            if notify is not None:
+                if given == total:
+                    notify.add("info", f"Verified {given} of {total} on {host}",
+                               "The downloads continue.", label="captcha")
+                else:
+                    notify.add("failed", f"Verified {given} of {total} on {host}",
+                               "The rest still wait; press Verify all to try again.", label="captcha")
+            self._done()
 
     def _report(self, req, ok: bool, error: str) -> None:
         notify = self.srv.features.get("notify")
@@ -179,6 +243,7 @@ def setup(srv):
         return svc.solve(str(req.body.get("id") or ""), str(req.body.get("answer") or ""))
 
     r.post(r"/api/captcha/solve", solve)
+    r.post(r"/api/captcha/verify-all", lambda _req: svc.verify_all())
     r.post(r"/api/captcha/(?P<rid>[a-f0-9]{32})/skip", lambda req: svc.skip(req.params["rid"]))
     r.post(r"/api/captcha/(?P<rid>[a-f0-9]{32})/browser", lambda req: svc.browser(req.params["rid"]))
     r.post(r"/api/captcha/(?P<rid>[a-f0-9]{32})/harvest-link",

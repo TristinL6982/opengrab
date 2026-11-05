@@ -1265,7 +1265,7 @@ def _make_handler(srv: ApiServer):
                 out = []
                 for u_ in urls[:200]:
                     u_ = str(u_).strip()
-                    if not re.match(r"(?:https?|ftps?)://[^/\s]+|magnet:\?", u_, re.I):
+                    if not re.match(r"(?:https?|ftps?)://[^/\s]+|magnet:\?|file:|[A-Za-z]:[\\/].*\.torrent$", u_, re.I):
                         # "example.com/file" is a link without its scheme; other text is not a link
                         if not re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?::\d+)?(?:[/?#]\S*)?", u_):
                             out.append({"url": u_, "error": "this is not a link (it should start with https://)"})

@@ -1,7 +1,8 @@
 """M14 routes: Windows link handlers, file types and autostart; opening
 files and opengrab:// links handed over by Windows or a second launch.
 
-GET  /api/system/integration   what is registered for this user
+GET  /api/system/integration   what is registered for this user, and who handles magnet / .torrent now
+POST /api/system/default-apps  register OpenGrab as a capable app and open Windows' Default apps page
 POST /api/system/integration   {protocols:{magnet:true}, files:{".torrent":true}, autostart:true}
 POST /api/open                 {targets:[url | opengrab://... | local file path]}
 
@@ -58,13 +59,20 @@ def open_targets(srv, targets) -> dict:
     return out
 
 
+def _full_status(reg) -> dict:
+    st = {"available": True, **reg.status()}
+    st["handlers"] = {k: wi.current_handler(k, reg) for k in ("magnet", ".torrent")}
+    st["capabilities"] = reg.capabilities_registered()
+    return st
+
+
 def setup(srv):
     r = srv.router
 
     def status(_req):
         if not wi.available():
             return {"available": False}
-        return {"available": True, **wi.Registry().status()}
+        return _full_status(wi.Registry())
 
     def change(req):
         if not wi.available():
@@ -81,7 +89,18 @@ def setup(srv):
                 reg.set_file_type(ext, bool(on))
         if "autostart" in body:
             reg.set_autostart(bool(body["autostart"]))
-        return {"available": True, **reg.status()}
+        return _full_status(reg)
+
+    def default_apps(req):
+        if not wi.available():
+            return 400, {"error": "Windows integration is only available on Windows"}
+        if not _local(req):
+            return 403, {"error": "change link handlers from this computer"}
+        reg = wi.Registry()
+        if not reg.capabilities_registered():
+            reg.register_capabilities()
+        opened = wi.open_default_apps()
+        return {**_full_status(reg), "opened": bool(opened)}
 
     def open_(req):
         if not _local(req):
@@ -93,5 +112,6 @@ def setup(srv):
 
     r.get(r"/api/system/integration", status)
     r.post(r"/api/system/integration", change, action="settings_write")
+    r.post(r"/api/system/default-apps", default_apps, action="settings_write")
     r.post(r"/api/open", open_, action="settings_write")
     return None

@@ -248,7 +248,29 @@ function rowActions(l) {
       break;
   }
   if (l.plugin === "torrent" && ["downloading", "resolving", "paused"].includes(l.status)) b.push(sm("Files", "torrent-files"));
+  if (l.plugin === "torrent" && (["downloading", "resolving", "paused"].includes(l.status) || l.extra?.torrent?.seeding === "seeding")) b.push(sm("Peers", "torrent-peers"));
   return b.join("");
+}
+
+/* torrent stats line: every piece is its own text node so the label is translated and the number is not */
+const TORRENT_STATE = { checking: "Checking files", metadata: "Fetching metadata", downloading: "Downloading",
+                        seeding: "Seeding", paused: "Paused" };
+function torrentStatsNote(t) {
+  const n = (v) => (v === null || v === undefined ? null : +v);
+  const stat = (label, value, tip) => `<span class="tstat"${tip ? ` title="${esc(tip)}"` : ""}><b>${label}</b> ${esc(String(value))}</span>`;
+  const out = [];
+  if (TORRENT_STATE[t.state]) out.push(`<span class="tstat tstate ${esc(t.state)}">${TORRENT_STATE[t.state]}</span>`);
+  const cs = n(t.connected_seeds ?? t.seeds) || 0;
+  const cp = n(t.connected_peers ?? Math.max(0, (t.peers || 0) - (t.seeds || 0))) || 0;
+  const ss = Math.max(n(t.swarm_seeds) || 0, n(t.tracker_seeds) || 0), sp = Math.max(n(t.swarm_peers) || 0, n(t.tracker_peers) || 0);
+  out.push(stat("Seeds", ss ? `${cs} (${ss})` : cs, "Connected seeds (seeds known in the swarm)"));
+  out.push(stat("Peers", sp ? `${cp} (${sp})` : cp, "Connected peers (peers known in the swarm)"));
+  out.push(`<span class="tstat" title="Download and upload speed">↓ ${humanBytes(t.download_rate || 0)}/s ↑ ${humanBytes(t.upload_rate || 0)}/s</span>`);
+  if (t.uploaded) out.push(stat("Uploaded", humanBytes(t.uploaded)));
+  if (t.ratio) out.push(stat("Ratio", t.ratio));
+  if (t.copies !== null && t.copies !== undefined) out.push(stat("Copies", (+t.copies).toFixed(2), "Distributed copies: how many complete copies the swarm holds"));
+  if (t.pieces_total) out.push(stat("Pieces", `${t.pieces_done || 0}/${t.pieces_total}`));
+  return `<div class="u tstats">${out.join("")}</div>`;
 }
 
 function childrenBlock(l) {
@@ -283,12 +305,17 @@ function statusText(l) {
   return STATUS_TEXT[l.status] || l.status;
 }
 
+/* machine-readable error hints: link.extra.fix_setting -> the control to jump to */
+const FIX_SETTINGS = {
+  "addon-torrent": { label: "Install BitTorrent", target: "#btn-addon-torrent-install" },
+};
+
 function linkRow(l) {
   const pct = Math.round((l.progress || 0) * 100);
   const barCls = (l.status === "error" ? "bar err" : l.status === "paused" ? "bar paused" : "bar") + (pct >= 55 ? " hi" : "");
   const sel = S.selected.has(l.id) ? " selected" : "";
   const notes = [];
-  if (l.status === "error" && l.error) notes.push(`<div class="u" style="color:var(--err)">${esc(l.error)}</div>`);
+  if (l.status === "error" && l.error) notes.push(`<div class="u" style="color:var(--err)">${esc(l.error)}${FIX_SETTINGS[l.extra?.fix_setting] ? ` <button class="sm" data-act="fix-setting" data-setting="${esc(l.extra.fix_setting)}">${esc(FIX_SETTINGS[l.extra.fix_setting].label)}</button>` : ""}</div>`);
   if (l.status === "captcha" && l.extra?.captcha_request_id) notes.push(`<div class="u" style="color:var(--warn)">Waiting for a ${esc(l.captcha_kind)} check on ${esc((l.extra.captcha_site_url || l.url).split("/")[2] || "")}${l.extra.captcha_ray_id ? ", Ray ID " + esc(l.extra.captcha_ray_id) : ""}. Open Captchas to solve it.</div>`);
   const vt = l.extra?.virustotal;
   if (vt) {
@@ -300,8 +327,7 @@ function linkRow(l) {
     ? `<div class="u hashbad">Virus scan: infected${l.extra.avscan.quarantined ? ", moved to quarantine" : ""}</div>`
     : `<div class="u ${l.extra.avscan.status === "clean" ? "hashok" : ""}">Virus scan: ${esc(l.extra.avscan.status)}</div>`);
   if (l.plugin === "torrent" && l.extra?.torrent && l.status !== "error") {
-    const t = l.extra.torrent;
-    notes.push(`<div class="u">Torrent: ${t.peers || 0} peer(s), ${t.seeds || 0} seed(s)${t.ratio ? ", ratio " + t.ratio : ""}${t.seeding === "seeding" ? ", seeding" : ""}</div>`);
+    notes.push(torrentStatsNote(l.extra.torrent));
   }
   if (l.extra?.hash) notes.push(l.extra.hash.ok ? `<div class="u hashok">${esc(l.extra.hash.algo)} checksum OK</div>` : `<div class="u hashbad">Checksum ${l.extra.hash.error ? esc(l.extra.hash.error) : "mismatch"}</div>`);
   if (l.status === "paywall" && l.paywall_note) notes.push(`<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>`);
@@ -657,17 +683,32 @@ function refreshData() {
 }
 
 /* ============================================================ captchas */
+$("#btn-captcha-verify-all")?.addEventListener("click", async () => {
+  try {
+    const r = await api("/api/captcha/verify-all", "POST", {});
+    if (r?.started) toast(`Verifying ${r.started} download(s). A browser window opens and closes by itself.`, "ok");
+    else toast("Nothing is waiting for a check", "");
+    renderCaptchas();
+  } catch (e) { toast("Failed: " + e.message, "err"); }
+});
 function setCaptchaBadge(n) {
   const b = $("#captcha-badge");
   if (!b) return;
   b.textContent = String(n || 0);
   b.classList.toggle("hidden", !n);
+  const tb = $("#tb-captchas");
+  if (tb) tb.title = n ? `${n} captcha(s) waiting. Open Captchas, then press Verify all.` : "Captchas waiting for you";
 }
 async function renderCaptchas() {
   try {
     const r = await api("/api/captcha/inbox");
     const pend = r.pending || [];
     setCaptchaBadge(pend.length);
+    const waiting = pend.reduce((a, c) => a + (c.links || []).length, 0);
+    const vb = $("#btn-captcha-verify-all");
+    if (vb) vb.disabled = !pend.some(c => c.harvest && (c.links || []).length);
+    const vh = $("#captcha-verify-hint");
+    if (vh) vh.textContent = pend.length ? `${waiting} download(s) wait for a check.` : "";
     const el = $("#captcha-list");
     if (el) el.innerHTML = pend.length ? pend.map(c => {
       const left = Math.max(0, Math.round((c.expires_at * 1000 - Date.now()) / 60000));
@@ -737,6 +778,7 @@ async function act(action, el) {
   const id = el.dataset.id;
   try {
     switch (action) {
+      case "fix-setting": { const f = FIX_SETTINGS[el.dataset.setting]; if (f) openSetting(f.target); return; }
       case "start": await api(`/api/links/${id}/start`, "POST"); break;
       case "virustotal":
         await api(`/api/links/${id}/virustotal`, "POST", {});
@@ -860,6 +902,7 @@ async function act(action, el) {
         await renderCaptchas();
         return;
       case "torrent-files": await openTorrentFiles(id); return;
+      case "torrent-peers": await openTorrentPeers(id); return;
       case "notif-read":
         await api(`/api/notifications/${encodeURIComponent(id)}/read`, "POST", {});
         await renderNotifications();
@@ -1039,7 +1082,7 @@ $("#btn-clear-finished").addEventListener("click", async () => {
 const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
   "speed_limit_kbps", "media_max_height", "media_playlist_max_entries",
   "retry_max", "impersonate", "proxy", "captcha_provider",
-  "captcha_2captcha_key", "captcha_capmonster_key", "captcha_capsolver_key",
+  "captcha_2captcha_key", "captcha_capmonster_key", "captcha_capsolver_key", "captcha_browser_enabled",
   "ua_rotation", "auto_start_after_grab", "clipboard_monitor_enabled",
   "terminal_enabled", "auto_extract_archives", "archive_max_files",
   "archive_max_expanded_gib", "archive_password_file",
@@ -1382,6 +1425,65 @@ $("#files-save").addEventListener("click", async () => {
   if (!selected.length) return toast("Pick at least one file", "err");
   try { await api(`/api/torrents/${filesFor}/files`, "POST", { selected }); $("#files-dialog").close(); toast("File selection saved", "ok"); }
   catch (e) { toast(e.message, "err"); }
+});
+
+/* peers dialog: refreshes every 2 s while open; countries come from an offline database on this PC */
+let peersFor = null, peersTimer = null;
+const FLAG_LABEL = { seed: "Seed", encrypted: "Encrypted", incoming: "Incoming", outgoing: "Outgoing", utp: "uTP" };
+function flagEmoji(cc) {
+  return /^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : "";
+}
+async function refreshPeers() {
+  if (!peersFor || !$("#peers-dialog").open) return;
+  try {
+    const r = await api(`/api/torrents/${peersFor}/peers`);
+    const geo = r.geo || {};
+    $("#peers-geo-install").hidden = !!geo.installed;
+    $("#peers-attr").hidden = !geo.installed;
+    $("#peers-countries").innerHTML = (r.countries || []).slice(0, 12).map(c =>
+      `<span class="ccount">${esc(flagEmoji(c.country))} <b>${esc(c.country)}</b> ${c.count}</span>`).join("");
+    $("#peers-count").textContent = r.total > r.shown ? `${r.shown} of ${r.total}` : `${r.total}`;
+    $("#peers-body").innerHTML = r.peers.length ? r.peers.map(p => `<tr>
+      <td>${esc(p.ip.includes(":") ? `[${p.ip}]:${p.port}` : `${p.ip}:${p.port}`)}</td>
+      <td>${esc(p.client || "—")}</td>
+      <td>${p.down_speed ? humanBytes(p.down_speed) + "/s" : ""}</td>
+      <td>${p.up_speed ? humanBytes(p.up_speed) + "/s" : ""}</td>
+      <td>${esc(String(p.progress))}%</td>
+      <td>${p.flags.map(f => `<span>${FLAG_LABEL[f] || esc(f)}</span>`).join(", ")}</td>
+      <td>${p.country ? esc(flagEmoji(p.country)) + " " + esc(p.country) : "—"}</td></tr>`).join("")
+      : `<tr><td colspan="7" class="hint">No peers connected yet.</td></tr>`;
+  } catch (e) {
+    $("#peers-body").innerHTML = `<tr><td colspan="7" class="hint">${esc(e.message)}</td></tr>`;
+  }
+  if (window.OG_I18N) window.OG_I18N.translate($("#peers-dialog"));
+}
+async function openTorrentPeers(lid) {
+  peersFor = lid;
+  $("#peers-body").innerHTML = "";
+  $("#peers-dialog").showModal();
+  await refreshPeers();
+  clearInterval(peersTimer);
+  peersTimer = setInterval(refreshPeers, 2000);
+}
+function closePeers() { clearInterval(peersTimer); peersTimer = null; peersFor = null; $("#peers-dialog").close(); }
+$("#peers-close").addEventListener("click", closePeers);
+$("#peers-done").addEventListener("click", closePeers);
+$("#peers-dialog").addEventListener("close", () => { clearInterval(peersTimer); peersTimer = null; });
+$("#peers-geo-install").addEventListener("click", async () => {
+  const btn = $("#peers-geo-install");
+  btn.disabled = true;
+  try {
+    await api("/api/geoip/install", "POST", {});
+    toast("Downloading the country database from db-ip.com. Peer addresses are never sent anywhere.", "");
+    for (let i = 0; i < 120; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const g = await api("/api/geoip");
+      if (g.installed) { toast("Country lookup installed", "ok"); break; }
+      if (g.job && !g.job.running && g.job.error) { toast(g.job.error, "err"); break; }
+    }
+  } catch (e) { toast(e.message, "err"); }
+  btn.disabled = false;
+  refreshPeers();
 });
 
 /* ============================================================ W12 plugins */
@@ -2155,13 +2257,27 @@ async function loadIntegration() {
     $$("[data-proto]", box).forEach(i => { i.checked = !!st.protocols[i.dataset.proto]; });
     $$("[data-ftype]", box).forEach(i => { i.checked = !!st.files[i.dataset.ftype]; });
     $("#win-autostart").checked = !!st.autostart;
+    showHandlers(st);
   } catch { /* banner shown on 401 */ }
 }
+function showHandlers(st) {
+  const h = st.handlers || {};
+  const name = (x) => (x && x.name) || "Not set";
+  $("#win-h-magnet").textContent = name(h.magnet);
+  $("#win-h-torrent").textContent = name(h[".torrent"]);
+  $("#win-h-magnet").classList.toggle("ok", !!(h.magnet && h.magnet.is_ours));
+  $("#win-h-torrent").classList.toggle("ok", !!(h[".torrent"] && h[".torrent"].is_ours));
+}
+$("#btn-win-default")?.addEventListener("click", async () => {
+  try { showHandlers(await api("/api/system/default-apps", "POST", {})); }
+  catch (e) { toast("Could not open Default apps: " + e.message, "err"); }
+});
+window.addEventListener("focus", () => { if ($("#win-integration") && !document.hidden) loadIntegration(); });
 $("#win-integration")?.addEventListener("change", async (ev) => {
   const i = ev.target;
   const body = i.dataset.proto ? { protocols: { [i.dataset.proto]: i.checked } }
     : i.dataset.ftype ? { files: { [i.dataset.ftype]: i.checked } } : { autostart: i.checked };
-  try { await api("/api/system/integration", "POST", body); toast("Windows settings updated", "ok"); }
+  try { showHandlers(await api("/api/system/integration", "POST", body)); toast("Windows settings updated", "ok"); }
   catch (e) { i.checked = !i.checked; toast("Could not change it: " + e.message, "err"); }
 });
 
@@ -2271,3 +2387,155 @@ $("#set-terminal_enabled")?.addEventListener("change", async (ev) => {
 });
 window.addEventListener("pywebviewready", syncTerminalSwitch);
 syncTerminalSwitch();
+
+/* ===================================================== jump to one setting */
+function openSetting(target) {
+  const tab = document.querySelector('.tab[data-tab="settings"]');
+  if (tab && !document.querySelector("#tab-settings.active")) tab.click();
+  window.OG_SETTINGS_SEARCH?.clear();   // a search could be hiding the target
+  const el = typeof target === "string" ? document.querySelector(target) : target;
+  if (!el) return false;
+  el.closest("details")?.setAttribute("open", "");
+  const box = el.closest(".groupbox") || el;
+  el.scrollIntoView({ block: "center" });
+  try { el.focus({ preventScroll: true }); } catch {}
+  box.classList.remove("setting-flash");
+  void box.offsetWidth;
+  box.classList.add("setting-flash");
+  setTimeout(() => box.classList.remove("setting-flash"), 2200);
+  return true;
+}
+
+/* ===================================================== settings search */
+(function () {
+  const pane = document.getElementById("tab-settings");
+  const input = document.getElementById("settings-search");
+  const clearBtn = document.getElementById("settings-search-clear");
+  const empty = document.getElementById("settings-search-empty");
+  if (!pane || !input) return;
+  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const HEAD = new Set(["H2", "H3", "LEGEND", "SUMMARY"]);
+  const LEAF = new Set(["LABEL", "P", "TABLE", "BUTTON", "UL", "OL", "SPAN", "CODE", "INPUT", "SELECT", "TEXTAREA", "A"]);
+  const NOHL = "script,style,textarea,select,option,[data-no-i18n]";
+  let hidden = [], marks = [], opened = new Map(), terms = [], active = false;
+
+  // shown text, its English original (when translated), ids/names/placeholders
+  function textOf(el) {
+    const out = [];
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) {
+      if (n.parentNode.closest("script,style,textarea")) continue;
+      out.push(n.nodeValue);
+      const o = window.OG_I18N?.original?.(n);
+      if (o) out.push(o);
+    }
+    const f = Array.from(el.querySelectorAll("input,select,textarea,button"));
+    if (el.matches("input,select,textarea,button")) f.push(el);
+    for (const x of f) out.push(x.id, x.name, x.getAttribute("placeholder"), x.getAttribute("aria-label"), x.getAttribute("title"));
+    return norm(out.join(" "));
+  }
+  const hit = (text) => terms.every(t => text.includes(t));
+  function hide(el) { el.classList.add("sf-hide"); hidden.push(el); }
+
+  function highlight(el) {
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    for (let n; (n = w.nextNode());) if (!n.parentNode.closest(NOHL) && n.nodeValue.trim()) nodes.push(n);
+    const re = new RegExp("(" + terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi");
+    for (const n of nodes) {
+      const v = n.nodeValue;
+      const frag = document.createDocumentFragment(), made = [];
+      let last = 0, m;
+      re.lastIndex = 0;
+      while ((m = re.exec(v))) {
+        if (!m[0]) { re.lastIndex++; continue; }
+        if (m.index > last) { const t = document.createTextNode(v.slice(last, m.index)); frag.append(t); made.push(t); }
+        const mk = document.createElement("mark"); mk.className = "sf-mark"; mk.textContent = m[0];
+        frag.append(mk); made.push(mk);
+        last = m.index + m[0].length;
+      }
+      if (!made.length) continue;
+      if (last < v.length) { const t = document.createTextNode(v.slice(last)); frag.append(t); made.push(t); }
+      n.parentNode.replaceChild(frag, n);
+      marks.push({ orig: n, made });
+    }
+  }
+  // put the original text nodes back (same nodes, so listeners and translations survive)
+  function unhighlight() {
+    for (const { orig, made } of marks.reverse()) {
+      const first = made.find(x => x.parentNode);
+      if (first) first.parentNode.insertBefore(orig, first);
+      made.forEach(x => x.parentNode && x.parentNode.removeChild(x));
+    }
+    marks = [];
+  }
+
+  // A heading owns the siblings after it until the next heading. Returns true when anything is shown.
+  function walk(kids, inherited) {
+    let any = false, cur = null, curMatch = inherited, group = [];
+    const flush = () => {
+      if (!cur) return;
+      const shown = curMatch || group.some(Boolean);
+      if (!shown) hide(cur); else if (curMatch && !inherited) highlight(cur);
+      any = any || shown; cur = null; group = [];
+    };
+    for (const c of kids) {
+      if (HEAD.has(c.tagName)) { flush(); cur = c; curMatch = inherited || hit(textOf(c)); continue; }
+      const m = cur ? curMatch : inherited;
+      let vis;
+      if (c.classList.contains("savebar")) {
+        continue;   // the Save settings bar always stays and never counts as a match
+      } else if (LEAF.has(c.tagName) || !c.querySelector("label,p,h2,h3,table,button,legend,summary")) {
+        const own = hit(textOf(c));
+        vis = m || own;
+        if (!vis) hide(c); else if (own && !m) highlight(c);
+      } else {
+        if (c.tagName === "DETAILS" && !opened.has(c)) opened.set(c, c.open);
+        vis = walk(Array.from(c.children), m);
+        if (!vis) hide(c); else if (c.tagName === "DETAILS") c.open = true;
+      }
+      if (cur) group.push(vis); else any = any || vis;
+    }
+    flush();
+    return any;
+  }
+
+  function reset() {
+    unhighlight();
+    hidden.forEach(e => e.classList.remove("sf-hide"));
+    hidden = [];
+    opened.forEach((o, d) => { d.open = o; });
+    opened.clear();
+    empty.classList.add("hidden");
+  }
+  function run() {
+    reset();
+    const q = norm(input.value);
+    clearBtn.classList.toggle("hidden", !input.value);
+    active = !!q;
+    if (!q) return;
+    terms = q.split(" ");
+    const kids = Array.from(pane.children).filter(c => !c.classList.contains("sfbar") && c !== empty);
+    if (!walk(kids, false)) {
+      const t = window.OG_I18N ? window.OG_I18N.t('No settings match "{q}".') : 'No settings match "{q}".';
+      empty.textContent = t.replace("{q}", input.value.trim());
+      empty.classList.remove("hidden");
+    }
+  }
+  function clear() { if (!input.value && !active) return; input.value = ""; run(); }
+
+  input.addEventListener("input", run);
+  clearBtn.addEventListener("click", () => { clear(); input.focus(); });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === 'Escape') { ev.preventDefault(); if (input.value) clear(); else input.blur(); }
+  });
+  pane.addEventListener("keydown", (ev) => {
+    if (ev.key === 'Escape' && active && ev.target !== input) clear();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "f" && pane.classList.contains("active")) {
+      ev.preventDefault(); input.focus(); input.select();
+    }
+  });
+  window.OG_SETTINGS_SEARCH = { run, clear };
+})();

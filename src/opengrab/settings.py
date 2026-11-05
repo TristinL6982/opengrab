@@ -83,7 +83,7 @@ class Settings(BaseModel):
     captcha_audio_enabled: bool = False      # opt-in offline audio captcha solver
     captcha_vosk_model_path: str = ""         # folder of an unpacked Vosk model
     captcha_ffmpeg_path: str = ""             # empty = ffmpeg on PATH
-    captcha_browser_enabled: bool = False   # opt-in real-browser Cloudflare solver
+    captcha_browser_enabled: bool = True    # on by default (owner decision 2026-11-05): a pasted link starts without a visible browser unless a click is needed
     captcha_browser_engine: str = "edge"    # edge (CDP) | camoufox
     captcha_manual_timeout_s: int = 120
     captcha_inbox_max_pending: int = 50       # W2: pending challenges kept for a human

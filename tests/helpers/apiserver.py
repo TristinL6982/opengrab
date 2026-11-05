@@ -26,7 +26,10 @@ def running_server(settings_overrides=None, data_dir: Path | None = None, start_
     os.environ["OPENGRAB_DATA_DIR"] = str(data_dir)
     dl = tmp / "downloads"
     dl.mkdir(parents=True, exist_ok=True)
-    settings = Settings(download_dir=str(dl), api_token=MASTER, **(settings_overrides or {}))
+    # the real-browser captcha solver is on by default (owner decision 2026-11-05);
+    # tests must never launch a browser, so it is off unless a test asks for it
+    overrides = {"captcha_browser_enabled": False, **(settings_overrides or {})}
+    settings = Settings(download_dir=str(dl), api_token=MASTER, **overrides)
     mgr = DownloadManager(settings)
     if start_manager:
         mgr.start()

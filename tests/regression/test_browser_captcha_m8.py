@@ -20,8 +20,14 @@ def record(calls, result):
     return fake
 
 
-def test_browser_disabled_by_default():
-    assert BrowserCaptchaSolver(Settings()).enabled() is False
+def test_browser_enabled_by_default():
+    # owner decision 2026-11-05: on by default, so a pasted link starts without
+    # the user seeing a browser unless a click is really needed
+    assert BrowserCaptchaSolver(Settings()).enabled() is True
+
+
+def test_browser_can_still_be_switched_off():
+    assert BrowserCaptchaSolver(Settings(captcha_browser_enabled=False)).enabled() is False
 
 
 def test_browser_enabled_when_set():
