@@ -7,6 +7,8 @@ extract:
     'download' in text/href, magnet links)
   * inline <video>/<source> URLs and JSON "url" fields in embedded data
 If the page itself looks like a file (content sniff), download it.
+A page from a file host built on XFileSharing goes to the shared XFS flow
+(``_xfs``), so such hosts work without a plugin of their own.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ from ..base import (SitePlugin, GrabResult, ResolveResult, PluginError,
                     CaptchaRequired, PluginContext)
 from .direct import FILE_EXTS, _filename_from_cd
 from ..dirindex import is_dir_index, parse_dir_index, split_entries
+from . import _xfs
 
 
 def _meta_title(html: str) -> str:
@@ -113,6 +116,11 @@ class GenericPagePlugin(SitePlugin):
             return GrabResult(title=title or fname, filename=fname, size=size,
                               site=host, plugin_id=self.id,
                               direct_url=str(r.url))
+        # a file host built on XFileSharing: resolve() walks its download steps
+        if _xfs.looks_like(html):
+            fname = _xfs.file_name(html)
+            return GrabResult(title=fname or title or url, filename=fname, site=host,
+                              plugin_id=self.id, extra={"final_url": str(r.url), "xfs": True})
         # Check for directory index
         if is_dir_index(html):
             entries = parse_dir_index(html, str(r.url))
@@ -132,6 +140,9 @@ class GenericPagePlugin(SitePlugin):
         children to the user) — or, if the URL already points at a file,
         return it directly."""
         g = self.grab(url, ctx)
+        if g.extra.get("xfs"):
+            name = g.site.removeprefix("www.") or "this site"
+            return _xfs.resolve(url, ctx, _xfs.Profile(name=name), name=g.filename)
         if g.direct_url:
             return ResolveResult(url=g.direct_url, filename=g.filename,
                                  size=g.size)

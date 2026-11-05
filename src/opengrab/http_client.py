@@ -137,6 +137,31 @@ class HttpClient:
             for c in jar:
                 store[c.name] = c.value
 
+    def _store_jar(self, jar, *urls: str) -> None:
+        """Keep the cookies a session collected, also those set by redirect
+        hops (a site's "302 + Set-Cookie" would otherwise be lost)."""
+        hosts = {(urlparse(u).hostname or "").lower(): self._domain(u) for u in urls if u}
+        try:
+            cookies = list(jar)
+        except TypeError:
+            return
+        with self._jars_lock:
+            for c in cookies:
+                dom = (getattr(c, "domain", "") or "").lstrip(".").lower()
+                for host, key in hosts.items():
+                    if dom and (host == dom or host.endswith("." + dom)):
+                        self._cookie_jars.setdefault(key, {})[c.name] = c.value
+
+    def _cookie_header(self, url: str, given: str = "") -> str:
+        """Saved cookies for ``url`` merged with a caller's own Cookie header
+        (the caller's values win)."""
+        jar = self._cookies_for(url)
+        for part in (given or "").split(";"):
+            if "=" in part:
+                k, v = part.strip().split("=", 1)
+                jar[k] = v
+        return "; ".join(f"{k}={v}" for k, v in jar.items())
+
     def set_cookie(self, url: str, name: str, value: str) -> None:
         with self._jars_lock:
             self._cookie_jars.setdefault(self._domain(url), {})[name] = value
@@ -155,7 +180,7 @@ class HttpClient:
         for k, v in (extra_headers or {}).items():
             headers[str(k).lower()] = v
         headers = {k: v for k, v in headers.items() if v is not None}
-        cookie_hdr = "; ".join(f"{k}={v}" for k, v in self._cookies_for(url).items())
+        cookie_hdr = self._cookie_header(url, headers.get("cookie", ""))
         if cookie_hdr:
             headers["cookie"] = cookie_hdr
         self._apply_clearance(url, headers)
@@ -250,6 +275,7 @@ class HttpClient:
         if max_bytes is not None and len(content) > max_bytes:
             content = content[:max_bytes]
         self._store_cookies(url, resp.headers)
+        self._store_jar(getattr(getattr(sess, "cookies", None), "jar", None) or (), url, str(resp.url))
         return Response(resp.status_code, dict(resp.headers), content,
                         str(resp.url), elapsed=time.time() - t0)
 
@@ -290,8 +316,7 @@ class HttpClient:
         for k, v in (headers or {}).items():
             if v is not None:
                 h[k] = v
-        cookie_hdr = "; ".join(f"{k}={v}"
-                               for k, v in self._cookies_for(url).items())
+        cookie_hdr = self._cookie_header(url, h.get("cookie", ""))
         if cookie_hdr:
             h["cookie"] = cookie_hdr
         self._apply_clearance(url, h)
@@ -314,6 +339,7 @@ class HttpClient:
                 kw["proxies"] = {"http": proxy, "https": proxy}
             raw = sess.get(url, **kw)
             self._store_cookies(url, raw.headers)
+            self._store_jar(getattr(getattr(sess, "cookies", None), "jar", None) or (), url, str(raw.url))
             return StreamHandle(raw, raw.status_code, dict(raw.headers),
                                 str(raw.url), owner=sess)
         import httpx

@@ -7,39 +7,38 @@ Share links are ``https://datanodes.to/<file_code>/<filename>``. Two ways in:
   as the password): ``/api/file/direct_link?file_code=..&key=..`` answers
   ``{"status": 200, "result": {"url": ..., "size": ...}}``. The site makes
   this premium-only on some accounts; a refusal falls back to the page flow.
-* The page flow a visitor sees: the share link answers 302 to ``/download``
-  and sets a ``file_code`` cookie. That page is a Vue app: the "Free
-  Download" form (``op=download1``/``download2``, ``id``, ``rand``,
-  ``method_free``) is gated by a short countdown and a Cloudflare Turnstile
-  widget. The plugin waits out a visible countdown of up to 90 s, sends the
-  Turnstile sitekey to the solver chain (``ctx.solve_captcha``) and posts the
-  form exactly once; the answer is JSON ``{"url": ...}`` or a redirect to the
-  file server.
+* The page flow a visitor sees. DataNodes runs XFileSharing, so the shared
+  flow in ``_xfs`` does the work; this site's quirks are in ``PROFILE``:
+
+  - every page request says it comes from ``https://datanodes.to/users``;
+    without that referer the site refuses ("Not allowed from domain you're
+    coming from");
+  - the share link answers 302 to ``/download`` and sets a ``file_code``
+    cookie; that page has the ``op=download1`` form;
+  - the second step is drawn by JavaScript: ``rand="..."``, ``dl-token="..."``
+    and ``countdown="N"`` are attributes, and the Turnstile widget sits
+    escaped in ``captcha-html="..."``; the post needs ``g_captch__a=1``;
+  - the answer is JSON ``{"url": ...}`` (URL-encoded) or a redirect.
 
 Turnstile on this host refuses headless browsers, so a solver that cannot
-produce a token leaves the link for the user (CaptchaRequired). When the page
-has neither a form nor a sitekey the plugin raises "needs the browser
-download flow".
+produce a token leaves the link for the user (CaptchaRequired).
 """
 from __future__ import annotations
 
-import html as _html
-import json
 import re
 import time
 from urllib.parse import quote, unquote, urlsplit
 
 from ..base import GrabResult, PluginContext, PluginError, ResolveResult, SitePlugin
-from ._hostflow import text as page_text, wait_message
+from . import _xfs
 
 HOST = "datanodes.to"
 BASE = "https://datanodes.to"
 CODE_RE = re.compile(r"^[A-Za-z0-9]{8,20}$")
 RESERVED = {"download", "premium", "login", "account", "api", "upload", "app",
-            "faq", "tos", "contact", "register", "dmca", "privacy"}
-DEAD_RE = re.compile(r"file not found|file was deleted|no such file|file expired|has been removed",
-                     re.I)
-MAX_WAIT = 90
+            "faq", "tos", "contact", "register", "dmca", "privacy", "users"}
+PROFILE = _xfs.Profile(name="DataNodes", referer=BASE + "/users", captcha_kind="turnstile",
+                       download2={"g_captch__a": "1"})
 sleep = time.sleep          # tests replace this
 
 
@@ -53,27 +52,6 @@ def parse(url: str) -> tuple[str, str] | None:
     if not parts or parts[0].lower() in RESERVED or not CODE_RE.match(parts[0]):
         return None
     return parts[0], unquote(parts[1]) if len(parts) > 1 else ""
-
-
-def _attr(page: str, name: str, prop: bool = False) -> str:
-    """Value of a form input or a Vue prop (``:name="'x'"``); with ``prop``
-    also of a plain attribute (``name="x"``)."""
-    pats = [rf'<input[^>]*name="{name}"[^>]*value="([^"]*)"',
-            rf'<input[^>]*value="([^"]*)"[^>]*name="{name}"',
-            rf':{name}="\'([^\']*)\'"']
-    if prop:
-        pats.append(rf'(?<![\w:-]){name}="([^"]*)"')
-    for pat in pats:
-        m = re.search(pat, page, re.I)
-        if m:
-            return _html.unescape(m.group(1))
-    return ""
-
-
-def countdown(page: str) -> int:
-    m = (re.search(r':(?:seconds|countdown|timer)="(\d+)"', page, re.I)
-         or re.search(r'id="countdown"[^>]*>\s*(?:<[^>]+>\s*)*(\d+)', page, re.I))
-    return int(m.group(1)) if m else 0
 
 
 def api_key(ctx: PluginContext) -> str:
@@ -113,7 +91,9 @@ class DataNodesPlugin(SitePlugin):
             res = self._api(code, key, name, ctx)
             if res is not None:
                 return res
-        return self._page_flow(code, name, ctx)
+        share = f"{BASE}/{code}/{quote(name)}" if name else f"{BASE}/{code}"
+        return _xfs.resolve(share, ctx, PROFILE, code=code, name=name,
+                            wait_fn=lambda s: sleep(s))
 
     # -- API key ------------------------------------------------------------
     def _api(self, code: str, key: str, name: str, ctx: PluginContext) -> ResolveResult | None:
@@ -136,67 +116,3 @@ class DataNodesPlugin(SitePlugin):
         size = str(result.get("size") or "")
         return ResolveResult(url=link, filename=name, size=int(size) if size.isdigit() else None,
                              headers={"referer": BASE + "/"})
-
-    # -- the page a visitor sees ----------------------------------------------
-    def _page_flow(self, code: str, name: str, ctx: PluginContext) -> ResolveResult:
-        share = f"{BASE}/{code}/{quote(name)}" if name else f"{BASE}/{code}"
-        r = ctx.client.get(share)
-        page = r.text
-        sitekey = _attr(page, "data-sitekey", True) or _attr(page, "sitekey", True)
-        ops = re.findall(r'<input[^>]*name="op"[^>]*value="(download\d?)"', page, re.I)
-        op = ops[0] if ops else ""
-        if r.status_code == 404 or (not op and not sitekey and DEAD_RE.search(page)):
-            raise PluginError("DataNodes file is offline (not found or deleted)")
-        if r.status_code >= 400:
-            raise PluginError(f"DataNodes page answered HTTP {r.status_code}")
-        page_url = r.url or f"{BASE}/download"
-        if not op and not sitekey:
-            raise PluginError("DataNodes needs the browser download flow "
-                              "(no download form on the page)")
-        if not name:
-            name = _attr(page, "file-name", True) or _attr(page, "fname")
-            name = "" if name.lower() == "download" else name
-        wait = countdown(page)
-        if wait > MAX_WAIT:
-            raise PluginError(f"DataNodes asks to wait {max(1, -(-wait // 60))} minutes")
-        form = {"op": "download2" if op in ("", "download1") else op,
-                "id": _attr(page, "id") or code,
-                "rand": _attr(page, "rand"),
-                "referer": _attr(page, "referer"),
-                "method_free": "Free Download >>",
-                "method_premium": "",
-                "dl": "1"}
-        if sitekey:
-            form["cf-turnstile-response"] = ctx.solve_captcha(kind="turnstile", sitekey=sitekey,
-                                                              site_url=page_url)
-        if wait:
-            sleep(wait)
-        headers = {"referer": page_url, "origin": BASE,
-                   "cookie": f"file_code={code}; lang=english"}
-        r2 = ctx.client.post(f"{BASE}/download", data=form, headers=headers, follow=False)
-        link = self._link(r2)
-        if not link:
-            text = r2.text.lower()
-            if "wrong captcha" in text or "verification failed" in text:
-                raise PluginError("DataNodes refused the captcha answer")
-            if re.search(r"you have to wait|download limit|reached the limit", text):
-                secs = wait_message(page_text(r2.text)) or 3600
-                raise PluginError("DataNodes download limit reached: "
-                                  f"wait {max(1, -(-secs // 60))} minutes")
-            raise PluginError("DataNodes needs the browser download flow "
-                              f"(form answered HTTP {r2.status_code} without a link)")
-        return ResolveResult(url=link, filename=name, headers={"referer": BASE + "/"})
-
-    @staticmethod
-    def _link(r) -> str:
-        loc = (r.headers.get("location") or "").strip()
-        if loc.startswith("http") and "datanodes.to/download" not in loc:
-            return loc
-        try:
-            body = json.loads(r.text)
-        except ValueError:
-            body = None
-        if isinstance(body, dict) and body.get("url"):
-            return unquote(str(body["url"]))
-        m = re.search(r'href="(https?://[^"]*datanodes\.to/d/[^"]+)"', r.text)
-        return _html.unescape(m.group(1)) if m else ""

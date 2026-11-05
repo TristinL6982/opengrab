@@ -7,9 +7,12 @@ and the server answers with an ``HX-Redirect`` header naming the direct
 ``https://dl.fuckingfast.co/dl/...`` link, which stays valid for 24 hours.
 Older pages had the link inline in ``window.open("...")``; that is still read.
 
-When the page carries a Cloudflare Turnstile widget and the server refuses the
-post without a token, the widget's sitekey goes to the solver chain
-(``ctx.solve_captcha``) and the post is repeated with the answer.
+The page loads Cloudflare Turnstile with JavaScript, so the sitekey is often
+not in the HTML; ``SITEKEY`` is the one the site uses. When the page says
+``turnstileSuccess: false`` the token is solved (``ctx.solve_captcha``) before
+the post; when the server refuses a post without one, it is solved and the
+post repeated. The server's answer is taken as the file's address whatever
+its path (it has moved between hosts and paths before).
 
 Direct ``dl.fuckingfast.co/dl/...`` links are passed through unchanged.
 """
@@ -20,11 +23,14 @@ import re
 from urllib.parse import unquote, urljoin, urlsplit
 
 from ..base import GrabResult, PluginContext, PluginError, ResolveResult, SitePlugin
+from ._hostflow import leaves_public_net
 
 DOMAINS = ("fuckingfast.co", "fuckingfast.net")
 ID_RE = re.compile(r"^/([A-Za-z0-9]{6,32})/?$")
 DL_RE = re.compile(r"^/dl/[A-Za-z0-9_\-]+")
-INLINE_RE = re.compile(r'window\.open\(\s*["\'](https://(?:dl\.)?fuckingfast\.(?:co|net)/dl/[^"\']+)["\']')
+INLINE_RE = re.compile(r'window\.open\(\s*["\'](https?://[^"\']+)["\']')
+TURNSTILE_JS = "challenges.cloudflare.com/turnstile/"
+SITEKEY = "0x4AAAAAABg7-KFH60E_65uI"     # the site's Turnstile key when the page does not name it
 DEAD_MARK = "file not found or deleted"
 
 
@@ -115,24 +121,31 @@ class FuckingFastPlugin(SitePlugin):
     def _link(self, page: str, page_url: str, origin: str, fid: str, share_url: str,
               ctx: PluginContext) -> str:
         m = INLINE_RE.search(page)
-        if m:
+        if m and not leaves_public_net(page_url, m.group(1)):
             return m.group(1)
         m = re.search(r'hx-post="([^"]*/go)"', page)
         go = urljoin(origin + "/", _html.unescape(m.group(1))) if m else f"{origin}/f/{fid}/go"
         headers = {"hx-request": "true", "hx-current-url": share_url, "origin": origin,
                    "referer": page_url, "content-type": "application/x-www-form-urlencoded"}
-        r = ctx.client.post(go, data={}, headers=headers, follow=False)
-        link = self._redirect(r, go)
+        m = re.search(r'data-sitekey="([^"]+)"', page)
+        sitekey = m.group(1) if m else (SITEKEY if TURNSTILE_JS in page else "")
+        data = {}
+        if sitekey and re.search(r"turnstileSuccess:\s*false", page):
+            data["cf-turnstile-response"] = ctx.solve_captcha(kind="turnstile", sitekey=sitekey,
+                                                              site_url=page_url)
+        r = ctx.client.post(go, data=data, headers=headers, follow=False)
+        link = self._redirect(r, go, page_url)
         if link:
             return link
         if r.status_code == 429:
             raise PluginError("FuckingFast rate limit reached; wait 5 minutes")
-        sitekey = re.search(r'data-sitekey="([^"]+)"', page)
+        if data:
+            raise PluginError("FuckingFast refused the captcha answer")
         if sitekey and (r.status_code in (400, 401, 403) or "captcha" in r.text.lower()):
-            token = ctx.solve_captcha(kind="turnstile", sitekey=sitekey.group(1), site_url=page_url)
+            token = ctx.solve_captcha(kind="turnstile", sitekey=sitekey, site_url=page_url)
             r = ctx.client.post(go, data={"cf-turnstile-response": token}, headers=headers,
                                 follow=False)
-            link = self._redirect(r, go)
+            link = self._redirect(r, go, page_url)
             if link:
                 return link
             raise PluginError("FuckingFast refused the captcha answer")
@@ -142,6 +155,13 @@ class FuckingFastPlugin(SitePlugin):
                           f"(download button answered HTTP {r.status_code} without a link)")
 
     @staticmethod
-    def _redirect(r, base: str) -> str:
+    def _redirect(r, base: str, page_url: str) -> str:
+        """The address the server sends the browser to (may be relative)."""
         target = (r.headers.get("hx-redirect") or r.headers.get("location") or "").strip()
-        return urljoin(base, target) if "/dl/" in target else ""  # may be relative
+        link = urljoin(base, target) if target else ""
+        if not link.startswith(("http://", "https://")) or link.rstrip("/") == page_url.rstrip("/"):
+            return ""
+        if leaves_public_net(page_url, link):
+            raise PluginError("FuckingFast sent the download to a local network address; "
+                              "OpenGrab did not follow it")
+        return link
