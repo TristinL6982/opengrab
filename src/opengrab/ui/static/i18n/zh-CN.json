@@ -49,6 +49,13 @@
     "VirusTotal"
   ],
   "strings": {
+    "Remove downloads": "移除下载",
+    "Remove this download?": "要移除此下载吗？",
+    "Deleted files go to the Recycle Bin when Windows allows it. Only files in the download folder are deleted.": "删除的文件会在 Windows 允许时放入回收站。只会删除下载文件夹中的文件。",
+    "Remove from list": "从列表中移除",
+    "Remove and delete files from this PC": "移除并从此电脑删除文件",
+    "Deleted 1 file": "已删除 1 个文件",
+    "No files to delete": "没有可删除的文件",
     ", press Ctrl+V with a link copied, or drop links onto this window.": "，或复制链接后按 Ctrl+V，或把链接拖到此窗口。",
     ". Folders stay inside the download folder, and existing files are never overwritten.": "。文件夹始终位于下载文件夹内，已有文件不会被覆盖。",
     ". They come from pasting, copied links, the site spider and Click'n'Load buttons on web pages. Each link is checked online first.": "。链接来自粘贴、复制、网站爬虫和网页上的 Click'n'Load 按钮，并会先检查是否在线。",
@@ -148,6 +155,10 @@
     "Click'n'Load port": "Click'n'Load 端口",
     "Clipboard monitoring is off.": "剪贴板监视已关闭。",
     "Clipboard status unknown.": "剪贴板状态未知。",
+    "Could not change clipboard watching:": "无法更改剪贴板监视：",
+    "Stopped watching copied links": "已停止监视复制的链接",
+    "Watch copied links": "监视复制的链接",
+    "Watching copied links": "正在监视复制的链接",
     "Close": "关闭",
     "close OpenGrab": "关闭 OpenGrab",
     "Cloudflare, DDoS-Guard and captcha widgets that need a person. One entry covers every download from the same site.": "需要人工处理的 Cloudflare、DDoS-Guard 和验证码组件。同一网站的所有下载共用一个条目。",
@@ -631,6 +642,18 @@
     "Your own plugins and templates run in a sandbox: they can reach only the sites you allow. Built-in plugins are trusted.": "你自己的插件和模板在沙箱中运行：只能访问你允许的网站。内置插件受信任。"
   },
   "patterns": [
+    [
+      "^Remove (\\d+) downloads\\?$",
+      "要移除 $1 个下载吗？"
+    ],
+    [
+      "^Deleted (\\d+) files$",
+      "已删除 $1 个文件"
+    ],
+    [
+      "^Could not delete (\\d+) files?: (.*)$",
+      "无法删除 $1 个文件：$2"
+    ],
     [
       "^Downloading (\\d+)%$",
       "正在下载 $1%"

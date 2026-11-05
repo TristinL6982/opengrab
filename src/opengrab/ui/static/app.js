@@ -506,14 +506,44 @@ $("#tb-pauseall").addEventListener("click", () =>
 $("#tb-captchas").addEventListener("click", () => $('.tab[data-tab="captchas"]').click());
 $("#tb-settings").addEventListener("click", () => $('.tab[data-tab="settings"]').click());
 
+// Remove asks first: keep the files (list only) or also delete them from this PC.
+let removeTargets = [];
 async function removeSelected() {
   const sel = selectedLinks();
   if (!sel.length) return;
-  if (!confirm(sel.length === 1 ? "Remove this download from the list? The file stays on disk."
-                                        : `Remove ${sel.length} downloads from the list? Files stay on disk.`)) return;
-  await forEachLink(sel, "remove");
-  S.selected.clear();
+  askRemove(sel);
 }
+function askRemove(links) {
+  removeTargets = links;
+  $("#remove-text").textContent = links.length === 1 ? "Remove this download?" : `Remove ${links.length} downloads?`;
+  const d = $("#remove-dialog");
+  if (!d.open) d.showModal();
+  $("#remove-list").focus();
+}
+async function doRemove(deleteFiles) {
+  const links = removeTargets;
+  removeTargets = [];
+  $("#remove-dialog").close();
+  let deleted = 0;
+  const failed = [];
+  for (const l of links) {
+    try {
+      const r = await api(`/api/links/${l.id}/remove`, "POST", deleteFiles ? { delete_files: true } : {});
+      deleted += (r.deleted || []).length;
+      for (const f of (r.failed || [])) failed.push(f.path.split(/[\/]/).pop());
+    } catch (e) { if (e.message === "unauthorized") return; }
+  }
+  S.selected.clear();
+  refreshData();
+  if (!deleteFiles) return;
+  if (deleted) toast(deleted === 1 ? "Deleted 1 file" : `Deleted ${deleted} files`, "ok");
+  if (failed.length) toast(`Could not delete ${failed.length === 1 ? "1 file" : failed.length + " files"}: ${failed.join(", ")}`, "err");
+  if (!deleted && !failed.length) toast("No files to delete", "");
+}
+$("#remove-close").addEventListener("click", () => $("#remove-dialog").close());
+$("#remove-cancel").addEventListener("click", () => $("#remove-dialog").close());
+$("#remove-list").addEventListener("click", () => doRemove(false));
+$("#remove-files").addEventListener("click", () => doRemove(true));
 
 /* ============================================================ add links dialog */
 function openAddDialog(text = "") {
@@ -587,6 +617,8 @@ async function renderLinkGrabber() {
       watching: "Clipboard monitoring is on; copied links wait here for your approval.",
       unavailable: "Clipboard monitoring is on, but the desktop clipboard is unavailable.",
     }[status.status] || "Clipboard status unknown.";
+    const sw = $("#lg-clipboard");
+    if (sw && !sw.disabled) sw.checked = status.status !== "off";
     const STATE = { online: "Online", offline: "Offline", unknown: "Unknown", unchecked: "Checking…" };
     const FROM = { clipboard: "Copied", paste: "Pasted", spider: "Spider", clicknload: "Click'n'Load" };
     el.innerHTML = candidates.length
@@ -716,9 +748,9 @@ async function act(action, el) {
         if (confirm("Stop this download?")) await api(`/api/links/${id}/stop`, "POST");
         break;
       case "remove": {
-        if (!confirm("Remove this link?")) return;
-        await api(`/api/links/${id}/remove`, "POST");
-        break;
+        const l = S.links.get(id);
+        if (l) askRemove([l]);
+        return;
       }
       case "candidate-add":
         await api(`/api/linkgrabber/${id}/add`, "POST", {});
@@ -1851,6 +1883,22 @@ $("#btn-lg-addonline").addEventListener("click", async () => {
     toast(`Added ${r.added} online link(s)`, "ok");
     renderLinkGrabber(); refreshData();
   } catch (e) { toast("Could not add links: " + e.message, "err"); }
+});
+$("#lg-clipboard").addEventListener("change", async (ev) => {
+  const sw = ev.target, on = sw.checked;
+  sw.disabled = true;
+  try {
+    await api("/api/settings", "POST", { clipboard_monitor_enabled: on });
+    const set = $("#set-clipboard_monitor_enabled");
+    if (set) set.checked = on;
+    toast(on ? "Watching copied links" : "Stopped watching copied links", "ok");
+  } catch (e) {
+    sw.checked = !on;
+    toast("Could not change clipboard watching: " + e.message, "err");
+  } finally {
+    sw.disabled = false;
+    renderLinkGrabber();
+  }
 });
 $("#btn-linkgrabber-clear").addEventListener("click", async () => {
   try {

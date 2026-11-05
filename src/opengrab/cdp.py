@@ -90,10 +90,16 @@ class CdpClient:
         self._next_id = 1
         self.events = []
 
-    def call(self, method: str, params: dict = None, timeout: float = 10.0) -> dict:
+    def call(self, method: str, params: dict = None, timeout: float = 10.0,
+             session_id: str = "") -> dict:
+        """Send one command; ``session_id`` targets a page attached with
+        Target.attachToTarget(flatten=True)."""
         msg_id = self._next_id
         self._next_id += 1
-        self.transport.send_text(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
+        msg = {"id": msg_id, "method": method, "params": params or {}}
+        if session_id:
+            msg["sessionId"] = session_id
+        self.transport.send_text(json.dumps(msg))
         deadline = self.clock() + timeout
         while True:
             remaining = deadline - self.clock()

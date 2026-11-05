@@ -228,8 +228,9 @@ def run_gui_mode(settings: Optional[Settings] = None,
                         current = json.loads(response.read()).get("text", "")
                     server.clipboard_status = "watching"
                     if not was_enabled:
-                        previous, was_enabled = current, True
-                        continue
+                        # a link copied before watching started counts too: it
+                        # only goes to the link grabber for review
+                        was_enabled = True
                     if current != previous:
                         previous = current
                         server.capture_clipboard_text(current)

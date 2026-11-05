@@ -31,6 +31,13 @@ class BrowserDriver:
     def user_agent(self) -> str:
         raise NotImplementedError
 
+    def open_page(self, url: str) -> str:
+        """Open url in a new tab; return a handle for evaluate()."""
+        raise BrowserSolverUnavailable("this browser cannot show a captcha on the site's own page")
+
+    def evaluate(self, session: str, expression: str):
+        raise BrowserSolverUnavailable("this browser cannot show a captcha on the site's own page")
+
     def close(self) -> None:
         raise NotImplementedError
 
@@ -146,6 +153,17 @@ class CdpDriver(BrowserDriver):
     def open(self, url: str) -> None:
         self._client.call("Target.createTarget", {"url": url})
 
+    def open_page(self, url: str) -> str:
+        """Open url in a new tab and return a session id for evaluate()."""
+        target = self._client.call("Target.createTarget", {"url": url}).get("targetId", "")
+        return self._client.call("Target.attachToTarget",
+                                 {"targetId": target, "flatten": True}).get("sessionId", "")
+
+    def evaluate(self, session: str, expression: str):
+        res = self._client.call("Runtime.evaluate", {"expression": expression, "returnByValue": True},
+                                session_id=session)
+        return (res.get("result") or {}).get("value")
+
     def cookies(self) -> List[Dict]:
         return self._client.call("Storage.getCookies").get("cookies", [])
 
@@ -191,6 +209,74 @@ def solve_in_browser(
             if c is not None:
                 store.put(c)
                 return c
+            if clock() - start >= timeout:
+                return None
+            sleep(poll)
+    finally:
+        driver.close()
+
+
+WIDGETS = {"turnstile": ("cf-turnstile", "https://challenges.cloudflare.com/turnstile/v0/api.js"),
+           "hcaptcha": ("h-captcha", "https://js.hcaptcha.com/1/api.js"),
+           "recaptcha": ("g-recaptcha", "https://www.google.com/recaptcha/api.js")}
+
+
+def widget_page(kind: str, sitekey: str, host: str) -> str:
+    """A page that shows one captcha widget and keeps its answer in window.__ogToken."""
+    import html as _html
+    import re as _re
+    if kind not in WIDGETS:
+        raise ValueError(f"unsupported captcha kind: {kind}")
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{1,100}", sitekey or ""):
+        raise ValueError("invalid sitekey")
+    cls, script = WIDGETS[kind]
+    h = _html.escape(host)
+    return (f"<!doctype html><html><head><meta charset='utf-8'><title>OpenGrab: check for {h}</title></head>"
+            "<body style='font-family:Segoe UI,sans-serif;padding:24px'>"
+            f"<p>OpenGrab needs this check to download from {h}. It often passes by itself; "
+            "if it asks, complete it here.</p>"
+            f"<div class='{cls}' data-sitekey='{sitekey}' data-callback='__ogDone'></div>"
+            "<script>window.__ogDone=function(t){window.__ogToken=t;"
+            "document.body.insertAdjacentHTML('beforeend','<p>Done. OpenGrab is continuing; "
+            "this window closes by itself.</p>')}</script>"
+            f"<script src='{script}' async defer></script></body></html>")
+
+
+def solve_widget_in_browser(
+    page_url: str,
+    kind: str,
+    sitekey: str,
+    driver: BrowserDriver,
+    timeout: float = 120.0,
+    poll: float = 1.0,
+    clock=time.monotonic,
+    sleep=time.sleep,
+) -> Optional[str]:
+    """Show a site's captcha widget on the site's own address and return its token.
+
+    Widgets such as Turnstile only work on the hostnames their site allows,
+    so the widget is drawn into a page of that site (its robots.txt, replaced
+    in the browser): the site's own pages are not needed, and a page that
+    depends on the download's cookies (DataNodes' /download) is never shown
+    out of context. Returns None on timeout. Always closes the driver."""
+    import json as _json
+    p = urllib.parse.urlsplit(page_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    html = widget_page(kind, sitekey, p.hostname or "")
+    try:
+        session = driver.open_page(origin + "/robots.txt")
+        start = clock()
+        # a new tab is about:blank (already "complete") until the site's page arrives
+        ready = f"location.origin === {_json.dumps(origin)} && document.readyState !== 'loading'"
+        while not driver.evaluate(session, ready):
+            if clock() - start >= timeout:
+                return None
+            sleep(poll / 4)
+        driver.evaluate(session, f"document.open();document.write({_json.dumps(html)});document.close();true")
+        while True:
+            token = driver.evaluate(session, "window.__ogToken || ''")
+            if token:
+                return str(token)
             if clock() - start >= timeout:
                 return None
             sleep(poll)

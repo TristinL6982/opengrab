@@ -466,8 +466,10 @@ class DownloadManager:
             return res.text if res.ok and res.text == "__CLEARANCE__" else ""
         req = CaptchaRequest(kind=e.kind, site_url=e.site_url or link.url,
                              recaptcha_sitekey=e.sitekey or "")
+        # with a sitekey the real-browser solver (opt-in) shows the widget on the
+        # site's own page and returns its token, so it may run on its own too
         auto = [s.id for s in self.captcha_chain._ordered(e.kind)
-                if s.id not in ("manual", "browser")]
+                if s.id != "manual" and (s.id != "browser" or (e.sitekey and s.enabled()))]
         if not auto:
             return ""
         try:
@@ -905,16 +907,22 @@ class DownloadManager:
             self._persist()
             self._broadcast("stopped", link)
 
-    def remove_link(self, link_id: str) -> None:
-        if self._is_torrent(self.get(link_id)):
+    def remove_link(self, link_id: str, delete_files: bool = False) -> dict:
+        """Remove a link. With ``delete_files`` also delete its own finished and
+        partial files (inside the download folder only); returns what was deleted
+        and what could not be."""
+        link = self.get(link_id)
+        if self._is_torrent(link):
             self.torrents.remove(link_id)  # keeps the downloaded files (C6)
         dl = self._active.pop(link_id, None)
         if dl:
             dl.stop_event.set()
         with self._lock:
             link = self._links.pop(link_id, None)
+        result = {"deleted": [], "failed": []}
         if link:
-            # C6: removing a link never deletes the finished file, only partial leftovers.
+            # C6: removing a link never deletes the finished file unless asked,
+            # only partial leftovers.
             dest = Path(self.settings.download_dir)
             candidates = []
             if link.filename:
@@ -924,6 +932,9 @@ class DownloadManager:
                 candidates.append(dest / (p.name + ".part"))
                 candidates.append(Path(str(p) + ".part"))
                 candidates.append(Path(str(p) + ".part.json"))
+            if delete_files:
+                result = self._delete_link_files(link, dl)
+                candidates = []
             for cand in candidates:
                 try:
                     if cand and cand.exists():
@@ -932,6 +943,32 @@ class DownloadManager:
                     pass
         self._save_now()
         self._broadcast("removed")
+        return result
+
+    def _delete_link_files(self, link: Link, dl) -> dict:
+        """The link's finished file and the partial/temp files the engine writes
+        next to it, limited to the download folder."""
+        from ..filedelete import delete_files
+        root = Path(self.settings.download_dir).expanduser().resolve()
+        names = {n for n in (link.filename,
+                             str(link.extra.get("download_target_filename", ""))) if n}
+        subdir = str(link.extra.get("download_target_subdir", ""))
+        folders = [root / subdir] if subdir else [root]
+        cands: list[Path] = []  # the finished file is only ever the path the engine recorded
+        if link.path:
+            p = Path(link.path)
+            cands.append(p)
+            folders.append(p.parent)
+            names.add(p.name)
+        if dl is not None:
+            names.add(dl.dest.name)
+            folders.append(dl.dest_dir)
+        for folder in folders:
+            for name in names:
+                stem = Path(name).stem
+                cands += [folder / (name + ".part"), folder / (name + ".part.json"),
+                          folder / (stem + ".video.mp4"), folder / (stem + ".audio.m4a")]
+        return delete_files(cands, [root])
 
     def clear_finished(self) -> int:
         with self._lock:

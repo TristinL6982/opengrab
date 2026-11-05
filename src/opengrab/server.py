@@ -1097,7 +1097,11 @@ def _make_handler(srv: ApiServer):
             if p == "/api/clipboard":
                 return self._json({"text": self._clipboard()})
             if p == "/api/clipboard/status":
-                return self._json({"status": srv.clipboard_status})
+                # the setting answers at once; the watcher fills in "unavailable"
+                on = mgr.settings.clipboard_monitor_enabled
+                st = srv.clipboard_status if on and srv.clipboard_status != "off" else (
+                    "watching" if on else "off")
+                return self._json({"status": st})
             if p == "/api/linkgrabber":
                 with srv._clipboard_candidates_lock:
                     return self._json(list(srv._clipboard_candidates.values()))
@@ -1206,7 +1210,9 @@ def _make_handler(srv: ApiServer):
                 elif action == "stop":
                     mgr.stop_download(lid)
                 elif action == "remove":
-                    mgr.remove_link(lid)
+                    # {"delete_files": true} also deletes this link's own files (download folder only)
+                    res = mgr.remove_link(lid, delete_files=body.get("delete_files") is True)
+                    return self._json({"ok": True, **res})
                 elif action == "queue-child":
                     c = mgr.queue_child(lid, int(body.get("index", 0)))
                     return self._json(c.to_public() if c else {"error": "no such child"})

@@ -29,7 +29,8 @@ def test_browser_enabled_when_set():
 
 
 def test_browser_priority_and_kind():
-    assert BrowserCaptchaSolver.kinds == ("turnstile",)
+    # widgets too since 2026-11-05: drawn on the site's own page, the token comes back
+    assert BrowserCaptchaSolver.kinds == ("turnstile", "hcaptcha", "recaptcha")
     assert BrowserCaptchaSolver.priority == 30
     assert AudioCaptchaSolver.priority < BrowserCaptchaSolver.priority < TwoCaptchaSolver.priority
 

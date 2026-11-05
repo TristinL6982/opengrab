@@ -164,6 +164,7 @@
           </div>
         </div>
         <div class="formrow">
+          <label class="check"><input id="lg-clipboard" type="checkbox"> Watch copied links</label>
           <span id="clipboard-state" class="hint">Clipboard monitoring is off.</span>
           <span id="cnl-state" class="hint"></span>
           <span class="grow"></span>
@@ -733,6 +734,18 @@
       <button type="button" id="add-cancel">Cancel</button>
       <button type="button" id="btn-add" class="primary">Add links</button>
     </div>
+  </div>
+</dialog>
+
+<dialog id="remove-dialog" class="win" aria-labelledby="remove-title">
+  <div class="win-title" id="remove-title">Remove downloads<button type="button" class="win-x" id="remove-close" aria-label="Close">×</button></div>
+  <div class="win-body">
+    <p id="remove-text"></p>
+    <p class="hint" id="remove-hint">Deleted files go to the Recycle Bin when Windows allows it. Only files in the download folder are deleted.</p>
+    <div class="addrow"><span class="grow"></span>
+      <button type="button" id="remove-cancel">Cancel</button>
+      <button type="button" id="remove-list">Remove from list</button>
+      <button type="button" id="remove-files" class="danger">Remove and delete files from this PC</button></div>
   </div>
 </dialog>
 

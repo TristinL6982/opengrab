@@ -129,7 +129,8 @@ def main() -> int:
 
         manager.add_url = fake_add_url
         captured = "https://example.com/a https://example.com/b."
-        check("clipboard capture disabled by default",
+        settings.clipboard_monitor_enabled = False   # on by default since 2026-11-05
+        check("clipboard capture off when watching is turned off",
               server.capture_clipboard_text(captured) == 0)
         settings.clipboard_monitor_enabled = True
         check("clipboard capture queues candidates for review",

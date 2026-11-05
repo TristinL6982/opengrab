@@ -25,13 +25,13 @@ def b58encode(raw: bytes) -> str:
     return "1" * (len(raw) - len(raw.lstrip(b"\0"))) + out
 
 
-def make_paste(text: str, password: str = ""):
+def make_paste(text: str, password: str = "", body: dict | None = None):
     key, salt, iv = os.urandom(32), os.urandom(8), os.urandom(16)
     adata = [[base64.b64encode(iv).decode(), base64.b64encode(salt).decode(), 100000, 256, 128,
               "aes", "gcm", "zlib"], "plaintext", 0, 0]
     derived = PBKDF2(key + password.encode(), salt, dkLen=32, count=100000, hmac_hash_module=SHA256)
     comp = zlib.compressobj(wbits=-15)
-    plain = comp.compress(json.dumps({"paste": text}).encode()) + comp.flush()
+    plain = comp.compress(json.dumps(body or {"paste": text}).encode()) + comp.flush()
     c = AES.new(derived, AES.MODE_GCM, nonce=iv, mac_len=16)
     c.update(json.dumps(adata, separators=(",", ":")).encode())
     ct, tag = c.encrypt_and_digest(plain)
@@ -72,6 +72,14 @@ def test_paste_is_decrypted_and_every_link_becomes_a_download():
         "https://datanodes.to/abc123/file.part01.rar", "https://fuckingfast.co/xyz#file.part02.rar",
         "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=x"]
     assert ctx.urls == [("https://paste.example.org/?pasteid=eeb22a8b461f9023", "JSONHttpRequest")]
+
+
+def test_links_in_an_attached_text_file_count_too():
+    att = "data:text/plain;base64," + base64.b64encode(b"https://example.org/a.part1.rar\n").decode()
+    pic = "data:image/png;base64," + base64.b64encode(b"https://example.org/not-a-link").decode()
+    paste, key = make_paste("", body={"paste": "", "attachment": [att, pic], "formatter": "plaintext"})
+    r = pb.PrivateBinPlugin().resolve(f"https://paste.example.org/?eeb22a8b461f9023#{key}", Ctx(paste))
+    assert [c[0] for c in r.children] == ["https://example.org/a.part1.rar"]
 
 
 def test_password_pastes_use_the_saved_password_and_say_when_it_is_missing():

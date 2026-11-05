@@ -90,9 +90,12 @@ def main() -> int:
         assert window.events.closing.fire() is False
         monitor_item = next(item for item in FakeIcon.instance.menu
                             if item.text == "Monitor copied links")
+        was_on = settings.clipboard_monitor_enabled     # on by default since 2026-11-05
         monitor_item.action(FakeIcon.instance, monitor_item)
-        assert settings.clipboard_monitor_enabled
-        assert monitor_item.kwargs["checked"](monitor_item)
+        assert settings.clipboard_monitor_enabled is (not was_on)
+        assert monitor_item.kwargs["checked"](monitor_item) is (not was_on)
+        monitor_item.action(FakeIcon.instance, monitor_item)
+        assert settings.clipboard_monitor_enabled is was_on
         exit_item = next(item for item in FakeIcon.instance.menu
                          if item.text == "Exit")
         exit_item.action(FakeIcon.instance, exit_item)

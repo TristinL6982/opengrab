@@ -116,7 +116,7 @@ class Settings(BaseModel):
     api_token: str = ""
     base_path: str = ""             # reverse-proxy path prefix, e.g. /opengrab
     terminal_enabled: bool = False  # shell API is opt-in and always token-gated
-    clipboard_monitor_enabled: bool = False
+    clipboard_monitor_enabled: bool = True   # copied links wait in the link grabber for approval
     premium_prefer_debrid: bool = True  # W9: try a debrid account before the hoster plugin
     # W8 LinkGrabber v2
     linkgrabber_online_check: bool = True

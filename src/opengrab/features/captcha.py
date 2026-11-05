@@ -97,8 +97,20 @@ class CaptchaService:
                     factory = (bs.make_stealth_driver
                                if (settings.captcha_browser_engine or "edge").lower() == "camoufox"
                                else bs.make_driver)
-                c = bs.solve_in_browser(req.page_url, self.mgr.clearance, factory(),
-                                        timeout=max(60.0, float(settings.captcha_manual_timeout_s or 120)))
+                wait = max(60.0, float(settings.captcha_manual_timeout_s or 120))
+                if req.kind in WIDGET_KINDS and req.sitekey:
+                    # a captcha inside the site's own form: its answer goes back to
+                    # the plugin (a clearance cookie would not satisfy the form)
+                    token = bs.solve_widget_in_browser(req.page_url, req.kind, req.sitekey,
+                                                       factory(), timeout=wait)
+                    if token:
+                        self.solve(rid, token)
+                        self._report(req, True, "")
+                    else:
+                        self._report(req, False, "the browser window closed or timed out "
+                                                 "before the check passed")
+                    return
+                c = bs.solve_in_browser(req.page_url, self.mgr.clearance, factory(), timeout=wait)
                 if c is None:
                     self._report(req, False, "the browser window closed or timed out before the check passed")
                 else:

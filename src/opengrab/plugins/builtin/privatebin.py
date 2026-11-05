@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import zlib
 from urllib.parse import urlparse
@@ -22,6 +23,7 @@ from urllib.parse import urlparse
 from ..base import LoginRequired, PluginContext, PluginError, ResolveResult, SitePlugin
 from .pastes import MAX_CHILDREN, extract_links
 
+log = logging.getLogger("opengrab.plugins.privatebin")
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ID_RE = re.compile(r"^(?:pasteid=)?([0-9a-f]{16})$")
 MAX_ITERATIONS = 2_000_000          # PrivateBin itself uses 100 000
@@ -88,7 +90,28 @@ def decrypt_v2(paste: dict, key_b58: str, password: str = "") -> str:
         if inflater.unconsumed_tail:
             raise PluginError("this PrivateBin paste is too large to open")
     body = json.loads(plain.decode("utf-8"))
-    return str(body.get("paste", ""))
+    if not isinstance(body, dict):
+        return str(body)
+    text = str(body.get("paste", ""))
+    # a paste can carry its text as attached files (data: URIs) instead
+    att = body.get("attachment") or []
+    for uri in att if isinstance(att, list) else [att]:
+        text += "\n" + attachment_text(uri)
+    log.debug("PrivateBin paste: %d characters of text, %d attachment(s), format %s",
+              len(str(body.get("paste", ""))), len(att) if isinstance(att, list) else 1,
+              body.get("formatter", "?"))
+    return text
+
+
+def attachment_text(uri) -> str:
+    """Text of a PrivateBin attachment (``data:<type>;base64,...``); "" for binaries."""
+    m = re.match(r"data:([^;,]*)(;base64)?,(.*)", str(uri or ""), re.S)
+    if not m:
+        return ""
+    raw = base64.b64decode(m.group(3)) if m.group(2) else m.group(3).encode("utf-8")
+    if m.group(1) and not m.group(1).startswith(("text/", "application/json")):
+        return ""
+    return raw[:MAX_PLAIN].decode("utf-8", errors="replace")
 
 
 class PrivateBinPlugin(SitePlugin):
