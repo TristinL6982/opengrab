@@ -305,7 +305,7 @@ class TorrentService:
             link.error = NOT_INSTALLED
             link.extra["fix_setting"] = "addon-torrent"  # the UI offers a jump to Settings, BitTorrent
             return
-        save = Path(self.settings.download_dir).expanduser().resolve()
+        save = self.mgr.link_root(link)
         save.mkdir(parents=True, exist_ok=True)
         own = []
         if magnet:
@@ -338,6 +338,18 @@ class TorrentService:
     def handle_for(self, link_id: str) -> Optional[LtHandle]:
         with self._lock:
             return self.handles.get(link_id)
+
+    def move_storage(self, link_id: str, new_root: Path) -> bool:
+        """Ask libtorrent to move the torrent's data to ``new_root``; False when it cannot."""
+        h = self.handle_for(link_id)
+        if h is None or not hasattr(h.h, "move_storage"):
+            return False
+        try:
+            Path(new_root).mkdir(parents=True, exist_ok=True)
+            h.h.move_storage(str(new_root))
+        except Exception:  # noqa: BLE001
+            return False
+        return True
 
     def pause(self, link_id: str) -> bool:
         h = self.handle_for(link_id)

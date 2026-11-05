@@ -17,6 +17,7 @@
     <linearGradient id="g-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f07a6c"/><stop offset="1" stop-color="#c42b1c"/></linearGradient>
     <linearGradient id="g-steel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f5f9"/><stop offset="1" stop-color="#a9b4c6"/></linearGradient>
   </defs>
+  <symbol id="i-open" viewBox="0 0 32 32"><path d="M3 9h9l3 3h14v15H3z" fill="#f2c94c" stroke="#9a7b12" stroke-width="1.5" stroke-linejoin="round"/><path d="M3 16h26l-3 11H3z" fill="#f7dc7a" stroke="#9a7b12" stroke-width="1.5" stroke-linejoin="round"/></symbol>
   <symbol id="i-add" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-green)" stroke="#1e7a2a"/><path d="M16 9v14M9 16h14" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></symbol>
   <symbol id="i-resume" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-blue)" stroke="#164a94"/><path d="M13 10.5v11l9-5.5z" fill="#fff"/></symbol>
   <symbol id="i-pause" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="url(#g-amber)" stroke="#a45f00"/><path d="M12.5 10.5v11M19.5 10.5v11" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></symbol>
@@ -41,10 +42,13 @@
   <!-- ============================ toolbar =============================== -->
   <div class="toolbar" role="toolbar" aria-label="Download actions">
     <button class="tb" id="tb-add" title="Add links (Ctrl+N)" aria-label="Add links"><svg aria-hidden="true"><use href="#i-add"/></svg><span>Add links</span></button>
+    <button class="tb" id="tb-open" title="Open a .torrent, container or link-list file" aria-label="Open file…"><svg aria-hidden="true"><use href="#i-open"/></svg><span>Open file…</span></button>
+    <input type="file" id="open-file-input" multiple hidden accept=".torrent,.dlc,.ccf,.rsdf,.crawljob,.txt,.url" aria-label="Open file…">
     <span class="tb-sep"></span>
     <button class="tb" id="tb-resume" title="Start or resume the selected downloads" aria-label="Resume" disabled><svg aria-hidden="true"><use href="#i-resume"/></svg><span>Resume</span></button>
     <button class="tb" id="tb-pause" title="Pause the selected downloads" aria-label="Pause" disabled><svg aria-hidden="true"><use href="#i-pause"/></svg><span>Pause</span></button>
     <button class="tb" id="tb-stop" title="Stop the selected downloads" aria-label="Stop" disabled><svg aria-hidden="true"><use href="#i-stop"/></svg><span>Stop</span></button>
+    <button class="tb" id="tb-folder" title="Change the save folder of the selected downloads" aria-label="Change folder…" disabled><svg aria-hidden="true"><use href="#i-open"/></svg><span>Folder…</span></button>
     <button class="tb" id="tb-delete" title="Remove the selected downloads from the list (Del)" aria-label="Remove" disabled><svg aria-hidden="true"><use href="#i-delete"/></svg><span>Remove</span></button>
     <span class="tb-sep"></span>
     <button class="tb" id="tb-startall" title="Start every waiting or paused download" aria-label="Start all"><svg aria-hidden="true"><use href="#i-startall"/></svg><span>Start all</span></button>
@@ -325,7 +329,15 @@
         <div class="sfbar">
           <input id="settings-search" type="search" aria-label="Search settings" placeholder="Search settings… (Ctrl+F)" autocomplete="off" spellcheck="false">
           <button id="settings-search-clear" type="button" class="hidden" aria-label="Clear search" title="Clear search (Esc)">×</button>
+          <div id="settings-layout" class="seg" role="group" aria-label="Settings layout">
+            <button type="button" data-layout="indexed" aria-pressed="true">Indexed</button>
+            <button type="button" data-layout="list" aria-pressed="false">List</button>
+          </div>
         </div>
+        <nav id="settings-index" aria-label="Settings sections">
+          <select id="settings-index-select" aria-label="Settings section"></select>
+          <ul id="settings-index-list"></ul>
+        </nav>
         <p id="settings-search-empty" class="hint hidden" role="status" aria-live="polite"></p>
         <h2>Appearance</h2>
         <div class="settings-grid groupbox">
@@ -348,6 +360,7 @@
         <div class="settings-grid groupbox">
           <label>Download folder
             <input id="set-download_dir" type="text"></label>
+          <label class="check"><input id="set-ask_save_folder" type="checkbox"> Ask where to save before adding downloads</label>
           <label>Downloads at the same time
             <input id="set-max_parallel" type="number" min="1" max="32"></label>
           <label>Connections per download
@@ -737,6 +750,12 @@
     <label for="url-input" class="win-label">Links, one per line</label>
     <textarea id="url-input" rows="7"
       placeholder="https://example.com/video&#10;https://example.com/file.zip"></textarea>
+    <label for="url-folder" class="win-label" style="margin-top:8px">Save to</label>
+    <div class="folderrow">
+      <input id="url-folder" type="text" placeholder="Download folder" spellcheck="false">
+      <button type="button" id="url-browse" title="Choose a folder" aria-label="Browse…">Browse…</button>
+      <select id="url-recent" aria-label="Recent folders" title="Recent folders"></select>
+    </div>
     <label for="url-hash" class="win-label" style="margin-top:8px">Checksum (optional, for a single link)</label>
     <input id="url-hash" type="text" placeholder="sha256:… or md5:…" style="width:100%">
     <div class="addrow">
@@ -744,10 +763,28 @@
       <label class="check"><input id="url-auto" type="checkbox" checked> Start now</label>
       <label class="check"><input id="url-review" type="checkbox"> Review in LinkGrabber first</label>
       <label>Queue <select id="url-queue"></select></label>
+      <button type="button" id="add-open-file" title="Open a .torrent, container or link-list file" aria-label="Open file…">Open file…</button>
       <span class="grow"></span>
       <button type="button" id="add-cancel">Cancel</button>
       <button type="button" id="btn-add" class="primary">Add links</button>
     </div>
+  </div>
+</dialog>
+
+<dialog id="folder-dialog" class="win" aria-labelledby="folder-title">
+  <div class="win-title" id="folder-title"><span id="folder-title-text">Save to</span><button type="button" class="win-x" id="folder-close" aria-label="Close">×</button></div>
+  <div class="win-body">
+    <p id="folder-text"></p>
+    <label for="folder-input" class="win-label">Save to</label>
+    <div class="folderrow">
+      <input id="folder-input" type="text" placeholder="Download folder" spellcheck="false">
+      <button type="button" id="folder-browse" title="Choose a folder" aria-label="Browse…">Browse…</button>
+      <select id="folder-recent" aria-label="Recent folders" title="Recent folders"></select>
+    </div>
+    <label class="check hidden" id="folder-move-row"><input id="folder-move" type="checkbox" checked> Move the files already downloaded to the new folder</label>
+    <div class="addrow"><span class="grow"></span>
+      <button type="button" id="folder-cancel">Cancel</button>
+      <button type="button" id="folder-ok" class="primary">OK</button></div>
   </div>
 </dialog>
 

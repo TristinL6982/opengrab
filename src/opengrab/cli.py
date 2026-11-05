@@ -36,6 +36,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="bind address (default: saved setting or 127.0.0.1)")
     parser.add_argument("--data-dir", default=None,
                         help="directory for settings, queue state, and plugins")
+    parser.add_argument("--download-dir", default=None,
+                        help="download folder for this run (overrides OPENGRAB_DOWNLOAD_DIR)")
     parser.add_argument("--grab", action="append", default=[], metavar="URL",
                         help="add a URL on startup; may be repeated")
     parser.add_argument("--list-plugins", action="store_true",
@@ -121,6 +123,14 @@ def main(argv=None) -> int:
         return 1 if errors else 0
     if args.data_dir:
         os.environ["OPENGRAB_DATA_DIR"] = args.data_dir
+    if args.download_dir:
+        os.environ["OPENGRAB_DOWNLOAD_DIR"] = args.download_dir
+    # Remember how this copy was started: a link/file handler it registers
+    # must start the same copy (same data folder, port, download folder).
+    from . import winintegration
+    winintegration.STARTUP_OPTIONS.update(
+        data_dir=args.data_dir, port=args.port,
+        download_dir=args.download_dir or os.environ.get("OPENGRAB_DOWNLOAD_DIR"))
     settings = load_settings()
     if args.install_addon:  # M14: offered by the installer
         from . import addons

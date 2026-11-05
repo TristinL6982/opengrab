@@ -221,13 +221,18 @@ def setup(srv):
         return 201, {"added": len(ids), "ids": ids}
 
     def add_all(req):
+        from ..savedir import SaveDirError, error_payload, folder_from_body
         only_online = bool(req.body.get("only_online", False))
+        try:
+            save_dir = folder_from_body(srv.manager.settings, req.body)  # checked before anything leaves the list
+        except SaveDirError as exc:
+            return error_payload(exc)
         with srv._clipboard_candidates_lock:
             picked = [c for c in srv._clipboard_candidates.values()
                       if not only_online or c.get("state") == "online"]
             for c in picked:
                 srv._clipboard_candidates.pop(c["id"], None)
-        links = [srv.add_candidate_link(c) for c in picked]
+        links = [srv.add_candidate_link(c, save_dir) for c in picked]
         return {"added": len(links)}
 
     def spider_start(req):

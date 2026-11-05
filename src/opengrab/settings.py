@@ -43,6 +43,8 @@ class Settings(BaseModel):
     
     # downloads
     download_dir: str = str(Path.home() / "Downloads")
+    recent_download_dirs: list[str] = Field(default_factory=list)  # last 8 "Save to" folders, newest first
+    ask_save_folder: bool = False      # ask where to save before adding downloads from the window
     max_parallel: int = 3              # concurrent links
     per_link_chunks: int = 2           # connections per download (1-16); W6 splits the slowest range when one frees up
     segment_min_mb: int = 1            # never split a range below this size

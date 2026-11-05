@@ -247,6 +247,7 @@ function rowActions(l) {
       b.push(sm("Try anyway", "paywall"));
       break;
   }
+  if (["waiting", "paused", "error"].includes(l.status)) b.push(sm("Change folder…", "change-folder"));
   if (l.plugin === "torrent" && ["downloading", "resolving", "paused"].includes(l.status)) b.push(sm("Files", "torrent-files"));
   if (l.plugin === "torrent" && (["downloading", "resolving", "paused"].includes(l.status) || l.extra?.torrent?.seeding === "seeding")) b.push(sm("Peers", "torrent-peers"));
   return b.join("");
@@ -310,6 +311,11 @@ const FIX_SETTINGS = {
   "addon-torrent": { label: "Install BitTorrent", target: "#btn-addon-torrent-install" },
 };
 
+function shortPath(p) {
+  const parts = String(p).split(/[\\/]+/).filter(Boolean);
+  return parts.length > 3 ? "…\\" + parts.slice(-2).join("\\") : String(p);
+}
+
 function linkRow(l) {
   const pct = Math.round((l.progress || 0) * 100);
   const barCls = (l.status === "error" ? "bar err" : l.status === "paused" ? "bar paused" : "bar") + (pct >= 55 ? " hi" : "");
@@ -332,6 +338,7 @@ function linkRow(l) {
   if (l.extra?.hash) notes.push(l.extra.hash.ok ? `<div class="u hashok">${esc(l.extra.hash.algo)} checksum OK</div>` : `<div class="u hashbad">Checksum ${l.extra.hash.error ? esc(l.extra.hash.error) : "mismatch"}</div>`);
   if (l.status === "paywall" && l.paywall_note) notes.push(`<div class="u" style="color:var(--warn)">${esc(l.paywall_note)}</div>`);
   if (l.extra?.archive_extraction) notes.push(`<div class="u" style="color:${l.extra.archive_extraction.status === "extracted" ? "var(--ok-dark)" : "var(--warn)"}">Archive ${esc(l.extra.archive_extraction.status)}${l.extra.archive_extraction.message ? ": " + esc(l.extra.archive_extraction.message) : ""}</div>`);
+  if (l.extra?.save_dir && l.status !== "finished") notes.push(`<div class="u" title="${esc(l.extra.save_dir)}">Saves to: ${esc(shortPath(l.extra.save_dir))}</div>`);
   const sub = l.status === "finished" && l.path ? l.path : (l.url + (l.plugin ? " · " + l.plugin : ""));
   return `<div class="linkrow${sel}" data-lid="${l.id}" data-status="${esc(l.status)}" title="${esc(l.url)}"
     role="row" tabindex="${S.focusId === l.id ? 0 : -1}" aria-selected="${S.selected.has(l.id)}">
@@ -479,6 +486,7 @@ function updateToolbar() {
   $("#tb-pause").disabled = !any(["downloading", "waiting"]);
   $("#tb-stop").disabled = !any(["downloading", "waiting", "resolving", "grabbing"]);
   $("#tb-delete").disabled = sel.length === 0;
+  $("#tb-folder").disabled = !sel.some(l => l.status !== "skipped");
 }
 
 function visibleRowIds(row) {
@@ -522,6 +530,7 @@ $("#tb-pause").addEventListener("click", () =>
 $("#tb-stop").addEventListener("click", () =>
   forEachLink(selectedLinks().filter(l => ["downloading", "waiting", "resolving", "grabbing"].includes(l.status)), "stop"));
 $("#tb-delete").addEventListener("click", () => removeSelected());
+$("#tb-folder").addEventListener("click", () => changeFolder(selectedLinks()));
 $("#tb-startall").addEventListener("click", async () => {
   const all = Array.from(S.links.values());
   await forEachLink(all.filter(l => l.status === "paused"), "resume");
@@ -571,9 +580,149 @@ $("#remove-cancel").addEventListener("click", () => $("#remove-dialog").close())
 $("#remove-list").addEventListener("click", () => doRemove(false));
 $("#remove-files").addEventListener("click", () => doRemove(true));
 
+/* ============================================================ save folder (one shared component) */
+// "Save to" field + Browse… + Recent, used by the Add links dialog and by the
+// folder dialog (ask before adding, Change folder…).
+const FOLDER = { dir: "", recent: [], ask: false };
+async function loadFolderPrefs() {
+  try {
+    const s = await api("/api/settings");
+    FOLDER.dir = s.download_dir || "";
+    FOLDER.recent = Array.isArray(s.recent_download_dirs) ? s.recent_download_dirs : [];
+    FOLDER.ask = !!s.ask_save_folder;
+  } catch { /* the banner shows on 401 */ }
+}
+// like api(), but keeps the server's error code (missing, relative, not_writable...)
+async function folderCall(path, body) {
+  const headers = { "Content-Type": "application/json" };
+  if (S.token) headers["Authorization"] = "Bearer " + S.token;
+  const res = await fetch(withBasePath(path), { method: "POST", headers, body: JSON.stringify(body) });
+  if (res.status === 401) { showAuthBanner(); throw new Error("unauthorized"); }
+  let data = {};
+  try { data = await res.json(); } catch {}
+  return { ok: res.ok, status: res.status, data };
+}
+function fillRecent(sel) {
+  sel.innerHTML = "";
+  const first = document.createElement("option");
+  first.value = ""; first.textContent = "Recent";
+  sel.appendChild(first);
+  for (const d of FOLDER.recent) {
+    const o = document.createElement("option");
+    o.value = d; o.textContent = d; o.title = d;
+    sel.appendChild(o);
+  }
+  sel.disabled = !FOLDER.recent.length;
+}
+async function browseFolder(input) {
+  try {
+    const r = await folderCall("/api/pick-folder", { start: input.value.trim() || FOLDER.dir });
+    if (r.ok && r.data.available) {
+      if (r.data.path) input.value = r.data.path;
+      return;
+    }
+  } catch (e) { if (e.message === "unauthorized") return; }
+  toast("The folder picker is only in the desktop app. Type the folder path instead.", "");
+  input.focus();
+}
+function wireFolderRow(input, browse, recent) {
+  browse.addEventListener("click", () => browseFolder(input));
+  recent.addEventListener("change", () => { if (recent.value) input.value = recent.value; recent.value = ""; });
+}
+// Checks the folder on the server; offers to create it when it is missing.
+// Returns the absolute path, or null (the reason has been shown).
+async function ensureFolder(raw) {
+  const path = (raw || "").trim();
+  if (!path) { toast("Choose a folder to save to", "err"); return null; }
+  let r = await folderCall("/api/check-folder", { path });
+  if (!r.ok && r.data.code === "missing") {
+    if (!confirm("Folder doesn't exist. Create it?")) return null;
+    r = await folderCall("/api/check-folder", { path, create_dir: true });
+  }
+  if (!r.ok) { toast(r.data.error || "That folder cannot be used", "err"); return null; }
+  return r.data.path;
+}
+
+let folderFinish = null;
+// Resolves to { dir, move } with a checked folder, or null when cancelled.
+async function chooseFolder({ title = "Save to", text = "", showMove = false } = {}) {
+  await loadFolderPrefs();
+  const d = $("#folder-dialog");
+  $("#folder-title-text").textContent = title;
+  $("#folder-text").textContent = text;
+  $("#folder-text").classList.toggle("hidden", !text);
+  $("#folder-input").value = FOLDER.dir;
+  $("#folder-move-row").classList.toggle("hidden", !showMove);
+  $("#folder-move").checked = true;
+  fillRecent($("#folder-recent"));
+  return new Promise((resolve) => {
+    folderFinish = (v) => { folderFinish = null; if (d.open) d.close(); resolve(v); };
+    d.addEventListener("close", () => { if (folderFinish) folderFinish(null); }, { once: true });
+    d.showModal();
+    $("#folder-input").focus();
+  });
+}
+wireFolderRow($("#folder-input"), $("#folder-browse"), $("#folder-recent"));
+wireFolderRow($("#url-folder"), $("#url-browse"), $("#url-recent"));
+$("#folder-ok").addEventListener("click", async () => {
+  const dir = await ensureFolder($("#folder-input").value);
+  if (dir && folderFinish) folderFinish({ dir, move: $("#folder-move").checked });
+});
+$("#folder-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#folder-ok").click(); });
+$("#folder-cancel").addEventListener("click", () => folderFinish && folderFinish(null));
+$("#folder-close").addEventListener("click", () => folderFinish && folderFinish(null));
+
+// When "Ask where to save before adding downloads" is on, add paths from the window
+// ask once per batch. Returns "" (use the default), a folder, or null (cancelled).
+async function askSaveFolder(text) {
+  await loadFolderPrefs();
+  if (!FOLDER.ask) return "";
+  const pick = await chooseFolder({ text });
+  return pick ? pick.dir : null;
+}
+
+// Change folder… for the selected downloads (queued ones just switch; started ones can move their files)
+async function changeFolder(links) {
+  links = links.filter(l => l.status !== "skipped");
+  if (!links.length) return;
+  const started = links.some(l => l.downloaded > 0 || l.path || ["finished", "paused", "downloading"].includes(l.status));
+  const pick = await chooseFolder({
+    title: "Change folder",
+    text: links.length === 1 ? "Where should this download be saved?" : "Where should these downloads be saved?",
+    showMove: started,
+  });
+  if (!pick) return;
+  let ids = links.map(l => l.id), rename = false, moved = 0, failed = [];
+  for (let pass = 0; pass < 2 && ids.length; pass++) {
+    let r;
+    try {
+      r = await folderCall("/api/change-folder", { ids, save_dir: pick.dir, move_files: pick.move, rename });
+    } catch (e) { if (e.message === "unauthorized") return; toast("Could not change the folder: " + e.message, "err"); return; }
+    if (!r.ok) { toast(r.data.error || "Could not change the folder", "err"); return; }
+    const clash = [];
+    for (const x of r.data.results || []) {
+      if (x.conflicts) clash.push(x.id);
+      else if (!x.ok) failed.push(x.error || "failed");
+      else { moved += (x.moved || []).length; for (const f of (x.failed || [])) failed.push(f.reason); }
+    }
+    ids = clash;
+    if (clash.length && pass === 0) {
+      if (!confirm("A file with the same name is already in that folder. Save it under a new name instead?")) { ids = []; toast("Nothing was overwritten", ""); }
+      else rename = true;
+    }
+  }
+  if (failed.length) toast("Could not change the folder: " + failed[0], "err");
+  else toast(moved ? `Moved ${moved} file(s)` : "Folder changed", "ok");
+  S.selected.clear();
+  refreshData();
+}
+
 /* ============================================================ add links dialog */
-function openAddDialog(text = "") {
+async function openAddDialog(text = "") {
   const d = $("#add-dialog");
+  await loadFolderPrefs();
+  $("#url-folder").value = FOLDER.dir;
+  fillRecent($("#url-recent"));
   if (text) $("#url-input").value = ($("#url-input").value ? $("#url-input").value + "\n" : "") + text;
   if (!d.open) d.showModal();
   $("#url-input").focus();
@@ -794,10 +943,19 @@ async function act(action, el) {
         if (l) askRemove([l]);
         return;
       }
-      case "candidate-add":
-        await api(`/api/linkgrabber/${id}/add`, "POST", {});
+      case "candidate-add": {
+        const dir = await askSaveFolder("Where should this download be saved?");
+        if (dir === null) return;
+        const r = await folderCall(`/api/linkgrabber/${id}/add`, dir ? { save_dir: dir } : {});
+        if (!r.ok) { toast(r.data.error || "Could not add the link", "err"); return; }
         toast("Link added to the queue", "ok");
         break;
+      }
+      case "change-folder": {
+        const l = S.links.get(id);
+        if (l) changeFolder([l]);
+        return;
+      }
       case "candidate-dismiss":
         await api(`/api/linkgrabber/${id}/dismiss`, "POST", {});
         break;
@@ -967,13 +1125,22 @@ async function addUrls() {
     return;
   }
   try {
+    // the "Save to" folder applies to every link of this add; the default folder needs no override
+    let saveDir = "";
+    const typed = $("#url-folder").value.trim();
+    if (typed && typed !== FOLDER.dir) {
+      saveDir = await ensureFolder(typed);
+      if (saveDir === null) return;
+    }
     const out = await api("/api/urls", "POST", {
       urls,
       priority: +$("#url-priority").value || 0,
       auto_download: $("#url-auto").checked,
       queue: $("#url-queue")?.value || "",
       hash: $("#url-hash")?.value.trim() || "",
+      ...(saveDir ? { save_dir: saveDir } : {}),
     });
+    loadFolderPrefs();
     if ($("#url-hash")) $("#url-hash").value = "";
     const errs = (out || []).filter(o => o.error);
     if (errs.length) toast(errs.length + " link(s) failed: " + errs[0].error, "err");
@@ -1003,22 +1170,59 @@ function dzOn(e, show) {
     hint.textContent = "release to add links";
     dz.appendChild(hint);
   }
+  if (show) hint.textContent = dragHasFiles(e) ? "release to open files" : "release to add links";
   hint.classList.toggle("hidden", !show);
 }
 window.addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; dzOn(e, true); });
-window.addEventListener("dragover", e => { e.preventDefault(); });
+window.addEventListener("dragover", e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; });
 window.addEventListener("dragleave", e => {
   e.preventDefault();
   if (--dragDepth <= 0) { dragDepth = 0; dzOn(e, false); }
 });
+function dragHasFiles(e) {
+  const t = e.dataTransfer?.types;
+  return !!t && Array.from(t).includes("Files");
+}
+/* A page never learns a dropped file's path, so the bytes go to the server, which
+   decides by extension (.torrent, containers, link lists). Same auth as other API calls. */
+async function importFiles(files) {
+  for (const file of Array.from(files || [])) {
+    try {
+      const headers = { "Content-Type": "application/octet-stream" };
+      if (S.token) headers["Authorization"] = "Bearer " + S.token;
+      const res = await fetch(withBasePath("/api/import-file") + "?name=" + encodeURIComponent(file.name),
+                              { method: "POST", headers, body: await file.arrayBuffer() });
+      if (res.status === 401) { showAuthBanner(); throw new Error("unauthorized"); }
+      let out = {};
+      try { out = await res.json(); } catch {}
+      if (!res.ok) throw new Error(out.error || (res.status + " " + res.statusText));
+      toast("Added " + file.name, "ok");
+    } catch (err) {
+      toast(err.message || String(err), "err");
+    }
+  }
+}
+$("#tb-open").addEventListener("click", () => $("#open-file-input").click());
+$("#add-open-file").addEventListener("click", () => $("#open-file-input").click());
+$("#open-file-input").addEventListener("change", async ev => {
+  const files = Array.from(ev.target.files || []);
+  ev.target.value = "";
+  await importFiles(files);
+});
 window.addEventListener("drop", async e => {
   e.preventDefault();
   dragDepth = 0; dzOn(e, false);
+  const files = e.dataTransfer?.files;
+  if (files && files.length) await importFiles(files);
   const ta = $("#url-input");
   const text = e.dataTransfer?.getData("text/plain") || "";
-  const urls = text.split("\n").map(s => s.trim()).filter(Boolean);
+  const urls = (files && files.length ? "" : text).split("\n").map(s => s.trim()).filter(Boolean);
   if (urls.length) {
+    const dir = await askSaveFolder("Where should these downloads be saved?");
+    if (dir === null) return;
     ta.value = (ta.value ? ta.value + "\n" : "") + urls.join("\n");
+    await loadFolderPrefs();
+    $("#url-folder").value = dir || FOLDER.dir;
     await addUrls();
   }
 });
@@ -1079,7 +1283,7 @@ $("#btn-clear-finished").addEventListener("click", async () => {
 });
 
 /* ============================================================ settings */
-const SET_FIELDS = ["download_dir", "max_parallel", "per_link_chunks",
+const SET_FIELDS = ["download_dir", "ask_save_folder", "max_parallel", "per_link_chunks",
   "speed_limit_kbps", "media_max_height", "media_playlist_max_entries",
   "retry_max", "impersonate", "proxy", "captcha_provider",
   "captcha_2captcha_key", "captcha_capmonster_key", "captcha_capsolver_key", "captcha_browser_enabled",
@@ -1981,7 +2185,9 @@ $("#btn-lg-check").addEventListener("click", async () => {
 });
 $("#btn-lg-addonline").addEventListener("click", async () => {
   try {
-    const r = await api("/api/linkgrabber/add-all", "POST", { only_online: true });
+    const dir = await askSaveFolder("Where should these downloads be saved?");
+    if (dir === null) return;
+    const r = await api("/api/linkgrabber/add-all", "POST", { only_online: true, ...(dir ? { save_dir: dir } : {}) });
     toast(`Added ${r.added} online link(s)`, "ok");
     renderLinkGrabber(); refreshData();
   } catch (e) { toast("Could not add links: " + e.message, "err"); }
@@ -2395,6 +2601,7 @@ function openSetting(target) {
   window.OG_SETTINGS_SEARCH?.clear();   // a search could be hiding the target
   const el = typeof target === "string" ? document.querySelector(target) : target;
   if (!el) return false;
+  window.OG_SETTINGS_INDEX?.reveal(el);   // Indexed layout: show the section that owns it first
   el.closest("details")?.setAttribute("open", "");
   const box = el.closest(".groupbox") || el;
   el.scrollIntoView({ block: "center" });
@@ -2404,6 +2611,23 @@ function openSetting(target) {
   box.classList.add("setting-flash");
   setTimeout(() => box.classList.remove("setting-flash"), 2200);
   return true;
+}
+
+/* ===================================================== settings sections */
+// The Settings page is a flat run of children: a top-level <h2> owns the siblings after it until the
+// next <h2> (the same rule the search below uses). The search box, the layout index and the Save bar
+// are not part of any section.
+function settingsKids(pane) {
+  return Array.from(pane.children).filter(c => !c.matches(".sfbar,#settings-search-empty,#settings-index,.savebar"));
+}
+function settingsSections(pane) {
+  const out = [];
+  let cur = null;
+  for (const c of settingsKids(pane)) {
+    if (c.tagName === "H2") { cur = { head: c, els: [c] }; out.push(cur); }
+    else if (cur) cur.els.push(c);
+  }
+  return out;
 }
 
 /* ===================================================== settings search */
@@ -2513,14 +2737,15 @@ function openSetting(target) {
     const q = norm(input.value);
     clearBtn.classList.toggle("hidden", !input.value);
     active = !!q;
-    if (!q) return;
+    if (!q) { window.OG_SETTINGS_INDEX?.refresh(); return; }
     terms = q.split(" ");
-    const kids = Array.from(pane.children).filter(c => !c.classList.contains("sfbar") && c !== empty);
+    const kids = settingsKids(pane);
     if (!walk(kids, false)) {
       const t = window.OG_I18N ? window.OG_I18N.t('No settings match "{q}".') : 'No settings match "{q}".';
       empty.textContent = t.replace("{q}", input.value.trim());
       empty.classList.remove("hidden");
     }
+    window.OG_SETTINGS_INDEX?.refresh();
   }
   function clear() { if (!input.value && !active) return; input.value = ""; run(); }
 
@@ -2537,5 +2762,129 @@ function openSetting(target) {
       ev.preventDefault(); input.focus(); input.select();
     }
   });
-  window.OG_SETTINGS_SEARCH = { run, clear };
+  window.OG_SETTINGS_SEARCH = { run, clear, isActive: () => active };
+})();
+
+/* ===================================================== settings layout: Indexed | List */
+(function () {
+  const pane = document.getElementById("tab-settings");
+  const list = document.getElementById("settings-index-list");
+  const sel = document.getElementById("settings-index-select");
+  const seg = document.getElementById("settings-layout");
+  if (!pane || !list || !sel || !seg) return;
+  const LAYOUT_KEY = "og_settings_layout", SECTION_KEY = "og_settings_section";
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  let layout = store.get(LAYOUT_KEY) === "list" ? "list" : "indexed";   // Indexed is the default
+  let secs = [], current = 0, wanted = store.get(SECTION_KEY);
+  const searching = () => !!window.OG_SETTINGS_SEARCH?.isActive();
+  const keyOf = (h) => {   // the English heading, so the remembered section survives a language change
+    const w = document.createTreeWalker(h, NodeFilter.SHOW_TEXT);
+    const n = w.nextNode();
+    return ((n && window.OG_I18N?.original?.(n)) || h.textContent).replace(/\s+/g, " ").trim();
+  };
+
+  // the sidebar is built from the live heading text, so it shows whatever language the page is in
+  function build() {
+    const sb = pane.querySelector(".savebar");
+    if (sb && pane.lastElementChild !== sb) pane.appendChild(sb);   // keep Save visible whichever section shows
+    secs = settingsSections(pane);
+    list.textContent = ""; sel.textContent = "";
+    secs.forEach((s, i) => {
+      s.name = s.head.textContent.replace(/\s+/g, " ").trim();
+      s.key = keyOf(s.head);
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "six-item"; b.dataset.i = i;
+      const nm = document.createElement("span"); nm.className = "six-name"; nm.textContent = s.name;
+      const ct = document.createElement("span"); ct.className = "six-count"; ct.hidden = true;
+      b.append(nm, ct); li.append(b); list.append(li);
+      s.btn = b; s.count = ct;
+      const o = document.createElement("option"); o.value = i; o.textContent = s.name;
+      s.opt = o; sel.append(o);
+    });
+    const at = secs.findIndex(s => s.key === wanted);
+    current = at >= 0 ? at : 0;
+    apply();
+  }
+
+  function apply() {
+    const ix = layout === "indexed", q = searching();
+    pane.classList.toggle("ix", ix);
+    pane.classList.toggle("ix-search", ix && q);
+    seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.layout === layout)));
+    secs.forEach((s, i) => {
+      const show = !ix || q || i === current;
+      s.els.forEach(e => e.classList.toggle("ix-hide", !show));
+      const here = i === current;
+      s.btn.classList.toggle("sel", here);
+      if (here) s.btn.setAttribute("aria-current", "true"); else s.btn.removeAttribute("aria-current");
+      s.btn.tabIndex = here ? 0 : -1;
+      let n = 0, dim = false;
+      if (q) {
+        dim = s.head.classList.contains("sf-hide");
+        if (!dim) {
+          n = s.els.reduce((a, e) => a + e.querySelectorAll("mark.sf-mark").length + (e.matches("mark.sf-mark") ? 1 : 0), 0) || 1;
+        }
+      }
+      s.btn.classList.toggle("dim", dim);
+      s.count.hidden = !(q && n);
+      s.count.textContent = n ? String(n) : "";
+      s.opt.textContent = s.name + (q ? " (" + n + ")" : "");
+      s.opt.disabled = false;
+    });
+    sel.value = String(current);
+  }
+
+  function choose(i, scroll) {
+    if (!secs[i]) return;
+    current = i; wanted = secs[i].key;
+    store.set(SECTION_KEY, wanted);
+    apply();
+    if (scroll !== false) secs[i].head.scrollIntoView({ block: "start" });
+  }
+
+  list.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".six-item");
+    if (b) choose(Number(b.dataset.i));
+  });
+  list.addEventListener("keydown", (ev) => {   // Up/Down move through the index, Enter (or Space) opens
+    const items = secs.map(s => s.btn), at = items.indexOf(document.activeElement);
+    if (at < 0) return;
+    let to = -1;
+    if (ev.key === "ArrowDown") to = Math.min(items.length - 1, at + 1);
+    else if (ev.key === "ArrowUp") to = Math.max(0, at - 1);
+    else if (ev.key === "Home") to = 0;
+    else if (ev.key === "End") to = items.length - 1;
+    if (to < 0) return;
+    ev.preventDefault();
+    items.forEach(b => { b.tabIndex = -1; });
+    items[to].tabIndex = 0; items[to].focus();
+  });
+  sel.addEventListener("change", () => choose(Number(sel.value)));
+  seg.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button[data-layout]");
+    if (!b || b.dataset.layout === layout) return;
+    layout = b.dataset.layout;
+    store.set(LAYOUT_KEY, layout);
+    apply();
+  });
+  document.querySelector('.tab[data-tab="settings"]')?.addEventListener("click", () => {
+    const fresh = settingsSections(pane);   // labels can change once translations land
+    if (fresh.length !== secs.length || fresh.some((s, i) => s.head !== secs[i].head)) build();
+  });
+
+  window.OG_SETTINGS_INDEX = {
+    refresh: apply,
+    layout: () => layout,
+    // used by openSetting(): make the section that owns `el` the visible one
+    reveal(el) {
+      if (layout !== "indexed" || !el) return;
+      const i = secs.findIndex(s => s.els.some(e => e === el || e.contains(el)));
+      if (i >= 0 && (i !== current || searching())) choose(i, false);
+    },
+  };
+  build();
 })();

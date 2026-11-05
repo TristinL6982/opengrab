@@ -32,13 +32,28 @@ URL_USERCHOICE = r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations
 EXT_USERCHOICE = r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{}\UserChoice"
 
 
+# Set by the command line: the --data-dir/--port/--download-dir this copy was started with.
+STARTUP_OPTIONS: dict = {"data_dir": None, "port": None, "download_dir": None}
+
+
 def launch_command() -> str:
-    """How Windows should start OpenGrab (frozen exe or this Python)."""
+    """How Windows should start OpenGrab (frozen exe or this Python), with the
+    data folder, port and download folder this copy was started with, so a copy
+    run on its own data (a test or portable copy) opens links in itself."""
     if getattr(sys, "frozen", False):
-        return f'"{sys.executable}"'
-    pyw = Path(sys.executable).with_name("pythonw.exe")
-    exe = pyw if pyw.exists() else Path(sys.executable)
-    return f'"{exe}" -m opengrab'
+        cmd = f'"{sys.executable}"'
+    else:
+        pyw = Path(sys.executable).with_name("pythonw.exe")
+        exe = pyw if pyw.exists() else Path(sys.executable)
+        cmd = f'"{exe}" -m opengrab'
+    opts = STARTUP_OPTIONS
+    if opts.get("data_dir"):
+        cmd += f' --data-dir "{opts["data_dir"]}"'
+    if opts.get("port"):
+        cmd += f' --port {int(opts["port"])}'
+    if opts.get("download_dir"):
+        cmd += f' --download-dir "{opts["download_dir"]}"'
+    return cmd
 
 
 class Registry:
@@ -105,22 +120,37 @@ class Registry:
         return (self._get(f"{CLASSES}\\{scheme}\\shell\\open\\command") or "").startswith(self.command)
 
     # -- file types -------------------------------------------------------------
+    def progid_for(self, ext: str) -> str:
+        """The ProgId an extension points at: .torrent uses the same ProgId the
+        Default apps Capabilities name; the other file types share OpenGrab.Download."""
+        return PROGID_TORRENT if ext == ".torrent" else PROGID
+
+    def _progid_is_ours(self, progid: str) -> bool:
+        return bool(progid) and (self._get(f"{CLASSES}\\{progid}\\shell\\open\\command") or "").startswith(self.command)
+
     def set_file_type(self, ext: str, on: bool) -> None:
+        progid = self.progid_for(ext)
         if on:
-            self._set(f"{CLASSES}\\{PROGID}", "", "OpenGrab download")
-            self._set(f"{CLASSES}\\{PROGID}\\shell\\open\\command", "", f'{self.command} "%1"')
-            self._set(f"{CLASSES}\\{ext}\\OpenWithProgids", PROGID, "")
-            self._set(f"{CLASSES}\\{ext}", "", PROGID)
             if ext == ".torrent":
-                self.register_capabilities()
-        elif self._get(f"{CLASSES}\\{ext}") == PROGID:
+                self.register_capabilities()  # writes the OpenGrab.torrent ProgId and its command
+            else:
+                self._set(f"{CLASSES}\\{progid}", "", "OpenGrab download")
+                self._set(f"{CLASSES}\\{progid}\\shell\\open\\command", "", f'{self.command} "%1"')
+            self._set(f"{CLASSES}\\{ext}\\OpenWithProgids", progid, "")
+            self._set(f"{CLASSES}\\{ext}", "", progid)
+            return
+        current = self._get(f"{CLASSES}\\{ext}") or ""
+        if current in (progid, PROGID) and self._progid_is_ours(current):
             self._delete_value(f"{CLASSES}\\{ext}", "")
-            self._delete_value(f"{CLASSES}\\{ext}\\OpenWithProgids", PROGID)
+            for p in {progid, current}:
+                self._delete_value(f"{CLASSES}\\{ext}\\OpenWithProgids", p)
             if ext == ".torrent":
                 self._sync_capabilities()
 
     def file_type_is_ours(self, ext: str) -> bool:
-        return self._get(f"{CLASSES}\\{ext}") == PROGID
+        current = self._get(f"{CLASSES}\\{ext}") or ""
+        # PROGID is also accepted for .torrent: the 0.1.3 installer used it
+        return current in (self.progid_for(ext), PROGID) and self._progid_is_ours(current)
 
     # -- Default apps capabilities -------------------------------------------
     def exe_path(self) -> str:

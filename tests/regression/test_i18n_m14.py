@@ -83,8 +83,8 @@ def test_every_form_field_has_an_accessible_label():
 
 def test_toolbar_buttons_keep_spoken_names_and_toasts_are_announced():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    assert html.count('class="tb"') == 10
-    assert len(re.findall(r'class="tb" id="[^"]+" title="[^"]+" aria-label="', html)) == 10
+    assert html.count('class="tb"') == 12
+    assert len(re.findall(r'class="tb" id="[^"]+" title="[^"]+" aria-label="', html)) == 12
     assert 'id="toasts" role="status" aria-live="polite"' in html
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'role="progressbar"' in js and 'aria-selected=' in js and 'ev.key === "ArrowDown"' in js

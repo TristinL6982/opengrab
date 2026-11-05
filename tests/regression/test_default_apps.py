@@ -13,6 +13,7 @@ from tests.helpers.apiserver import req, pair_device, running_server
 
 STATIC = Path(__file__).resolve().parents[2] / "src" / "opengrab" / "ui" / "static"
 EXE = "C:\\OpenGrab\\OpenGrab.exe"
+DATA_DIR = r"C:\Users\x\OpenGrab-Test\data"
 _RealRegistry = wi.Registry
 win_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows registry")
 
@@ -164,3 +165,73 @@ def test_markup_and_script_wire_the_default_apps_button():
     assert "/api/system/default-apps" in js
     assert 'window.addEventListener("focus"' in js and "loadIntegration()" in js
     assert (STATIC / "i18n" / "zh-CN.json").read_bytes().endswith(b"\n")
+
+
+@win_only
+def test_torrent_default_points_at_the_registered_progid(scratch):
+    """.torrent's default and OpenWithProgids must name the ProgId the Capabilities
+    list, otherwise double-clicking runs whatever another ProgId (an installed copy) says."""
+    reg, _ = scratch
+    cls = wi.CLASSES
+    reg.set_file_type(".torrent", True)
+    progid = reg._get(wi.CAP_KEY + r"\FileAssociations", ".torrent")
+    assert progid == wi.PROGID_TORRENT
+    assert reg._get(rf"{cls}\.torrent") == progid
+    assert reg._get(rf"{cls}\.torrent\OpenWithProgids", progid) == ""
+    assert reg._get(rf"{cls}\{progid}\shell\open\command") == f'"{EXE}" "%1"'
+    assert reg.file_type_is_ours(".torrent")
+    # the other file types keep their shared ProgId
+    reg.set_file_type(".dlc", True)
+    assert reg._get(rf"{cls}\.dlc") == wi.PROGID and reg.file_type_is_ours(".dlc")
+    # an older registration under the installer's old ProgId is replaced, not left behind
+    reg._set(rf"{cls}\.torrent", "", wi.PROGID)
+    reg.set_file_type(".torrent", True)
+    assert reg._get(rf"{cls}\.torrent") == wi.PROGID_TORRENT
+    reg.set_file_type(".torrent", False)
+    assert reg._get(rf"{cls}\.torrent") in (None, "")
+    assert not reg.file_type_is_ours(".torrent")
+
+
+@win_only
+def test_registered_commands_carry_this_copys_data_dir_and_port(monkeypatch):
+    monkeypatch.setattr(wi, "STARTUP_OPTIONS", {"data_dir": DATA_DIR, "port": 5790, "download_dir": None})
+    monkeypatch.setattr(wi.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(wi.sys, "executable", EXE)
+    base = rf"Software\OpenGrabTest\{uuid.uuid4().hex}"
+    reg = _RealRegistry(base=base)  # default command: launch_command() of the running copy
+    try:
+        want = f'"{EXE}" --data-dir "{DATA_DIR}" --port 5790 "%1"'
+        reg.set_protocol("magnet", True)
+        reg.set_file_type(".torrent", True)
+        cls = wi.CLASSES
+        assert reg._get(rf"{cls}\magnet\shell\open\command") == want
+        progid = reg._get(rf"{cls}\.torrent")
+        assert progid == wi.PROGID_TORRENT and reg._get(rf"{cls}\{progid}\shell\open\command") == want
+        assert reg._get(rf"{cls}\{wi.PROGID_MAGNET}\shell\open\command") == want
+        assert reg.file_type_is_ours(".torrent") and reg.protocol_is_ours("magnet")
+    finally:
+        _RealRegistry(base="")._delete_tree(base)
+
+
+@win_only
+def test_registration_never_writes_a_user_choice_key(scratch):
+    reg, base = scratch
+    reg.set_protocol("magnet", True)
+    reg.set_file_type(".torrent", True)
+    reg.set_file_type(".dlc", True)
+    reg.register_capabilities()
+    assert reg.user_choice("magnet") == "" and reg.user_choice(".torrent") == ""
+    import winreg
+
+    def keys(path):
+        out = []
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as k:
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(k, i)
+                except OSError:
+                    return out
+                out += [name] + [name + chr(92) + c for c in keys(path + chr(92) + name)]
+                i += 1
+    assert not [k for k in keys(base) if "UserChoice" in k]

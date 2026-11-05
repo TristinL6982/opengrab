@@ -5,6 +5,7 @@ settings, accounts, filters, registry, solver chain, manager, server.
 """
 
 import os
+import sys
 from typing import Optional
 import json
 import threading
@@ -17,7 +18,8 @@ _log = logging.getLogger("opengrab.app")
 from .settings import load_settings, Settings
 from .engine.manager import DownloadManager
 from .server import ApiServer
-from .single_instance import acquire, release, forward_to_running
+from .single_instance import (acquire, release, forward_to_running, find_instance, forward_to_entry,
+                              register_instance, unregister_instance, report_forward_failure)
 
 
 def bootstrap_app(settings: Optional[Settings] = None) -> tuple:
@@ -168,6 +170,22 @@ class DesktopApi:
         return self._settings.terminal_enabled
 
 
+def native_folder_picker(window):
+    """A callable that opens the native folder dialog on the window's GUI thread and
+    returns the chosen path ("" when cancelled). Served by POST /api/pick-folder,
+    which only answers requests from this computer."""
+    import webview
+
+    def pick(start: str = "") -> str:
+        kind = getattr(getattr(webview, "FileDialog", None), "FOLDER", None)
+        if kind is None:
+            kind = webview.FOLDER_DIALOG
+        start = start if start and os.path.isdir(start) else ""
+        chosen = window.create_file_dialog(kind, directory=start)
+        return str(chosen[0]) if chosen else ""
+    return pick
+
+
 def run_gui_mode(settings: Optional[Settings] = None,
                  host: Optional[str] = None, port: Optional[int] = None,
                  urls=(), files=(), minimized: bool = False) -> None:
@@ -176,22 +194,39 @@ def run_gui_mode(settings: Optional[Settings] = None,
     import pystray
     from PIL import Image, ImageDraw
     
-    # Handle single instance lock for GUI mode  
+    # Handle single instance lock for GUI mode
+    total = len(urls) + len(files)
+    if total and not os.environ.get("OPENGRAB_DATA_DIR"):
+        # Launched by Windows with only a target: hand it to the copy started
+        # from this same executable (a test copy, a portable copy) if one runs.
+        mine = find_instance(exe=sys.executable)
+        if mine is not None:
+            if forward_to_entry(mine, list(urls), list(files)):
+                _log.info("handed %d item(s) to the running copy on port %s", total, mine.get("port"))
+            else:
+                report_forward_failure(total, f"The copy on port {mine.get('port')} did not accept them.")
+            return
     lock_handle = acquire(instance_lock_name())
     if lock_handle is None:
-        # Another instance is running, forward URLs to it and exit
+        # Another instance holds this data folder: forward to it and exit
         try:
-            from .settings import load_settings
-            settings = load_settings()
-            if forward_to_running(list(urls), settings.api_host, settings.api_port, settings.api_token,
-                                  settings.base_path, files=list(files)):
-                print(f"Opened {len(urls) + len(files)} item(s) in existing OpenGrab instance")
+            from .settings import app_data_dir
+            ddir = app_data_dir()
+            entry = find_instance(data_dir=ddir)
+            if entry is None:  # an older copy that never listed itself
+                s = load_settings()
+                entry = {"host": s.api_host, "port": s.api_port, "base_path": s.base_path,
+                         "data_dir": str(ddir)}
+            if not total:
+                return
+            if forward_to_entry(entry, list(urls), list(files)):
+                _log.info("handed %d item(s) to the running copy on port %s", total, entry.get("port"))
             else:
-                print("Failed to forward URLs to existing OpenGrab instance")
-        except Exception:
-            pass
-        finally:
-            release(lock_handle)
+                report_forward_failure(
+                    total, f"Nothing answered on port {entry.get('port')} with this copy's data folder.")
+        except Exception as exc:
+            _log.warning("forwarding to the running copy failed", exc_info=True)
+            report_forward_failure(total, f"{type(exc).__name__}: {exc}")
         return
     
     try:
@@ -205,6 +240,8 @@ def run_gui_mode(settings: Optional[Settings] = None,
         
         # Before creating the window, verify it's our own server instance
         verify_own_server(bound_port, server.nonce, settings.base_path)
+        from .settings import app_data_dir
+        register_instance(server.host, bound_port, settings.base_path, app_data_dir())
         
         _open_startup(server, urls, files)
         stop_watcher = threading.Event()
@@ -249,6 +286,8 @@ def run_gui_mode(settings: Optional[Settings] = None,
                 js_api=DesktopApi(settings),
             )
             
+            server.folder_picker = native_folder_picker(window)
+
             def on_closing():
                 if exiting.is_set():
                     return None
@@ -353,6 +392,7 @@ def run_gui_mode(settings: Optional[Settings] = None,
                     pass
             _close_server(manager, server)
     finally:
+        unregister_instance()
         release(lock_handle)
 
 

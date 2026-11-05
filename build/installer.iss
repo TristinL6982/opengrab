@@ -113,10 +113,12 @@ Root: HKCU; Subkey: "Software\Classes\magnet\shell\open\command"; ValueType: str
 Root: HKCU; Subkey: "Software\Classes\opengrab"; ValueType: string; ValueData: "URL:opengrab protocol"; Tasks: opengrabproto; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\opengrab"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Tasks: opengrabproto
 Root: HKCU; Subkey: "Software\Classes\opengrab\shell\open\command"; ValueType: string; ValueData: """{app}\app\OpenGrab.exe"" ""%1"""; Tasks: opengrabproto
-Root: HKCU; Subkey: "Software\Classes\OpenGrab.Download"; ValueType: string; ValueData: "OpenGrab download"; Tasks: torrent crawljob dlc; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\OpenGrab.Download\shell\open\command"; ValueType: string; ValueData: """{app}\app\OpenGrab.exe"" ""%1"""; Tasks: torrent crawljob dlc
-Root: HKCU; Subkey: "Software\Classes\.torrent"; ValueType: string; ValueData: "OpenGrab.Download"; Tasks: torrent; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.torrent\OpenWithProgids"; ValueType: string; ValueName: "OpenGrab.Download"; ValueData: ""; Tasks: torrent; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\OpenGrab.Download"; ValueType: string; ValueData: "OpenGrab download"; Tasks: crawljob dlc; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\OpenGrab.Download\shell\open\command"; ValueType: string; ValueData: """{app}\app\OpenGrab.exe"" ""%1"""; Tasks: crawljob dlc
+Root: HKCU; Subkey: "Software\Classes\OpenGrab.torrent"; ValueType: string; ValueData: "OpenGrab torrent file"; Tasks: torrent; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\OpenGrab.torrent\shell\open\command"; ValueType: string; ValueData: """{app}\app\OpenGrab.exe"" ""%1"""; Tasks: torrent
+Root: HKCU; Subkey: "Software\Classes\.torrent"; ValueType: string; ValueData: "OpenGrab.torrent"; Tasks: torrent; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.torrent\OpenWithProgids"; ValueType: string; ValueName: "OpenGrab.torrent"; ValueData: ""; Tasks: torrent; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\.crawljob"; ValueType: string; ValueData: "OpenGrab.Download"; Tasks: crawljob; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\.crawljob\OpenWithProgids"; ValueType: string; ValueName: "OpenGrab.Download"; ValueData: ""; Tasks: crawljob; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\.dlc"; ValueType: string; ValueData: "OpenGrab.Download"; Tasks: dlc; Flags: uninsdeletevalue

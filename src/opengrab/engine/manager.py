@@ -47,6 +47,18 @@ log = logging.getLogger("opengrab.engine")
 _WIN_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 
 
+def _existing_unique(paths) -> list:
+    """The paths that exist, each once (case-insensitive on Windows)."""
+    seen: set = set()
+    out = []
+    for c in paths:
+        key = os.path.normcase(str(c))
+        if key not in seen and os.path.lexists(c):
+            seen.add(key)
+            out.append(c)
+    return out
+
+
 def _local_torrent_path(url: str) -> Optional[Path]:
     """The filesystem path of a local .torrent given as file:// or a Windows path.
 
@@ -233,7 +245,8 @@ class DownloadManager:
     # ------------------------------------------------------------------ grab
     def add_url(self, url: str, priority: int = 0,
                 auto_download: bool = True, title: str = "",
-                filename: str = "", queue: str = "", expected_hash: str = "") -> Link:
+                filename: str = "", queue: str = "", expected_hash: str = "",
+                save_dir: str = "") -> Link:
         """Register a URL and run the grab phase (async).  Returns the Link
         immediately (status RESOLVING, or SKIPPED if a filter excludes it)."""
         url = (url or "").strip()
@@ -241,8 +254,11 @@ class DownloadManager:
             raise ValueError("empty url")
         local = _local_torrent_path(url)  # file:///x.torrent or C:\x.torrent; other file:// raises
         if local is not None:
-            return self._add_local_torrent(url, local, priority, title, queue)
+            return self._add_local_torrent(url, local, priority, title, queue, save_dir)
         extra: dict = {}
+        if save_dir:  # a folder chosen for this link; categories/packagizer subfolders go inside it
+            from ..savedir import validate_save_dir
+            extra["save_dir"] = str(validate_save_dir(save_dir, create=False))
         if queue:
             extra["queue"] = self.flow.queues.get(queue).name  # KeyError: unknown queue
         if expected_hash:
@@ -294,7 +310,12 @@ class DownloadManager:
             self.torrents.pause(link_id)
             link.status = LinkStatus.PAUSED
 
-    def _add_local_torrent(self, url: str, path: Path, priority: int, title: str, queue: str) -> Link:
+    def link_root(self, link: Link) -> Path:
+        """The folder this link downloads into: its own "Save to" folder, else the default."""
+        return Path(str(link.extra.get("save_dir") or self.settings.download_dir)).expanduser().resolve()
+
+    def _add_local_torrent(self, url: str, path: Path, priority: int, title: str, queue: str,
+                           save_dir: str = "") -> Link:
         """A file:// (or plain path) .torrent: validate it, keep a private copy in the
         app data dir (so the download survives the original being moved or deleted)
         and load it as a torrent file, never as a URL."""
@@ -307,18 +328,35 @@ class DownloadManager:
             data = path.read_bytes()
         except OSError as exc:
             raise ValueError(f"cannot read the torrent file {path.name}: {exc.strerror or exc}") from exc
+        return self._add_torrent_data(data, path.name, url, priority, title or path.stem, queue, save_dir)
+
+    def add_torrent_bytes(self, data: bytes, name: str, title: str = "", priority: int = 0, queue: str = "",
+                          save_dir: str = "") -> Link:
+        """Torrent bytes that arrived without a path (dropped onto the window): same
+        validation and private copy as a local file."""
+        name = Path(str(name or "").replace("\\", "/")).name or "dropped.torrent"
+        if len(data) > 32 * 1024 * 1024:
+            raise ValueError(f"not a valid torrent file (too large): {name}")
+        return self._add_torrent_data(data, name, "", priority, title or Path(name).stem, queue, save_dir)
+
+    def _add_torrent_data(self, data: bytes, name: str, url: str, priority: int, title: str, queue: str,
+                          save_dir: str = "") -> Link:
+        import hashlib
         if not data.startswith(b"d"):
-            raise ValueError(f"not a valid torrent file: {path.name}")
+            raise ValueError(f"not a valid torrent file: {name}")
         from .torrents import libtorrent_available
         if libtorrent_available():
             import libtorrent as lt
             try:
                 lt.torrent_info(lt.bdecode(data))
             except Exception as exc:  # noqa: BLE001
-                raise ValueError(f"not a valid torrent file: {path.name} ({exc})") from exc
+                raise ValueError(f"not a valid torrent file: {name} ({exc})") from exc
         extra: dict = {}
         if queue:
             extra["queue"] = self.flow.queues.get(queue).name
+        if save_dir:
+            from ..savedir import validate_save_dir
+            extra["save_dir"] = str(validate_save_dir(save_dir, create=False))
         copy_dir = self.data_dir / "torrents"
         copy_dir.mkdir(parents=True, exist_ok=True)
         copy = copy_dir / (hashlib.sha1(data).hexdigest() + ".torrent")
@@ -326,7 +364,7 @@ class DownloadManager:
             copy.write_bytes(data)
         # recorded up front so a retry or a restart finds the file even if the first start fails
         extra["torrent"] = {"info_hash": "", "magnet": "", "torrent_file": str(copy), "save_path": ""}
-        link = Link(url=url, title=title or path.stem, priority=priority,
+        link = Link(url=url or copy.as_uri(), title=title, priority=priority,
                     status=LinkStatus.RESOLVING, plugin="torrent", extra=extra)
         with self._lock:
             self._links[link.id] = link
@@ -750,7 +788,7 @@ class DownloadManager:
             cfg = self.virus_scan.config()
             if cfg.quarantine:
                 try:
-                    root = Path(self.settings.download_dir).expanduser().resolve()
+                    root = self.link_root(link)
                     moved = self.virus_scan.quarantine(Path(link.path), root)
                     link.path = str(moved)
                     link.extra.setdefault("avscan", {"status": "infected"})["quarantined"] = True
@@ -1021,7 +1059,7 @@ class DownloadManager:
         if link:
             # C6: removing a link never deletes the finished file unless asked,
             # only partial leftovers.
-            dest = Path(self.settings.download_dir)
+            dest = self.link_root(link)
             candidates = []
             if link.filename:
                 candidates.append(dest / (link.filename + ".part"))
@@ -1043,11 +1081,10 @@ class DownloadManager:
         self._broadcast("removed")
         return result
 
-    def _delete_link_files(self, link: Link, dl) -> dict:
+    def _own_files(self, link: Link, dl) -> tuple[list[Path], Path]:
         """The link's finished file and the partial/temp files the engine writes
-        next to it, limited to the download folder."""
-        from ..filedelete import delete_files
-        root = Path(self.settings.download_dir).expanduser().resolve()
+        next to it, and the folder they must stay inside (the link's root)."""
+        root = self.link_root(link)
         names = {n for n in (link.filename,
                              str(link.extra.get("download_target_filename", ""))) if n}
         subdir = str(link.extra.get("download_target_subdir", ""))
@@ -1066,7 +1103,138 @@ class DownloadManager:
                 stem = Path(name).stem
                 cands += [folder / (name + ".part"), folder / (name + ".part.json"),
                           folder / (stem + ".video.mp4"), folder / (stem + ".audio.m4a")]
+        return cands, root
+
+    def _delete_link_files(self, link: Link, dl) -> dict:
+        """The link's own files, limited to the link's download folder."""
+        from ..filedelete import delete_files
+        cands, root = self._own_files(link, dl)
         return delete_files(cands, [root])
+
+    # ------------------------------------------------------- change folder
+    def change_folder(self, link_id: str, save_dir: str, move_files: Optional[bool] = None,
+                      rename_on_conflict: bool = False) -> dict:
+        """Point a link at another folder. ``save_dir`` must already be validated.
+
+        Links that have not written anything just get the new folder. Links with
+        partial or finished files need ``move_files`` (True moves the link's own
+        files, False leaves them and the download starts again in the new folder);
+        without it the result says ``needs_choice``. Moving never overwrites: on a
+        name clash nothing moves unless ``rename_on_conflict`` picks a free name.
+        """
+        import shutil
+        link = self.get(link_id)
+        if link is None:
+            raise KeyError(link_id)
+        new_root = Path(save_dir).expanduser().resolve()
+        old_root = self.link_root(link)
+        if new_root == old_root:
+            return {"ok": True, "moved": [], "unchanged": True}
+        if self._is_torrent(link):
+            return self._change_torrent_folder(link, new_root)
+        if link.status == LinkStatus.SKIPPED:
+            raise ValueError("this link was skipped by a filter")
+        dl = self._active.get(link_id)
+        cands, _ = self._own_files(link, dl)
+        existing = _existing_unique(cands)
+        has_files = bool(existing)
+        if has_files and move_files is None:
+            return {"ok": False, "needs_choice": True, "files": [c.name for c in existing]}
+        was_downloading = link.status == LinkStatus.DOWNLOADING or dl is not None
+        if has_files and move_files and was_downloading:
+            self.pause_download(link_id)
+            for _ in range(100):  # let the transfer wind down so its files are closed
+                if link_id not in self._active:
+                    break
+                time.sleep(0.1)
+            else:
+                raise RuntimeError("the download did not stop in time; try again")
+            cands, _ = self._own_files(link, None)
+            existing = _existing_unique(cands)
+        result: dict = {"ok": True, "moved": [], "failed": [], "renamed": ""}
+        if has_files and move_files:
+            subdir = str(link.extra.get("download_target_subdir", ""))
+            target_dir = (new_root / subdir) if subdir else new_root
+            plan = self._plan_moves(link, existing, old_root, target_dir, rename_on_conflict)
+            if plan.get("conflicts"):
+                if was_downloading:
+                    self.resume_download(link_id)
+                return {"ok": False, "conflicts": plan["conflicts"]}
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for src, dst in plan["pairs"]:
+                try:
+                    if os.path.lexists(dst):  # checked again right before: never overwrite
+                        raise FileExistsError(17, "a file with that name already exists", str(dst))
+                    shutil.move(str(src), str(dst))
+                    result["moved"].append(str(dst))
+                except OSError as exc:
+                    result["failed"].append({"path": str(src), "reason": exc.strerror or str(exc)})
+            if plan.get("new_name"):
+                result["renamed"] = plan["new_name"]
+                link.filename = plan["new_name"]
+                link.extra["download_target_filename"] = plan["new_name"]
+            if link.path:
+                for src, dst in plan["pairs"]:
+                    if os.path.normcase(str(src)) == os.path.normcase(link.path):
+                        link.path = str(dst)
+        link.extra["save_dir"] = str(new_root)
+        self._persist()
+        self._broadcast("folder", link)
+        if was_downloading and link.status == LinkStatus.PAUSED:
+            self.resume_download(link_id)
+        return result
+
+    def _plan_moves(self, link: Link, existing: list[Path], old_root: Path, target_dir: Path,
+                    rename: bool) -> dict:
+        """Which files go where; only regular files inside the old root move."""
+        real_root = Path(os.path.realpath(old_root))
+        safe: list[Path] = []
+        for c in existing:
+            real = Path(os.path.realpath(c.parent)) / c.name
+            try:
+                real.relative_to(real_root)
+            except ValueError:
+                continue  # not the link's own place: left alone, like delete
+            if c.is_symlink() or not c.is_file():
+                continue
+            safe.append(c)
+        old_name = str(link.extra.get("download_target_filename") or link.filename or "")
+
+        def mapped(c: Path, name: str) -> str:
+            if old_name and c.name.startswith(old_name):
+                return name + c.name[len(old_name):]
+            stem_old = Path(old_name).stem
+            if old_name and c.name.startswith(stem_old + "."):
+                return Path(name).stem + c.name[len(stem_old):]
+            return c.name
+        new_name = old_name
+        pairs = [(c, target_dir / mapped(c, new_name)) for c in safe]
+        clashes = [dst for _, dst in pairs if os.path.lexists(dst)]
+        if clashes and rename and old_name:
+            base = Path(old_name)
+            for i in range(1, 10000):
+                trial = f"{base.stem}_{i}{base.suffix}"
+                trial_pairs = [(c, target_dir / mapped(c, trial)) for c in safe]
+                if not any(os.path.lexists(d) for _, d in trial_pairs):
+                    pairs, new_name, clashes = trial_pairs, trial, []
+                    break
+        if clashes:
+            return {"conflicts": [d.name for d in clashes]}
+        return {"pairs": pairs, "new_name": new_name if new_name != old_name else ""}
+
+    def _change_torrent_folder(self, link: Link, new_root: Path) -> dict:
+        """libtorrent moves the data itself (move_storage); before the torrent starts
+        only the folder it will be added to changes."""
+        info = link.extra.get("torrent") or {}
+        if self.torrents.handle_for(link.id) is not None:
+            if not self.torrents.move_storage(link.id, new_root):
+                raise ValueError("this torrent's folder can only be changed before it starts")
+            info["save_path"] = str(new_root)
+            link.extra["torrent"] = info
+        link.extra["save_dir"] = str(new_root)
+        self._persist()
+        self._broadcast("folder", link)
+        return {"ok": True, "moved": [], "failed": [], "renamed": ""}
 
     def clear_finished(self) -> int:
         with self._lock:
@@ -1180,7 +1348,9 @@ class DownloadManager:
             if not link.direct_url:
                 continue
             with self._lock:
-                running = [l for l in self._links.values() if l.status == LinkStatus.DOWNLOADING]
+                # torrents run inside libtorrent: they never use an HTTP download slot
+                running = [l for l in self._links.values()
+                           if l.status == LinkStatus.DOWNLOADING and l.plugin != "torrent"]
                 reason = self.flow.gate(link, running)
                 if reason:
                     self._deferred.add(link.id)
@@ -1244,7 +1414,7 @@ class DownloadManager:
             self._broadcast("downloading", link)
             url = link.direct_url or link.url
             from .packagizer import plan_packagizer, safe_filename, safe_subdir
-            root = Path(self.settings.download_dir).expanduser().resolve()
+            root = self.link_root(link)
             saved_name = str(link.extra.get("download_target_filename", ""))
             saved_subdir = str(link.extra.get("download_target_subdir", ""))
             if saved_name:

@@ -6,6 +6,7 @@ Endpoints (JSON unless noted):
   POST   /api/linkgrab/container       {filename:str, data:base64} -> {count, packages}
   GET    /api/links                    all links (public dicts)
   POST   /api/urls                     {urls:[...], priority?:int, auto_download?:bool}
+  POST   /api/import-file?name=<file>  raw body (<= 32 MB): a dropped .torrent / container / link list
   GET    /api/stats                    counts + aggregate speed
   POST   /api/links/{id}/start|pause|resume|stop|remove
   POST   /api/links/{id}/retry         (alias of start for error state)
@@ -225,10 +226,13 @@ class ApiServer:
                 self._clipboard_candidates.pop(next(iter(self._clipboard_candidates)))
         return added
 
-    def add_candidate_link(self, candidate: dict):
+    # set by the desktop window: opens the native folder picker, returns the path or ""
+    folder_picker = None
+
+    def add_candidate_link(self, candidate: dict, save_dir: str = ""):
         """Turn a reviewed LinkGrabber entry into a download (W8 keeps the
         package name and archive passwords from Click'n'Load)."""
-        link = self.manager.add_url(candidate["url"])
+        link = self.manager.add_url(candidate["url"], save_dir=save_dir)
         if candidate.get("package"):
             link.extra["package"] = candidate["package"]
         if candidate.get("passwords"):
@@ -663,6 +667,8 @@ def _make_handler(srv: ApiServer):
                 return
             if not self._authorized():
                 return self._err(401, "unauthorized: send Bearer token")
+            if p == "/api/import-file":
+                return self._import_file(parse_qs(u.query))
             try:
                 self._api_post(p, self._body())
             except Exception as e:  # noqa: BLE001
@@ -781,6 +787,29 @@ def _make_handler(srv: ApiServer):
                 check=True,
             )
             return proc.stdout.decode("utf-8", "replace") if value is None else None
+
+        def _import_file(self, query: dict) -> None:
+            """A file dropped onto the window arrives as raw bytes; same auth as adding links."""
+            from .importfile import MAX_IMPORT_BYTES, ImportError_, import_dropped_file
+            try:
+                length = int(self.headers.get("Content-Length") or "-1")
+            except ValueError:
+                length = -1
+            if length < 0:
+                return self._err(411, "Content-Length is required")
+            if length > MAX_IMPORT_BYTES:
+                self.close_connection = True  # the oversized body is not read
+                self._mark_body_read()
+                return self._err(413, "file is larger than 32 MB")
+            self._mark_body_read()
+            data = self.rfile.read(length) if length else b""
+            if len(data) != length:
+                self.close_connection = True
+                return self._err(400, "upload ended before Content-Length bytes arrived")
+            try:
+                return self._json(import_dropped_file(srv, (query.get("name") or [""])[0], data))
+            except ImportError_ as e:
+                return self._err(e.status, str(e))
 
         def _upload_file(self, query: dict) -> None:
             relative = (query.get("path") or [""])[0]
@@ -1258,7 +1287,62 @@ def _make_handler(srv: ApiServer):
                 return self._json({"ok": True, "id": link.id,
                                    "cookies": len(cookies),
                                    "link": link.to_public()})
+            if p == "/api/pick-folder":
+                # the native folder picker belongs to this computer's window only
+                if not is_loopback(srv.access.client_ip(self.client_address[0], self.headers)):
+                    return self._err(403, "the folder picker can only be used on this computer")
+                picker = srv.folder_picker
+                if picker is None:
+                    return self._json({"available": False, "path": ""})
+                try:
+                    chosen = picker(str(body.get("start") or mgr.settings.download_dir))
+                except Exception as e:  # noqa: BLE001
+                    return self._err(500, f"could not open the folder picker: {e}")
+                return self._json({"available": True, "path": str(chosen or "")})
+            if p == "/api/check-folder":
+                from .savedir import SaveDirError, error_payload, validate_save_dir
+                try:
+                    return self._json({"ok": True, "path": str(validate_save_dir(
+                        body.get("path"), create=bool(body.get("create_dir"))))})
+                except SaveDirError as e:
+                    code, payload = error_payload(e)
+                    return self._json(payload, code)
+            if p == "/api/change-folder":
+                from .savedir import SaveDirError, error_payload, validate_save_dir, record_recent
+                ids = body.get("ids") or []
+                if not isinstance(ids, list) or not ids:
+                    return self._err(400, "no downloads selected")
+                try:
+                    folder = validate_save_dir(body.get("save_dir"),
+                                               create=bool(body.get("create_dir")))
+                except SaveDirError as e:
+                    code, payload = error_payload(e)
+                    return self._json(payload, code)
+                move = body.get("move_files")
+                results, changed = [], 0
+                for lid in ids[:500]:
+                    lid = str(lid)
+                    if mgr.get(lid) is None:
+                        results.append({"id": lid, "ok": False, "error": "no such download"})
+                        continue
+                    try:
+                        r = mgr.change_folder(lid, str(folder),
+                                              move_files=None if move is None else bool(move),
+                                              rename_on_conflict=bool(body.get("rename")))
+                    except Exception as e:  # noqa: BLE001
+                        r = {"ok": False, "error": str(e)}
+                    changed += 1 if r.get("ok") else 0
+                    results.append({"id": lid, **r})
+                if changed:
+                    record_recent(mgr.settings, folder)
+                return self._json({"ok": bool(changed), "folder": str(folder), "results": results})
             if p == "/api/urls":
+                from .savedir import SaveDirError, error_payload, folder_from_body
+                try:
+                    save_dir = folder_from_body(mgr.settings, body)
+                except SaveDirError as e:
+                    code, payload = error_payload(e)
+                    return self._json(payload, code)
                 urls = body.get("urls") or []
                 if isinstance(urls, str):
                     urls = [x.strip() for x in urls.splitlines() if x.strip()]
@@ -1280,6 +1364,7 @@ def _make_handler(srv: ApiServer):
                             filename=str(body.get("filename", "")),
                             queue=str(body.get("queue") or ""),
                             expected_hash=str(body.get("hash") or "") if len(urls) == 1 else "",
+                            save_dir=save_dir,
                         ).to_public())
                     except Exception as e:  # noqa: BLE001
                         out.append({"url": u_, "error": str(e)})
@@ -1360,7 +1445,15 @@ def _make_handler(srv: ApiServer):
                     return self._err(404, "clipboard candidate not found")
                 if action == "dismiss":
                     return self._json({"ok": True, "dismissed": True})
-                link = srv.add_candidate_link(candidate)
+                from .savedir import SaveDirError, error_payload, folder_from_body
+                try:
+                    save_dir = folder_from_body(mgr.settings, body)
+                except SaveDirError as e:
+                    with srv._clipboard_candidates_lock:  # keep it in the list for another try
+                        srv._clipboard_candidates[candidate_id] = candidate
+                    code, payload = error_payload(e)
+                    return self._json(payload, code)
+                link = srv.add_candidate_link(candidate, save_dir)
                 return self._json({"ok": True, "link": link.to_public()}, 201)
             if p == "/api/settings":
                 if self._gate("settings_write") is None:
