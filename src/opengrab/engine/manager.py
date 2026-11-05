@@ -75,8 +75,9 @@ def _local_torrent_path(url: str) -> Optional[Path]:
         elif re.match(r"^/[A-Za-z]:", path):
             path = path[1:]  # /C:/x -> C:/x on any OS
         return Path(unquote(path) if _WIN_PATH.match(path) else url2pathname(path))
-    if _WIN_PATH.match(url) and url.lower().endswith(".torrent"):
-        return Path(url)
+    if (_WIN_PATH.match(url) or (url.startswith("/") and not url.startswith("//"))) \
+            and url.lower().endswith(".torrent"):
+        return Path(url)  # a Windows path, or an absolute POSIX path on Linux/macOS
     return None
 
 
