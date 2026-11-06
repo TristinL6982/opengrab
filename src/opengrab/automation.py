@@ -237,6 +237,7 @@ class StayAwake:
         self._lock = __import__("threading").Lock()
         self._thread = None
         self._wake = __import__("threading").Event()
+        self._closed = False
 
     def _set(self, flags: int) -> int:
         if self._setter is not None:
@@ -257,11 +258,23 @@ class StayAwake:
                 self._thread.start()
         self._wake.set()
 
+    def close(self) -> None:
+        """Release the hold and let the owner thread exit."""
+        with self._lock:
+            self._want = False
+            self._closed = True
+        self._wake.set()
+
     def _run(self) -> None:
         while True:
             self._wake.wait()
             self._wake.clear()
             want = self._want
+            if self._closed:
+                if self.active:
+                    self._set(ES_CONTINUOUS)
+                    self.active = False
+                return
             if want and not self.active:
                 self._set(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
                 self.active = True

@@ -144,6 +144,7 @@ class DownloadManager:
             log.warning("loading accounts/filters", exc_info=True)
 
         self._workers: list[threading.Thread] = []
+        self._stop_evt = threading.Event()
         self._started = False
         self._retries: dict[str, int] = {}
         self._last_persist = 0.0
@@ -170,13 +171,16 @@ class DownloadManager:
         self._spawn(self.plugin_policy.maybe_auto_update)  # W12
         n = self.settings.max_parallel or 3
         MAX_WORKERS = 16
+        self._stop_evt = stop = threading.Event()  # one per start(): shutdown() ends this generation
+        self._workers = []
         for i in range(MAX_WORKERS):
-            t = threading.Thread(target=self._worker, args=(i,), name=f"worker-{i}",
+            t = threading.Thread(target=self._worker, args=(i, stop), name=f"worker-{i}",
                                  daemon=True)
             t.start()
             self._workers.append(t)
         self._started = True
-        threading.Thread(target=self._flow_loop, name="flow-control", daemon=True).start()
+        threading.Thread(target=self._flow_loop, args=(stop,), name="flow-control",
+                         daemon=True).start()
         for l in self.all_links():  # W11: torrents survive a restart
             t = (l.extra or {}).get("torrent") or {}
             if self._is_torrent(l) and l.status not in (LinkStatus.FINISHED, LinkStatus.SKIPPED) \
@@ -210,6 +214,7 @@ class DownloadManager:
             self._db.close()
             self._db = None
         self._started = False
+        self._stop_evt.set()  # worker and flow-control threads exit within ~1 s
         log.info("engine stopped")
 
     # ----------------------------------------------------------------- links
@@ -1334,10 +1339,11 @@ class DownloadManager:
         self._spawn(retry)
 
     # ---------------------------------------------------------------- worker
-    def _worker(self, index=0) -> None:
-        while True:
+    def _worker(self, index=0, stop=None) -> None:
+        stop = stop or self._stop_evt
+        while not stop.is_set():
             if index >= max(1, int(self.settings.max_parallel or 1)):
-                time.sleep(0.5)
+                stop.wait(0.5)
                 continue
             try:
                 _, _, link_id = self._ready.get(timeout=1.0)
@@ -1369,15 +1375,16 @@ class DownloadManager:
             self._run_download(link, previous_status=LinkStatus.WAITING)
 
     # --------------------------------------------------------- W3-W5 ticker
-    def _flow_loop(self) -> None:
+    def _flow_loop(self, stop=None) -> None:
         """Once a second: apply the effective speed limit, follow schedule
         pause windows, and give deferred downloads another chance."""
-        while self._started:
+        stop = stop or self._stop_evt
+        while not stop.is_set():
             try:
                 self._flow_tick()
             except Exception:
                 log.debug("flow tick failed", exc_info=True)
-            time.sleep(1.0)
+            stop.wait(1.0)
 
     def _flow_tick(self) -> None:
         self._global_limiter.set_rate(self.flow.effective_limit_bps())

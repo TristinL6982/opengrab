@@ -271,6 +271,14 @@ class ApiServer:
         return self.port
 
     def stop(self) -> None:
+        # features own background threads (samplers, pools, listeners); stop them too
+        for name, feat in list((getattr(self, "features", None) or {}).items()):
+            fn = getattr(feat, "shutdown", None)
+            if callable(fn):
+                try:
+                    fn()
+                except Exception:
+                    log.debug("feature %s shutdown failed", name, exc_info=True)
         if self.httpd:
             self.httpd.shutdown()
             self.httpd.server_close()

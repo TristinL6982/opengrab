@@ -227,7 +227,7 @@ class AutomationService:
 
     def shutdown(self) -> None:
         self._stop.set()
-        self.awake.hold(False)
+        self.awake.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
 
