@@ -252,25 +252,30 @@ def run_gui_mode(settings: Optional[Settings] = None,
             endpoint = (f"http://127.0.0.1:{bound_port}{settings.base_path}"
                         "/api/clipboard")
             was_enabled = False
-            previous = ""
+            previous = None
             while not stop_watcher.wait(2):
                 enabled = settings.clipboard_monitor_enabled
                 if not enabled:
                     server.clipboard_status = "off"
-                    was_enabled, previous = False, ""
+                    was_enabled, previous = False, None
                     continue
                 try:
                     req = urllib.request.Request(endpoint, headers={"Authorization": f"Bearer {server.token}"})
                     with urllib.request.urlopen(req, timeout=5) as response:
-                        current = json.loads(response.read()).get("text", "")
+                        payload = json.loads(response.read())
+                    current = payload.get("text", "")
+                    html_links = [x for x in payload.get("links") or [] if isinstance(x, str)]
                     server.clipboard_status = "watching"
                     if not was_enabled:
                         # a link copied before watching started counts too: it
                         # only goes to the link grabber for review
                         was_enabled = True
-                    if current != previous:
-                        previous = current
-                        server.capture_clipboard_text(current)
+                    # a copy that only changes the HTML flavour (link names in the
+                    # text, hrefs in the HTML) is new content too
+                    state = (payload.get("seq", 0), current, tuple(html_links))
+                    if state != previous:
+                        previous = state
+                        server.capture_clipboard_text(current, html_links)
                 except Exception:
                     # Keep the watcher alive if another app temporarily owns the
                     # clipboard or the desktop has no clipboard backend.
@@ -287,6 +292,7 @@ def run_gui_mode(settings: Optional[Settings] = None,
             )
             
             server.folder_picker = native_folder_picker(window)
+            watcher.start()  # before the tray: a tray failure must not stop copy capture
 
             def on_closing():
                 if exiting.is_set():
@@ -379,7 +385,6 @@ def run_gui_mode(settings: Optional[Settings] = None,
             automation = getattr(server, "features", {}).get("automation")
             if automation is not None:  # M13: "exit when done"
                 automation.exit_app = lambda _tray=tray: exit_app(_tray, None)
-            watcher.start()
             webview.start()
         finally:
             stop_watcher.set()

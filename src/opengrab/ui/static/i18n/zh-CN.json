@@ -184,6 +184,7 @@
     "Console token for LAN or browser access:": "用于局域网或浏览器访问的控制台令牌：",
     "Cookies (paste a cookies.txt export or name=value; …)": "Cookie（粘贴导出的 cookies.txt 或 name=value; …）",
     "Copied": "已复制",
+    "Could not save appearance:": "无法保存外观设置：",
     "Could not add links:": "无法添加链接：",
     "Could not add rule:": "无法添加规则：",
     "Could not change it:": "无法更改：",
@@ -714,7 +715,8 @@
     "That folder cannot be used": "无法使用该文件夹",
     "The folder picker is only in the desktop app. Type the folder path instead.": "文件夹选择器仅在桌面应用中可用。请直接输入文件夹路径。",
     "Where should these downloads be saved?": "这些下载要保存到哪里？",
-    "Where should this download be saved?": "这个下载要保存到哪里？"
+    "Where should this download be saved?": "这个下载要保存到哪里？",
+    "No links found. If you copied link names from a web page, copy the links themselves or paste here with Ctrl+V.": "未找到链接。如果你复制的是网页上的链接名称，请复制链接本身，或在此处按 Ctrl+V 粘贴。"
   },
   "patterns": [
     [

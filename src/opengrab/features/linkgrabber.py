@@ -200,13 +200,18 @@ def spider_default_exts() -> tuple:
 def setup(srv):
     svc = LinkGrabberService(srv)
 
-    def capture(text):
+    def capture(text, links=None):
         """Copied links go the same way as pasted ones: filtered, de-duplicated,
-        announced to the UI (so it can say so) and checked online."""
-        if not srv.settings.clipboard_monitor_enabled or not isinstance(text, str) or not text:
+        announced to the UI (so it can say so) and checked online. ``links`` are
+        the hrefs of the clipboard's HTML flavour, merged after the text's URLs;
+        every URL of a copy is added, not just the first."""
+        from ..clipboard_html import urls_from_text
+        if not srv.settings.clipboard_monitor_enabled or not isinstance(text, str):
             return 0
-        import re
-        found = re.findall(r"(?:https?://|ftps?://|magnet:\?)[^\s<>\"']+", text, flags=re.IGNORECASE)
+        found = urls_from_text(text)
+        found += [l for l in (links or []) if isinstance(l, str) and l not in found]
+        if not found:
+            return 0
         return len(svc.add(found, "clipboard"))
 
     srv.capture_clipboard_text = capture

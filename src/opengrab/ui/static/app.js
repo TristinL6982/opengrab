@@ -1110,10 +1110,56 @@ $$(".chip").forEach(c => c.addEventListener("click", () => {
 }));
 
 /* ============================================================ add urls */
+/* Copying hyperlinks from a page puts only their names in the text flavour; the
+   HTML flavour has every href (what JDownloader reads). Returns those URLs. */
+function linksFromClipboardHtml(html) {
+  if (!html) return [];
+  let doc;
+  try { doc = new DOMParser().parseFromString(html, "text/html"); } catch { return []; }
+  const m = /SourceURL:([^\r\n]+)/i.exec(html);
+  let base = m ? m[1].trim() : "";
+  const baseTag = doc.querySelector("base[href]");
+  if (baseTag) { try { base = new URL(baseTag.getAttribute("href"), base || document.baseURI).href; } catch {} }
+  const out = [], seen = new Set();
+  doc.querySelectorAll("a[href]").forEach(a => {
+    const raw = (a.getAttribute("href") || "").trim();
+    if (!raw || raw.startsWith("#")) return;
+    let url = raw;
+    if (!/^magnet:/i.test(raw)) {
+      try { url = new URL(raw, base || document.baseURI).href; } catch { return; }
+      if (!/^https?:/i.test(url)) return;
+    }
+    if (!seen.has(url)) { seen.add(url); out.push(url); }
+  });
+  return out;
+}
+/* Paste into a links box: real URLs from the HTML flavour, plus any plain-text
+   URLs they do not already cover. Plain text without HTML pastes as usual. */
+function pasteLinksInto(ev, box) {
+  const cd = ev.clipboardData;
+  if (!cd) return;
+  const links = linksFromClipboardHtml(cd.getData("text/html"));
+  if (!links.length) return;
+  ev.preventDefault();
+  const plain = (cd.getData("text/plain") || "").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const extra = plain.filter(x => /^(https?:\/\/|magnet:\?)/i.test(x) && !links.includes(x));
+  const text = links.concat(extra).join("\n");
+  const a = box.selectionStart ?? box.value.length, b = box.selectionEnd ?? a;
+  const before = box.value.slice(0, a), after = box.value.slice(b);
+  const lead = before && !before.endsWith("\n") ? "\n" : "";
+  box.value = before + lead + text + "\n" + after;
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function looksLikeLink(s) {
+  return /^(?:(?:https?|ftps?):\/\/[^\/\s]+|magnet:\?|file:|[A-Za-z]:[\\/].*\.torrent$)/i.test(s)
+    || /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?::\d+)?(?:[\/?#]\S*)?$/.test(s);
+}
+const NO_LINKS_MSG = "No links found. If you copied link names from a web page, copy the links themselves or paste here with Ctrl+V.";
+
 async function addUrls() {
   const ta = $("#url-input");
   const urls = ta.value.split("\n").map(s => s.trim()).filter(Boolean);
-  if (!urls.length) return;
+  if (!urls.some(looksLikeLink)) { toast(NO_LINKS_MSG, "err"); return; }
   if ($("#url-review")?.checked) {
     try {
       const r = await api("/api/linkgrabber", "POST", { urls, source: "paste" });
@@ -1153,6 +1199,7 @@ async function addUrls() {
   }
 }
 $("#btn-add").addEventListener("click", addUrls);
+$("#url-input").addEventListener("paste", e => pasteLinksInto(e, e.currentTarget));
 $("#url-input").addEventListener("keydown", e => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) addUrls();
 });
@@ -1896,15 +1943,34 @@ function collectAppearance(body) {
   body.ui_hidden_columns = $$("fieldset.cols [data-col]").filter(c => !c.checked).map(c => c.dataset.col);
   body.trusted_proxies = $("#adv-proxies").value.split(",").map(x => x.trim()).filter(Boolean);
 }
-// preview appearance changes immediately
+// appearance changes preview at once and are saved at once (no Save button needed),
+// so opening Settings again does not reset them to the stored value
+async function saveAppearance() {
+  const body = {
+    ui_theme: UI.ui_theme, ui_density: UI.ui_density, ui_toolbar_labels: !!UI.ui_toolbar_labels,
+    ui_accent: UI.ui_accent || "",
+    ui_hidden_columns: $$("fieldset.cols [data-col]").filter(c => !c.checked).map(c => c.dataset.col),
+  };
+  try {
+    await api("/api/settings", "POST", body);
+  } catch (e) {
+    if (e.message !== "unauthorized") toast("Could not save appearance: " + e.message, "err");
+  }
+}
 for (const id of ["#set-ui_theme", "#set-ui_density", "#set-ui_toolbar_labels"]) {
-  $(id).addEventListener("change", () => applyUi({ ui_theme: $("#set-ui_theme").value, ui_density: $("#set-ui_density").value,
-                                                    ui_toolbar_labels: $("#set-ui_toolbar_labels").checked }));
+  $(id).addEventListener("change", () => {
+    applyUi({ ui_theme: $("#set-ui_theme").value, ui_density: $("#set-ui_density").value,
+              ui_toolbar_labels: $("#set-ui_toolbar_labels").checked });
+    saveAppearance();
+  });
 }
 $("#set-ui_accent").addEventListener("input", (ev) => applyUi({ ui_accent: ev.target.value }));
-$("#btn-accent-reset").addEventListener("click", () => { applyUi({ ui_accent: "" }); $("#set-ui_accent").value = "#1c5db8"; });
-$$("fieldset.cols [data-col]").forEach(c => c.addEventListener("change", () =>
-  applyUi({ ui_hidden_columns: $$("fieldset.cols [data-col]").filter(x => !x.checked).map(x => x.dataset.col) })));
+$("#set-ui_accent").addEventListener("change", saveAppearance);
+$("#btn-accent-reset").addEventListener("click", () => { applyUi({ ui_accent: "" }); $("#set-ui_accent").value = "#1c5db8"; saveAppearance(); });
+$$("fieldset.cols [data-col]").forEach(c => c.addEventListener("change", () => {
+  applyUi({ ui_hidden_columns: $$("fieldset.cols [data-col]").filter(x => !x.checked).map(x => x.dataset.col) });
+  saveAppearance();
+}));
 async function loadAdvanced() {
   try {
     const s = await api("/api/settings");
@@ -2159,6 +2225,7 @@ $("#btn-terminal-stop").addEventListener("click", async () => {
   } catch (e) { toast("Could not stop command: " + e.message, "err"); }
 });
 
+$("#lg-paste").addEventListener("paste", e => pasteLinksInto(e, e.currentTarget));
 $("#btn-lg-paste").addEventListener("click", async () => {
   const urls = $("#lg-paste").value.split(/\s+/).filter(Boolean);
   if (!urls.length) return toast("Paste one or more links first", "err");

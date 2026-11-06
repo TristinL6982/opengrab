@@ -197,14 +197,19 @@ class ApiServer:
                 except Exception:
                     pass
 
-    def capture_clipboard_text(self, text: str) -> int:
-        """Queue filtered URL candidates for user review; never auto-add them."""
+    def capture_clipboard_text(self, text: str, links=None) -> int:
+        """Queue filtered URL candidates for user review; never auto-add them.
+        ``links`` are the hrefs from the clipboard's HTML flavour; they are
+        merged with the URLs found in the plain text."""
         import re
-        if (not self.settings.clipboard_monitor_enabled
-                or not isinstance(text, str) or not text):
+        if not isinstance(text, str):
+            text = ""
+        extra = [l for l in (links or []) if isinstance(l, str) and l]
+        if (not self.settings.clipboard_monitor_enabled or not (text or extra)):
             return 0
-        found = re.findall(r"(?:https?://|magnet:\?)[^\s<>\"']+", text,
-                           flags=re.IGNORECASE)
+        from .clipboard_html import urls_from_text
+        found = urls_from_text(text)
+        found += [l for l in extra if l not in found]
         existing = {link.url for link in self.manager.all_links()}
         added = 0
         with self._clipboard_candidates_lock:
@@ -796,6 +801,52 @@ def _make_handler(srv: ApiServer):
             )
             return proc.stdout.decode("utf-8", "replace") if value is None else None
 
+        def _clipboard_html_links(self):
+            """(links, sequence number) from the clipboard's HTML flavour. Copying
+            hyperlinks from a page leaves only their names in the text flavour; the
+            HTML flavour still has every href. Windows only; ([], 0) elsewhere."""
+            if sys.platform != "win32":
+                return [], 0
+            try:
+                import ctypes
+                from ctypes import wintypes
+                from .clipboard_html import links_from_cf_html
+                user32 = ctypes.WinDLL("user32", use_last_error=True)
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+                user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+                user32.RegisterClipboardFormatW.restype = wintypes.UINT
+                user32.OpenClipboard.argtypes = [wintypes.HWND]
+                user32.OpenClipboard.restype = wintypes.BOOL
+                user32.GetClipboardData.argtypes = [wintypes.UINT]
+                user32.GetClipboardData.restype = wintypes.HANDLE
+                kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalLock.restype = ctypes.c_void_p
+                kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+                kernel32.GlobalSize.restype = ctypes.c_size_t
+                seq = int(user32.GetClipboardSequenceNumber())
+                fmt = user32.RegisterClipboardFormatW("HTML Format")
+                if not fmt or not user32.OpenClipboard(None):
+                    return [], seq
+                try:
+                    handle = user32.GetClipboardData(fmt)
+                    if not handle:
+                        return [], seq
+                    size = min(int(kernel32.GlobalSize(handle)), 8_000_000)
+                    pointer = kernel32.GlobalLock(handle)
+                    if not pointer:
+                        return [], seq
+                    try:
+                        data = ctypes.string_at(pointer, size)
+                    finally:
+                        kernel32.GlobalUnlock(handle)
+                finally:
+                    user32.CloseClipboard()
+                return links_from_cf_html(data), seq
+            except Exception:
+                return [], 0
+
         def _import_file(self, query: dict) -> None:
             """A file dropped onto the window arrives as raw bytes; same auth as adding links."""
             from .importfile import MAX_IMPORT_BYTES, ImportError_, import_dropped_file
@@ -1132,7 +1183,9 @@ def _make_handler(srv: ApiServer):
                 return self._serve_file(file_path,
                                         attachment=p == "/api/files/download")
             if p == "/api/clipboard":
-                return self._json({"text": self._clipboard()})
+                text = self._clipboard()
+                links, seq = self._clipboard_html_links()
+                return self._json({"text": text, "links": links, "seq": seq})
             if p == "/api/clipboard/status":
                 # the setting answers at once; the watcher fills in "unavailable"
                 on = mgr.settings.clipboard_monitor_enabled
