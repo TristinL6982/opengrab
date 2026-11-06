@@ -165,7 +165,7 @@ def _request_all(b, n, host="datanodes.to", kind="turnstile", key="K1"):
 
 def test_30_parked_links_share_one_solve_and_get_different_tokens():
     fake = FakeSolve()
-    b = WidgetBatcher(fake, window=0.4)
+    b = WidgetBatcher(fake, window=2.0)  # wide: 30 threads must all park before it closes on a slow runner
     pool, futs = _request_all(b, 30)
     tokens = [f.result(15) for f in futs]
     pool.shutdown()
@@ -204,7 +204,7 @@ def test_only_one_browser_runs_at_a_time_even_for_different_hosts():
 
 def test_a_batch_holds_at_most_max_batch_links():
     fake = FakeSolve()
-    b = WidgetBatcher(fake, window=0.3, max_batch=40)
+    b = WidgetBatcher(fake, window=2.0, max_batch=40)
     pool, futs = _request_all(b, 45)
     tokens = [f.result(20) for f in futs]
     pool.shutdown()
