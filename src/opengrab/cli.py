@@ -135,15 +135,19 @@ def main(argv=None) -> int:
     if args.install_addon:  # M14: offered by the installer
         from . import addons
         report = _progress_writer(args.progress_file)
+        report({"done": 0, "total": 0, "step": "starting"})  # tells the wizard we are alive
         try:
             addons.install(args.install_addon, progress=report)
-        except Exception as exc:
-            print(f"could not install the {args.install_addon} add-on: {exc}", file=sys.stderr)
-            report(None, error=str(exc))
+            if args.install_addon == "ocr" and args.enable_ocr:
+                settings.captcha_ocr_enabled = True
+                settings.save()
+        except BaseException as exc:  # the wizard must always get a final line
+            message = str(exc) or type(exc).__name__
+            print(f"could not install the {args.install_addon} add-on: {message}", file=sys.stderr)
+            report(None, error=message)
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
             return 1
-        if args.install_addon == "ocr" and args.enable_ocr:
-            settings.captcha_ocr_enabled = True
-            settings.save()
         print(f"{args.install_addon} add-on installed")
         report(None, finished=True)
         return 0

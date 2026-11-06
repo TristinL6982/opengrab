@@ -54,13 +54,15 @@ en.TaskOpenGrab=opengrab:// links (from web pages and the browser extension)
 en.TaskTorrent=.torrent files
 en.TaskCrawljob=.crawljob files
 en.TaskDlc=.dlc files
-en.TaskOcr=Download the small local OCR captcha solver (about 40 MB)
+en.TaskOcr=Download the local OCR captcha solver (about 150 MB)
 en.TaskOcrOn=Turn the OCR solver on by default
 en.OcrStatus=Downloading the local OCR captcha solver...
 en.OcrProgress=Captcha solver: %1 of %2 MB (%3%%)
 en.OcrStarting=Captcha solver: starting the download...
 en.OcrDone=Captcha solver installed.
 en.OcrFailed=The captcha solver could not be downloaded (%1). You can install it later in Settings, Local OCR captcha solver.
+en.OcrNoStart=the add-on installer did not start or could not write its progress file
+en.OcrNoWorkDir=could not prepare a folder for the add-on progress file
 en.KeepData=Also delete your OpenGrab settings, queue and downloaded add-ons in %APPDATA%\OpenGrab? Your downloaded files are not touched.
 zh.GroupShortcuts=快捷方式:
 zh.GroupStart=启动 OpenGrab:
@@ -72,13 +74,15 @@ zh.TaskOpenGrab=opengrab:// 链接（来自网页和浏览器扩展）
 zh.TaskTorrent=.torrent 文件
 zh.TaskCrawljob=.crawljob 文件
 zh.TaskDlc=.dlc 文件
-zh.TaskOcr=下载小型本地 OCR 验证码识别组件（约 40 MB）
+zh.TaskOcr=下载本地 OCR 验证码识别组件（约 150 MB）
 zh.TaskOcrOn=默认启用 OCR 识别
 zh.OcrStatus=正在下载本地 OCR 验证码识别组件...
 zh.OcrProgress=验证码识别组件：%1 / %2 MB（%3%%）
 zh.OcrStarting=验证码识别组件：正在开始下载...
 zh.OcrDone=验证码识别组件已安装。
 zh.OcrFailed=无法下载验证码识别组件（%1）。之后可在“设置”的“本地 OCR 验证码识别”中安装。
+zh.OcrNoStart=附加组件安装程序未能启动，或无法写入进度文件
+zh.OcrNoWorkDir=无法为附加组件进度文件准备文件夹
 zh.KeepData=同时删除 %APPDATA%\OpenGrab 中的 OpenGrab 设置、队列和已下载的附加组件吗？你下载的文件不会受影响。
 
 [Tasks]
@@ -221,34 +225,71 @@ begin
   WizardForm.InstallingPage.Repaint;
 end;
 
+// A fresh, unique folder the signed-in (non-elevated) user can write to. Setup's
+// own {tmp} is created by this elevated process and only gives that user
+// read access, so OpenGrab could not write its progress file there. The name
+// is unpredictable and must not exist yet, so nobody can pre-plant it.
+function MakeProgressDir(var Dir: String): Boolean;
+var
+  Base: String;
+  Attempt, Rc: Integer;
+begin
+  Result := False;
+  Base := ExpandConstant('{commonappdata}\OpenGrab');
+  for Attempt := 1 to 5 do
+  begin
+    Dir := Base + '\setup-' + IntToStr(GetTickCount) + '-' + IntToStr(Random(1000000000));
+    if DirExists(Dir) then Continue;
+    if not ForceDirectories(Base) then Continue;
+    if not CreateDir(Dir) then Continue;
+    // Users group (S-1-5-32-545): modify, inherited by the file created inside
+    if Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /grant *S-1-5-32-545:(OI)(CI)M', '',
+            SW_HIDE, ewWaitUntilTerminated, Rc) and (Rc = 0) then
+    begin
+      Result := True;
+      exit;
+    end;
+    DelTree(Dir, True, True, True);
+  end;
+end;
+
 procedure InstallOcr;
 var
-  ProgressFile, Params, Line, Err: String;
+  ProgressDir, ProgressFile, Params, Line, Err: String;
   Lines: AnsiString;
   Rc, Pct: Integer;
   Started: DWord;
-  Finished: Boolean;
+  Finished, SeenFile: Boolean;
 begin
-  ProgressFile := ExpandConstant('{tmp}\ocr-progress.txt');
-  DeleteFile(ProgressFile);
-  Params := '--install-addon ocr --progress-file "' + ProgressFile + '"';
-  if WizardIsTaskSelected('ocr\on') then
-    Params := Params + ' --enable-ocr';
   WizardForm.StatusLabel.Caption := CustomMessage('OcrStatus');
   OcrLabel.Visible := True;
   OcrBar.Visible := True;
   OcrBar.Style := npbstMarquee;   // moving until the first progress arrives
   ShowOcr(CustomMessage('OcrStarting'));
+  if not MakeProgressDir(ProgressDir) then
+  begin
+    OcrBar.Style := npbstNormal;
+    OcrBar.State := npbsError;
+    ShowOcr(FmtMessage(CustomMessage('OcrFailed'), [CustomMessage('OcrNoWorkDir')]));
+    exit;
+  end;
+  ProgressFile := ProgressDir + '\ocr-progress.txt';
+  DeleteFile(ProgressFile);
+  Params := '--install-addon ocr --progress-file "' + ProgressFile + '"';
+  if WizardIsTaskSelected('ocr\on') then
+    Params := Params + ' --enable-ocr';
   // runs as the signed-in user: the add-on belongs in their %APPDATA%
   if not ExecAsOriginalUser(ExpandConstant('{app}\app\OpenGrab.exe'), Params, '', SW_HIDE, ewNoWait, Rc) then
   begin
     OcrBar.Style := npbstNormal;
     OcrBar.State := npbsError;
     ShowOcr(FmtMessage(CustomMessage('OcrFailed'), [SysErrorMessage(Rc)]));
+    DelTree(ProgressDir, True, True, True);
     exit;
   end;
   Started := GetTickCount;
   Finished := False;
+  SeenFile := False;
   Err := '';
   while not Finished do
   begin
@@ -256,6 +297,7 @@ begin
     Sleep(100);
     if LoadStringFromFile(ProgressFile, Lines) then
     begin
+      SeenFile := True;
       Line := Trim(String(Lines));
       if Line = 'done' then
         Finished := True
@@ -267,13 +309,23 @@ begin
       else if Line <> '' then
       begin
         Pct := StrToIntDef(Field(Line, 0), 0);
-        OcrBar.Style := npbstNormal;
-        OcrBar.Position := Pct;
+        if Field(Line, 2) <> '0' then   // total known; otherwise keep the marquee
+        begin
+          OcrBar.Style := npbstNormal;
+          OcrBar.Position := Pct;
+        end;
         // (a line may not start with "[": Inno Setup would read it as a section)
         ShowOcr(FmtMessage(CustomMessage('OcrProgress'), [
           IntToStr(StrToInt64Def(Field(Line, 1), 0) div 1048576),
           IntToStr(StrToInt64Def(Field(Line, 2), 0) div 1048576), IntToStr(Pct)]));
       end;
+    end;
+    // OpenGrab writes its first line right after it starts; no file at all
+    // means it never ran or could not write here.
+    if (not SeenFile) and (GetTickCount - Started > 2 * 60 * 1000) then
+    begin
+      Err := CustomMessage('OcrNoStart');
+      Finished := True;
     end;
     if GetTickCount - Started > 20 * 60 * 1000 then
     begin
@@ -281,6 +333,7 @@ begin
       Finished := True;
     end;
   end;
+  DelTree(ProgressDir, True, True, True);
   OcrBar.Style := npbstNormal;
   if Err = '' then
   begin

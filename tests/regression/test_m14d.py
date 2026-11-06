@@ -94,3 +94,54 @@ def test_install_addon_progress_file_for_the_setup_wizard(monkeypatch, tmp_path)
     monkeypatch.setattr(addons, "install", failing)
     assert cli.main(["--install-addon", "ocr", "--progress-file", str(prog)]) == 1
     assert prog.read_text() == "error|network down / retry later"
+
+
+def test_install_addon_always_ends_the_progress_file(monkeypatch, tmp_path):
+    from opengrab import addons
+    from opengrab.settings import Settings
+    monkeypatch.setenv("OPENGRAB_DATA_DIR", str(tmp_path))
+    prog = tmp_path / "progress.txt"
+    seen = []
+
+    def fake_install(name, progress=None, **kw):
+        seen.append(prog.read_text())  # a first line exists before any download work
+        return {"ok": True}
+
+    monkeypatch.setattr(addons, "install", fake_install)
+    assert cli.main(["--install-addon", "ocr", "--progress-file", str(prog)]) == 0
+    assert seen == ["0|0|0|starting"] and prog.read_text() == "done"
+
+    # a failure while turning the solver on still reports an error, not a silent exit
+    def save_fails(self):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Settings, "save", save_fails)
+    assert cli.main(["--install-addon", "ocr", "--enable-ocr", "--progress-file", str(prog)]) == 1
+    assert prog.read_text() == "error|disk full"
+
+    # even a SystemExit/KeyboardInterrupt from inside the install leaves a final line
+    def interrupted(name, progress=None, **kw):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(addons, "install", interrupted)
+    try:
+        cli.main(["--install-addon", "ocr", "--progress-file", str(prog)])
+    except KeyboardInterrupt:
+        pass
+    assert prog.read_text() == "error|KeyboardInterrupt"
+
+
+def test_installer_progress_file_is_where_the_original_user_can_write():
+    iss = (ROOT / "build" / "installer.iss").read_text(encoding="utf-8-sig")
+    # {tmp} is created by the elevated setup and is read-only for the signed-in user
+    assert "{tmp}" not in iss.split("procedure InstallOcr;")[1].split("procedure CurStepChanged")[0]
+    assert r"{commonappdata}\OpenGrab" in iss and "S-1-5-32-545" in iss and "icacls" in iss
+    assert "DirExists(Dir)" in iss and "DelTree(ProgressDir" in iss
+    # nothing at all within two minutes is a failure; the 20-minute limit stays for slow downloads
+    assert "OcrNoStart" in iss and "2 * 60 * 1000" in iss and "20 * 60 * 1000" in iss
+    for key in ("OcrNoStart", "OcrNoWorkDir"):
+        assert f"en.{key}=" in iss and f"zh.{key}=" in iss
+    assert (ROOT / "build" / "installer.iss").read_bytes().startswith(b"\xef\xbb\xbf")
+    # the add-on runs the installed exe (a stray "\a" once turned this path into a bell character)
+    assert r"ExecAsOriginalUser(ExpandConstant('{app}\app\OpenGrab.exe')" in iss
+    import re
+    assert not re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", iss), "control character in installer.iss"
