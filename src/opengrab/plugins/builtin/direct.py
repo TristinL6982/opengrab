@@ -46,6 +46,7 @@ class DirectLinkPlugin(SitePlugin):
     origin = "builtin"
     supports_captcha = False
     supports_login = False
+    catch_all = True
     description = "Downloads URLs that serve the file directly (content sniffed)."
 
     def supports(self, url: str) -> bool:

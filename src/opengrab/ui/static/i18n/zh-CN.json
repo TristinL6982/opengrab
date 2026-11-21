@@ -776,6 +776,10 @@
       "$1 个链接在 LinkGrabber 中等待"
     ],
     [
+      "^Waiting for the site: retry in (\\d+:\\d{2})$",
+      "等待站点：$1 后重试"
+    ],
+    [
       "^Waiting for a free slot on (.+)$",
       "等待 $1 的空闲连接"
     ],

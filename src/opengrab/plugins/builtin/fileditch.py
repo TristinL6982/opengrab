@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from ..base import GrabResult, PluginContext, PluginError, ResolveResult, SitePlugin
+from ..base import GrabResult, PluginContext, PluginError, ResolveResult, RetryLater, SitePlugin
 
 STATUS_API = "https://fileditchfiles.st/api"
 HOT_HOST = "fileditchhot.st"
@@ -57,7 +57,7 @@ def status(ctx: PluginContext, path: str) -> dict:
     except ValueError:
         body = None
     if r.status_code == 429:
-        raise PluginError("FileDitch status API rate limit reached; wait 1 minute")
+        raise RetryLater("FileDitch status API rate limit reached; wait 1 minute", 60)
     if not isinstance(body, dict) or "status" not in body:
         raise PluginError(f"FileDitch status API answered HTTP {r.status_code}")
     return body

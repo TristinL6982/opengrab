@@ -30,7 +30,7 @@ from typing import Callable, Iterable, Optional
 
 from Cryptodome.Cipher import AES
 
-from ..base import PluginError
+from ..base import PluginError, RetryLater
 
 API_URL = "https://g.api.mega.co.nz/cs"
 
@@ -73,6 +73,24 @@ class MegaApiError(PluginError):
         if code in (EOVERQUOTA, EGOINGOVERQUOTA) or wait_s:
             msg = quota_message(wait_s)
         super().__init__(f"{msg} (code {code})")
+
+
+_WAIT_CODES = {-3: 10, -4: 120, -6: 120, -17: 3600, -18: 120, -19: 60, -24: 3600}
+
+
+class MegaWait(MegaApiError, RetryLater):
+    """A Mega error that means "come back later" (busy, rate limit, quota)."""
+
+    def __init__(self, code: int, wait_s: Optional[int] = None):
+        MegaApiError.__init__(self, code, wait_s)
+        self.seconds = max(1, int(wait_s or _WAIT_CODES.get(code, 120)))
+        self.message = str(self.args[0])
+
+
+def mega_error(code: int, wait_s: Optional[int] = None) -> MegaApiError:
+    if code in _WAIT_CODES or (wait_s and wait_s > 0):
+        return MegaWait(code, wait_s)
+    return MegaApiError(code, wait_s)
 
 
 def quota_message(wait_s: Optional[int]) -> str:
@@ -227,12 +245,12 @@ class MegaApi:
                     self.sleep(delay)
                     delay = min(delay * 2, 16.0)
                     continue
-                raise MegaApiError(res)
+                raise mega_error(res)
             if isinstance(res, dict) and isinstance(res.get("e"), int) \
                     and res["e"] < 0:
-                raise MegaApiError(res["e"], _int(res.get("tl")))
+                raise mega_error(res["e"], _int(res.get("tl")))
             return res
-        raise MegaApiError(EAGAIN)
+        raise mega_error(EAGAIN)
 
     # -- commands --------------------------------------------------------
     def file_info(self, *, p: str = "", node: str = "", want_url: bool,
@@ -279,7 +297,7 @@ def download_url(info: dict) -> str:
                           "which OpenGrab does not download yet")
     if not isinstance(g, str) or not g.startswith("http"):
         if tl:
-            raise MegaApiError(EOVERQUOTA, tl)
+            raise mega_error(EOVERQUOTA, tl)
         raise PluginError("Mega gave no download URL for this file")
     return g
 

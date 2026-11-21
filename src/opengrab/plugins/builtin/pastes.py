@@ -215,6 +215,7 @@ class MultiLinkPlugin(SitePlugin):
     supports_captcha = False
     supports_login = False
     universal = True       # after the generic grabber (module order)
+    catch_all = True
     description = ("Fallback for pages listing many hoster links: one child per "
                    "hoster, magnet, ftp or file link.")
 

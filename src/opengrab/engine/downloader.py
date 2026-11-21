@@ -51,6 +51,39 @@ class DownloadError(Exception):
         self.cancelled = False
 
 
+class WebPageError(DownloadError):
+    """The server answered with a web page where a file was expected (an error
+    page, a rate-limit page, a redirect back to the file's page)."""
+
+    MESSAGE = "the site sent a web page instead of the file"
+
+    def __init__(self, msg: str = ""):
+        super().__init__(msg or self.MESSAGE, transient=False)
+
+
+WEB_PAGE_EXTS = (".html", ".htm", ".xhtml", ".xht", ".shtml", ".php", ".asp", ".aspx",
+                 ".jsp", ".cgi", ".cfm", ".mht", ".mhtml")
+# plugins that hand over whatever the page URL names: a web page may be what the user wants
+PAGE_PLUGINS = ("", "direct", "generic", "multilink")
+_HTML_START = re.compile(rb"^(?:\xef\xbb\xbf)?\s*(?:<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>]|<!--)", re.I)
+
+
+def looks_like_html(head: bytes) -> bool:
+    return bool(_HTML_START.match(head or b""))
+
+
+def web_page_expected(name: str, plugin: str = "") -> bool:
+    """May this download legitimately be a web page? A name with a web-page
+    extension says yes, any other extension says no; with no extension it is
+    only allowed when a generic plugin took the page URL as given."""
+    ext = os.path.splitext(name or "")[1].lower()
+    if ext in WEB_PAGE_EXTS:
+        return True
+    if ext and len(ext) <= 8:
+        return False
+    return (plugin or "") in PAGE_PLUGINS
+
+
 class RangeUnsupported(DownloadError):
     """The server advertised or implied ranges but did not honor them."""
 
@@ -432,6 +465,7 @@ class LinkDownload:
         self._validators = validators_from_headers(probe.headers)
         if self._validators.length is None and self._total is not None:
             self._validators.length = self._total
+        self._check_probe_not_web_page(probe)
         # server-side name wins over plugin guess
         cd = probe.headers.get("content-disposition", "")
         name = _cd_filename(cd)
@@ -507,9 +541,62 @@ class LinkDownload:
         if (self._total is not None and self.part.exists()
                 and self.part.stat().st_size != self._total):
             raise DownloadError("size mismatch", transient=True)
+        self._check_part_not_web_page()
         self._finalize()
         self._drop_meta()
         return self.final_path
+
+    # -- a web page is not the file ----------------------------------------
+    def _name_for_page_check(self) -> str:
+        return self.link.filename or os.path.basename(urllib.parse.urlsplit(self.link.url).path) or ""
+
+    def _page_allowed(self) -> bool:
+        return web_page_expected(self._name_for_page_check(), getattr(self.link, "plugin", ""))
+
+    def _expected_size(self) -> Optional[int]:
+        try:
+            return int(self.link.size) if self.link.size else None
+        except (TypeError, ValueError):
+            return None
+
+    def _check_probe_not_web_page(self, probe: "_Probe") -> None:
+        ctype = ""
+        for k, v in (probe.headers or {}).items():
+            if str(k).lower() == "content-type":
+                ctype = str(v).lower()
+        if "html" not in ctype:
+            return
+        for k, v in (probe.headers or {}).items():
+            if str(k).lower() == "content-disposition" and "attachment" in str(v).lower():
+                return  # the server calls it a download: the first bytes decide
+        want = self._expected_size()
+        limit = 1 << 20
+        if want:
+            limit = min(limit, max(1, want // 4))
+        if probe.size is not None and probe.size >= limit:
+            return  # too big for an error page: the first bytes decide
+        if not self._page_allowed() or (want and probe.size and probe.size * 4 < want):
+            raise WebPageError()
+
+    def _check_part_not_web_page(self) -> None:
+        """Never let an HTML page reach the final name when a file was expected."""
+        try:
+            with open(self.part, "rb") as f:
+                head = f.read(2048)
+            size = self.part.stat().st_size
+        except OSError:
+            return
+        if not looks_like_html(head):
+            return
+        want = self._expected_size()
+        if self._page_allowed() and not (want and size * 4 < want):
+            return
+        self._drop_meta()
+        try:
+            self.part.unlink()
+        except OSError:
+            pass
+        raise WebPageError()
 
     # -- single stream -----------------------------------------------------
     def _stream(self, start: int, end: Optional[int], idx: int = None, seg=None) -> None:

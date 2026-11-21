@@ -19,7 +19,7 @@ import time
 from urllib.parse import urljoin, urlsplit
 
 from ..base import (GrabResult, LoginRequired, PaywallRequired, PluginError,
-                    ResolveResult, SitePlugin)
+                    ResolveResult, RetryLater, SitePlugin)
 
 _sleep = time.sleep          # tests replace this
 
@@ -85,7 +85,7 @@ def _check_page(html: str) -> None:
                  r"You can download files up to \d+\s*[KMG]b only", t, re.I):
         raise PaywallRequired(note="FileKeeper: this file needs a premium account")
     if re.search(r"reached the download.limit|download limit (?:reached|exceeded)", t, re.I):
-        raise PluginError("FileKeeper download limit reached: wait 60 minutes")
+        raise RetryLater("FileKeeper download limit reached: wait 60 minutes", 3600)
 
 
 _WIDGETS = (("cf-turnstile", "turnstile", "cf-turnstile-response"),

@@ -12,6 +12,8 @@ class FileSite:
     def __init__(self):
         self.files: dict[str, bytes] = {}
         self.etags: dict[str, str] = {}
+        self.extra_headers: dict[str, dict] = {}  # path -> extra response headers
+        self.ctypes: dict[str, str] = {}  # path -> Content-Type (default application/octet-stream)
         self.delay_per_64k = 0.0  # seconds slept per 64 KiB sent
         self.slow_below = 0       # bytes [0, slow_below) are served slower ...
         self.slow_delay = 0.0     # ... with this delay per 64 KiB
@@ -46,7 +48,9 @@ class FileSite:
                         end = min(end, len(data) - 1)
                         code = 206
                 self.send_response(code)
-                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Type", site.ctypes.get(path, "application/octet-stream"))
+                for hk, hv in site.extra_headers.get(path, {}).items():
+                    self.send_header(hk, hv)
                 self.send_header("Accept-Ranges", "bytes")
                 self.send_header("ETag", site.etags.get(path) or '"%s"' % hashlib.md5(data).hexdigest())
                 self.send_header("Content-Length", str(end - start + 1))

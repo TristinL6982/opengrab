@@ -23,7 +23,7 @@ import re
 import time
 from urllib.parse import parse_qs, quote, urljoin, urlsplit
 
-from ..base import GrabResult, PluginContext, PluginError, ResolveResult, SitePlugin
+from ..base import GrabResult, PluginContext, PluginError, ResolveResult, RetryLater, SitePlugin
 
 HOSTS = ("rootz.so", "www.rootz.so")
 ID_RE = re.compile(r"^/d/([A-Za-z0-9_\-]{3,32})/?$")
@@ -77,7 +77,7 @@ class RootzPlugin(SitePlugin):
             if wait is None:
                 break
             if wait > MAX_WAIT or attempt == 2:   # no point sleeping without a re-check
-                raise PluginError(f"Rootz rate limit: wait {max(1, -(-wait // 60))} minutes")
+                raise RetryLater(f"Rootz rate limit: wait {max(1, -(-wait // 60))} minutes", wait)
             sleep(max(wait, 1))
         return ResolveResult(url=proxy, filename=data["name"], size=data["size"],
                              headers={"referer": page_url})

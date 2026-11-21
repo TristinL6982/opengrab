@@ -20,7 +20,7 @@ import threading
 import time
 from typing import Callable, Optional
 
-from ..base import GrabResult, LoginRequired, PaywallRequired, PluginError, ResolveResult, SitePlugin
+from ..base import GrabResult, LoginRequired, PaywallRequired, PluginError, ResolveResult, RetryLater, SitePlugin
 
 URL_RE = re.compile(r"^https?://(?:www\.)?gofile\.io/d/([A-Za-z0-9-]+)/?(?:#file=([0-9A-Za-z-]+))?$")
 CACHE_SECONDS = 30 * 60
@@ -105,7 +105,7 @@ def fetch_listing_api(code: str, token: str, client, clock=time.time) -> Optiona
     if status == "error-notFound":
         raise PluginError("this GoFile link does not exist or was deleted")
     if status == "error-rateLimit":
-        raise PluginError("GoFile's rate limit was reached; wait 5 minutes")
+        raise RetryLater("GoFile's rate limit was reached; wait 5 minutes", 300)
     if status != "ok":
         raise PluginError(f"GoFile's API refused the listing: {status or r.status_code}")
     data = body.get("data") or {}

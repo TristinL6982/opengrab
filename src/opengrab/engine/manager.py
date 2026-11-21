@@ -36,13 +36,15 @@ from ..filters import FilterManager
 from ..http_client import HttpClient
 from ..models import Link, LinkStatus
 from ..plugins.base import (CaptchaRequired, LoginRequired, PaywallRequired,
-                            PluginContext, PluginError)
+                            PluginContext, PluginError, RetryLater)
 from ..plugins.registry import PluginRegistry
 from ..settings import Settings, app_data_dir, user_plugins_dir
-from .downloader import DownloadError, LinkDownload, _RateLimiter
+from .downloader import DownloadError, LinkDownload, WebPageError, _RateLimiter
 from ..sessiondb import SessionDB
 
 log = logging.getLogger("opengrab.engine")
+
+RETRY_LATER_MAX = 20     # automatic retries after a site said "come back later"
 
 _WIN_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 
@@ -147,6 +149,8 @@ class DownloadManager:
         self._stop_evt = threading.Event()
         self._started = False
         self._retries: dict[str, int] = {}
+        self._resume_lookup: list[str] = []   # lookups the last shutdown cut short
+        self._now = time.time                 # tests replace this clock
         self._last_persist = 0.0
         self._persist_scheduled = False
         # Initialize to None so we can check it later
@@ -179,6 +183,9 @@ class DownloadManager:
             t.start()
             self._workers.append(t)
         self._started = True
+        for lid in self._resume_lookup:  # lookups the last shutdown cut short
+            self._spawn(self._grab_and_queue, lid, True)
+        self._resume_lookup = []
         threading.Thread(target=self._flow_loop, args=(stop,), name="flow-control",
                          daemon=True).start()
         for l in self.all_links():  # W11: torrents survive a restart
@@ -412,12 +419,13 @@ class DownloadManager:
             raise PluginError(f"no plugin supports this url: {link.url}")
         return plugins[0]
 
-    def _refresh_expired_link(self, link: Link, msg: str) -> bool:
+    def _refresh_expired_link(self, link: Link, msg: str, web_page: bool = False) -> bool:
         """Hosts like Mega and GoFile hand out download links that expire. When
         one answers 401/403/404/410 (often after a restart or a long pause),
         ask the plugin once for a fresh link instead of failing."""
         import re as _re
-        if not _re.match(r"HTTP (401|403|404|410)\b", msg) or link.plugin in ("", "direct", "generic"):
+        if not (web_page or _re.match(r"HTTP (401|403|404|410)\b", msg)) \
+                or link.plugin in ("", "direct", "generic"):
             return False
         if link.extra.get("link_refreshed"):
             link.extra.pop("link_refreshed", None)  # refreshed once already: a real failure
@@ -444,6 +452,9 @@ class DownloadManager:
                 link.status, link.login_hint = LinkStatus.LOGIN, e.hint
             except PaywallRequired as e:
                 link.status, link.paywall_note = LinkStatus.PAYWALL, e.note
+            except RetryLater as e:
+                link.extra.pop("link_refreshed", None)  # the new link is a fresh start
+                self._retry_later(link, e)
             except Exception as e:  # noqa: BLE001
                 link.extra.pop("link_refreshed", None)
                 self._fail(link, f"{msg}; asking the host for a new link failed: {e}", False)
@@ -469,7 +480,8 @@ class DownloadManager:
         fails outright (an extractor refusing the site, a page it cannot
         read), the next one gets the link, ending with the generic page
         grabber. Captchas, logins and paywalls stop the search: they are
-        answers, not failures."""
+        answers, not failures. So does a site plugin's own error ("file is
+        offline", "rate limit"): only the catch-all plugins fall through."""
         plugins = self.registry.for_url(link.url)
         if not plugins:
             raise PluginError(f"no plugin supports this url: {link.url}")
@@ -480,7 +492,7 @@ class DownloadManager:
             try:
                 try:
                     g = plugin.grab(link.url, ctx)
-                except (CaptchaRequired, LoginRequired, PaywallRequired):
+                except (CaptchaRequired, LoginRequired, PaywallRequired, RetryLater):
                     raise
                 except (NotImplementedError, PluginError):
                     g = None  # metadata is optional: resolve may still work
@@ -492,15 +504,90 @@ class DownloadManager:
                 if link.status != LinkStatus.ERROR:
                     return
                 failure: Exception = PluginError(link.error or "failed")
-            except (CaptchaRequired, LoginRequired, PaywallRequired):
+            except (CaptchaRequired, LoginRequired, PaywallRequired, RetryLater):
                 raise
             except PluginError as e:
                 failure = e
+            if not self._is_catch_all(plugin):
+                raise failure  # the site's own answer is final
             log.info("%s could not handle %s (%s); trying the next plugin", plugin.id, link.url, failure)
             first_error = first_error or failure
             link.status, link.error = LinkStatus.RESOLVING, ""
             link.direct_url, link.direct_headers = None, {}
         raise first_error or PluginError("no plugin could handle this link")
+
+    @staticmethod
+    def _is_catch_all(plugin) -> bool:
+        """Fallback plugins (direct, generic page, multilink, extractor bridges)
+        guess; every other plugin knows its site."""
+        return bool(getattr(plugin, "catch_all", False) or getattr(plugin, "universal", False)
+                    or getattr(plugin, "origin", "") == "bridge")
+
+    # ------------------------------------------------------- wait and retry
+    def _retry_later(self, link: Link, e: RetryLater) -> None:
+        """The site said "come back later": keep the link waiting (not failed),
+        remember when to try again, and give up after RETRY_LATER_MAX tries."""
+        n = int(link.extra.get("retry_count") or 0) + 1
+        link.direct_url, link.direct_headers = None, {}
+        link.speed, link.eta = 0.0, None
+        if n > RETRY_LATER_MAX:
+            self._clear_retry(link)
+            link.extra.pop("retry_count", None)
+            link.status = LinkStatus.ERROR
+            link.error = f"gave up after {RETRY_LATER_MAX} automatic retries: {e.message}"
+            self._persist()
+            self._broadcast("error", link)
+            return
+        link.extra["retry_count"] = n
+        link.extra["retry_at"] = self._now() + e.seconds
+        link.extra["retry_reason"] = e.message
+        link.status, link.error = LinkStatus.WAITING, ""
+        # the host's answer applies to its other waiting links too: push them out
+        # to at least this time, without costing them a retry
+        key = self._retry_key(link)
+        with self._lock:
+            for o in self._links.values():
+                if (o is not link and o.status == LinkStatus.WAITING and o.extra.get("retry_at") is not None
+                        and self._retry_key(o) == key and float(o.extra["retry_at"]) < link.extra["retry_at"]):
+                    o.extra["retry_at"] = link.extra["retry_at"]
+        log.info("%s asked to wait %ss (%s); retry %d/%d", link.url, e.seconds, e.message, n, RETRY_LATER_MAX)
+        self._persist()
+        self._broadcast("waiting", link)
+
+    @staticmethod
+    def _retry_key(link: Link) -> tuple:
+        return (link.plugin, urlparse(link.url).netloc.lower())
+
+    @staticmethod
+    def _clear_retry(link: Link) -> None:
+        for k in ("retry_at", "retry_reason"):
+            link.extra.pop(k, None)
+
+    def _retry_tick(self) -> None:
+        """Start the lookup again for links whose wait is over: one link per
+        (plugin, host) at a time, in queue order, and none while another link
+        of that host is still being looked up."""
+        now = self._now()
+        due = []
+        with self._lock:
+            busy = {self._retry_key(l) for l in self._links.values()
+                    if l.status == LinkStatus.RESOLVING}
+            waiting = sorted((l for l in self._links.values()
+                              if l.status == LinkStatus.WAITING and l.extra.get("retry_at") is not None
+                              and now >= float(l.extra["retry_at"])),
+                             key=lambda l: (-l.priority, l.created))
+            for l in waiting:
+                key = self._retry_key(l)
+                if key in busy:
+                    continue
+                busy.add(key)
+                self._clear_retry(l)
+                l.status, l.error = LinkStatus.RESOLVING, ""
+                due.append(l)
+        for l in due:
+            self._persist()
+            self._broadcast("grabbing", l)
+            self._spawn(self._grab_and_queue, l.id, True)
 
     def _plugin_for(self, link: Link):
         """Registered plugin for the link, falling back to url matching."""
@@ -524,6 +611,8 @@ class DownloadManager:
         except PaywallRequired as e:
             link.status = LinkStatus.PAYWALL
             link.paywall_note = e.note
+        except RetryLater as e:
+            self._retry_later(link, e)
         except Exception as e:
             link.status = LinkStatus.ERROR
             link.error = str(e)
@@ -906,8 +995,8 @@ class DownloadManager:
             return  # W9: a debrid account unrestricted the hoster link
         try:
             r = plugin.resolve(link.url, ctx)
-        except (CaptchaRequired, LoginRequired, PaywallRequired):
-            # User-action states are not plugin failures: record nothing.
+        except (CaptchaRequired, LoginRequired, PaywallRequired, RetryLater):
+            # User-action states and "come back later" are not plugin failures: record nothing.
             raise
         except Exception as e:
             self.registry.record_result(pid, False, str(e))
@@ -976,6 +1065,7 @@ class DownloadManager:
             return
         if link.status == LinkStatus.ERROR:
             link.error = ""
+        self._clear_retry(link)  # "start" means try now
         if not link.direct_url and not link.children:
             # the lookup never finished, so there is nothing to download yet:
             # look the link up again (the workers skip links without a file address)
@@ -1007,6 +1097,7 @@ class DownloadManager:
             dl.stop_event.set()
         elif link.status in (LinkStatus.WAITING, LinkStatus.DOWNLOADING):
             link.status = LinkStatus.PAUSED
+        self._clear_retry(link)  # a pending automatic retry is cancelled
         self._persist()
         self._broadcast("paused", link)
 
@@ -1027,6 +1118,13 @@ class DownloadManager:
         # winding down, its worker re-queues the link when it exits.
         link.status = LinkStatus.WAITING
         link.extra.pop("note", None)
+        if not link.direct_url and not link.children and link.extra.get("retry_count"):
+            # it was waiting for the site and has no file address yet: look it up again
+            link.status = LinkStatus.RESOLVING
+            self._persist()
+            self._broadcast("resumed", link)
+            self._spawn(self._grab_and_queue, link.id, True)
+            return
         if dl is not None:
             link.extra["requeue_on_stop"] = True
         else:
@@ -1046,6 +1144,7 @@ class DownloadManager:
             # queued but not started — just park it
             link.status = LinkStatus.PAUSED
             link.extra["note"] = "stopped by user"
+            self._clear_retry(link)
             self._persist()
             self._broadcast("stopped", link)
 
@@ -1278,6 +1377,8 @@ class DownloadManager:
             except CaptchaRequired:
                 link.status = LinkStatus.CAPTCHA
                 link.extra["captcha_error"] = "captcha still required"
+            except RetryLater as e:
+                self._retry_later(link, e)
             except Exception as e:
                 link.status = LinkStatus.CAPTCHA
                 link.extra["captcha_error"] = str(e)
@@ -1305,6 +1406,8 @@ class DownloadManager:
                     self._broadcast("queued", link)
             except LoginRequired as e:
                 link.login_hint = e.hint or link.login_hint
+            except RetryLater as e:
+                self._retry_later(link, e)
             except Exception as e:
                 link.status = LinkStatus.ERROR
                 link.error = str(e)
@@ -1330,6 +1433,8 @@ class DownloadManager:
                 if link.status == LinkStatus.WAITING and link.direct_url:
                     self._ready_put(link.id)
                     self._broadcast("queued", link)
+            except RetryLater as e:
+                self._retry_later(link, e)
             except Exception as e:
                 link.status = LinkStatus.ERROR
                 link.error = str(e)
@@ -1401,6 +1506,7 @@ class DownloadManager:
                 if l.extra.pop("paused_by_schedule", False) and l.status == LinkStatus.PAUSED:
                     self.resume_download(l.id)
         self._schedule_paused = paused
+        self._retry_tick()
         with self._lock:
             again, self._deferred = self._deferred, set()
         for lid in again:
@@ -1518,6 +1624,8 @@ class DownloadManager:
             link.downloaded = link.size or link.downloaded
             link.status = LinkStatus.FINISHED
             link.extra.pop("link_refreshed", None)
+            self._clear_retry(link)
+            link.extra.pop("retry_count", None)
             link.finished = time.time()
             link.speed = 0.0
             link.progress = 1.0
@@ -1543,7 +1651,7 @@ class DownloadManager:
                 # already PAUSED: keep its note ("paused by user", app closed)
                 self._persist()
                 self._broadcast("stopped", link)
-            elif self._refresh_expired_link(link, msg):
+            elif self._refresh_expired_link(link, msg, web_page=isinstance(e, WebPageError)):
                 pass  # the plugin is asked for a fresh link; the download is requeued
             else:
                 self._fail(link, msg, e.transient)
@@ -1848,6 +1956,7 @@ class DownloadManager:
             else:
                 links_data = []
 
+            resume_lookup: list[str] = []
             for d in links_data:
                 try:
                     l = Link(**d["data"])
@@ -1858,8 +1967,13 @@ class DownloadManager:
                     l.status = LinkStatus.PAUSED
                     l.extra["note"] = "was downloading when app closed"
                 elif l.status == LinkStatus.RESOLVING:
-                    l.status = LinkStatus.ERROR
-                    l.error = "was resolving when app closed — remove and re-add the URL"
+                    # the lookup was cut short: do it again once the engine runs
+                    if l.plugin != "torrent" and not l.url.lower().startswith("magnet:?"):
+                        l.error = ""
+                        resume_lookup.append(l.id)
+                    else:  # a magnet has its own restore path
+                        l.status = LinkStatus.ERROR
+                        l.error = "was resolving when app closed — remove and re-add the URL"
                 with self._lock:
                     self._links[l.id] = l
             if migrating:
@@ -1867,6 +1981,7 @@ class DownloadManager:
                 self.links_file.replace(
                     self.links_file.with_name(self.links_file.name + ".migrated"))
                 log.info("migrated links.json to session.db")
+            self._resume_lookup = resume_lookup
             log.info("loaded %d links from disk", len(self._links))
         except Exception:
             log.warning("failed to load links", exc_info=True)

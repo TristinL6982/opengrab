@@ -300,7 +300,20 @@ const STATUS_TEXT = {
   captcha: "Needs captcha", login: "Needs login", paywall: "Paywall", skipped: "Skipped",
 };
 
+/* a site said "come back later": the engine keeps the link waiting and retries at extra.retry_at (epoch seconds) */
+function retryWaitText(at) {
+  const s = Math.max(0, Math.ceil(at - Date.now() / 1000));
+  return `Waiting for the site: retry in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+setInterval(() => {
+  document.querySelectorAll("[data-retry-at]").forEach((el) => {
+    const t = retryWaitText(+el.dataset.retryAt);
+    if (el.dataset.shown !== t) { el.dataset.shown = t; el.textContent = t; }
+  });
+}, 1000);
+
 function statusText(l) {
+  if (l.status === "waiting" && l.extra?.retry_at) return retryWaitText(l.extra.retry_at);
   if (l.status === "downloading" && l.size) return "Downloading " + Math.round((l.progress || 0) * 100) + "%";
   if (l.status === "error" && /^retry \d+\/\d+/.test(l.error || "")) return "Retrying";
   return STATUS_TEXT[l.status] || l.status;
@@ -346,7 +359,7 @@ function linkRow(l) {
       <div class="t">${esc(l.title || l.filename || l.url)}</div>
       <div class="u">${esc(sub)}</div>${notes.join("")}</span></div>
     <div class="c-size">${l.size ? humanBytes(l.size) : "—"}</div>
-    <div class="c-status"><span class="st ${esc(l.status)}">${esc(statusText(l))}</span>${l.status === "waiting" && l.extra?.wait_reason ? `<span class="why" title="${esc(l.extra.wait_reason)}">${esc(l.extra.wait_reason)}</span>` : ""}</div>
+    <div class="c-status"><span class="st ${esc(l.status)}"${l.status === "waiting" && l.extra?.retry_at ? ` data-retry-at="${+l.extra.retry_at}" title="${esc(l.extra.retry_reason || "")}"` : ""}>${esc(statusText(l))}</span>${l.status === "waiting" && l.extra?.wait_reason ? `<span class="why" title="${esc(l.extra.wait_reason)}">${esc(l.extra.wait_reason)}</span>` : ""}</div>
     <div class="c-eta">${l.status === "downloading" ? humanEta(l.eta) : (l.status === "finished" ? humanTime(l.finished) : "")}</div>
     <div class="c-speed">${l.status === "downloading" ? humanBytes(l.speed) + "/s" : ""}</div>
     <div class="c-prog"><div class="${barCls}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i><span class="pct">${pct}%</span></div></div>

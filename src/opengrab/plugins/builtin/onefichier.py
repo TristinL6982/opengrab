@@ -21,7 +21,7 @@ import time
 from urllib.parse import urljoin, urlsplit
 
 from ..base import (GrabResult, LoginRequired, PluginError, ResolveResult,
-                    SitePlugin)
+                    RetryLater, SitePlugin)
 
 _sleep = time.sleep          # tests replace this
 
@@ -89,15 +89,16 @@ def _check_waits(html: str) -> None:
         unit = m.group(2).lower()
         unit = "hours" if unit.startswith(("hour", "heure")) else \
             "seconds" if unit.startswith("sec") else "minutes"
-        raise PluginError(f"1fichier free download limit: wait {m.group(1)} {unit}")
+        raise RetryLater(f"1fichier free download limit: wait {m.group(1)} {unit}",
+                         int(m.group(1)) * {"hours": 3600, "seconds": 1}.get(unit, 60))
     if re.search(r"one file at a time|un seul fichier à la fois|un fichier à la fois", t, re.I):
-        raise PluginError("1fichier allows one free download at a time: wait 5 minutes "
-                          "(or use a premium account)")
+        raise RetryLater("1fichier allows one free download at a time: wait 5 minutes "
+                         "(or use a premium account)", 300)
     if re.search(r"not compatible with massively shared|massivement partag", t, re.I):
-        raise PluginError("1fichier refuses free downloads from this shared IP/VPN: wait 60 minutes "
-                          "or change the connection")
+        raise RetryLater("1fichier refuses free downloads from this shared IP/VPN: wait 60 minutes "
+                         "or change the connection", 3600)
     if re.search(r"Please wait until the file has been scanned|en cours d'analyse", t, re.I):
-        raise PluginError("1fichier is scanning the file for viruses: wait 5 minutes")
+        raise RetryLater("1fichier is scanning the file for viruses: wait 5 minutes", 300)
 
 
 def _offline(status: int, html: str) -> bool:
@@ -219,7 +220,7 @@ class OneFichierPlugin(SitePlugin):
         if r.status_code in (401, 403):
             raise LoginRequired(hint=f"1fichier rejected the API key{': ' + msg if msg else ''}")
         if r.status_code == 429:
-            raise PluginError("1fichier API rate limit (429): wait 1 minute")
+            raise RetryLater("1fichier API rate limit (429): wait 1 minute", 60)
         if r.status_code == 404 or re.search(r"not found|#6\d\d|doesn't exist|does not exist", msg, re.I):
             raise PluginError("1fichier: file not found (offline)")
         if r.status_code >= 400 or str(data.get("status", "OK")).upper() == "KO":

@@ -27,6 +27,7 @@ Plugins raise:
   CaptchaRequired(image_b64=..., kind=...)  -> engine parks link, asks solver/UI
   LoginRequired(hint=...)                   -> engine parks link, asks for creds
   PaywallRequired(note=...)                 -> engine marks paywall (configurable)
+  RetryLater(message, seconds)              -> engine keeps the link waiting, retries later
 
 `ctx.solve_captcha` runs the full SolverChain (local OCR -> manual -> paid
 providers), so a plugin author never touches provider code.
@@ -44,6 +45,21 @@ from urllib.parse import urlparse, urljoin
 # ---------------------------------------------------------------------------
 class PluginError(Exception):
     pass
+
+
+class RetryLater(PluginError):
+    """The site asked us to come back later (a rate limit, a busy server).
+    The engine keeps the link waiting and runs the step again after
+    ``seconds`` instead of failing it."""
+
+    def __init__(self, message: str = "", seconds: int = 60):
+        try:
+            seconds = int(seconds)
+        except (TypeError, ValueError):
+            seconds = 60
+        self.seconds = max(1, seconds)
+        self.message = message or f"try again in {self.seconds} s"
+        super().__init__(self.message)
 
 
 class CaptchaRequired(PluginError):
@@ -218,6 +234,9 @@ class SitePlugin:
     dedicated: bool = False          # True = ranks as a site plugin whenever supports() is True
                                      # (for plugins that own many hosts, e.g. storage servers)
     description: str = ""
+    catch_all: bool = False          # True = fallback for any page (direct, generic, multilink, bridges):
+                                     # the engine tries the next one when it fails. A site plugin's
+                                     # error is final.
 
     def supports(self, url: str) -> bool:
         if not self.site:
@@ -244,4 +263,4 @@ class SitePlugin:
 class BridgePlugin(SitePlugin):
     """Marker for plugins that delegate to an external extractor
     (e.g. the yt-dlp bridge).  They claim many hosts."""
-    pass
+    catch_all = True

@@ -27,7 +27,7 @@ import re
 from urllib.parse import unquote, urljoin, urlsplit
 
 from ..base import (GrabResult, LoginRequired, PaywallRequired, PluginContext, PluginError,
-                    ResolveResult, SitePlugin)
+                    ResolveResult, RetryLater, SitePlugin)
 from . import _hostflow as hf
 
 SITE = "mdiaload.com"
@@ -72,7 +72,7 @@ def _check(page: str) -> None:
                  r"You can download files up to \d+\s*[KMG]b only", t, re.I):
         raise PaywallRequired(note="Mdia Load: this file needs a premium account")
     if re.search(r"reached the download.limit|download limit (?:reached|exceeded)", t, re.I):
-        raise PluginError("Mdia Load download limit reached: wait 60 minutes")
+        raise RetryLater("Mdia Load download limit reached: wait 60 minutes", 3600)
     if re.search(r"Wrong captcha", t, re.I):
         raise PluginError("Mdia Load refused the captcha answer")
 

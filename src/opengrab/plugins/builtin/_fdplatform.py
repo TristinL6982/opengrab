@@ -26,7 +26,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 from ..base import (GrabResult, LoginRequired, PaywallRequired, PluginError,
-                    ResolveResult, SitePlugin)
+                    ResolveResult, RetryLater, SitePlugin)
 
 _sleep = time.sleep          # tests replace this
 MAX_WAIT = 90
@@ -113,7 +113,7 @@ class FdPlatformPlugin(SitePlugin):
                                      "file_not_found_in_storages") or re.search(r"not found", msg, re.I):
             raise PluginError(f"{self.label}: file not found (offline)")
         if status == 429 or name == "too_many_requests":
-            raise PluginError(f"{self.label}: too many requests (429), wait 1 minutes")
+            raise RetryLater(f"{self.label}: too many requests (429), wait 1 minutes", 60)
         delay = self._delay(data)
         if delay:
             raise PluginError(f"{self.label} free download limit: wait {_wait_text(delay)}")

@@ -22,7 +22,7 @@ import html as _html
 import re
 from urllib.parse import unquote, urljoin, urlsplit
 
-from ..base import GrabResult, PluginContext, PluginError, ResolveResult, SitePlugin
+from ..base import GrabResult, PluginContext, PluginError, ResolveResult, RetryLater, SitePlugin
 from ._hostflow import leaves_public_net
 
 DOMAINS = ("fuckingfast.co", "fuckingfast.net")
@@ -32,6 +32,15 @@ INLINE_RE = re.compile(r'window\.open\(\s*["\'](https?://[^"\']+)["\']')
 TURNSTILE_JS = "challenges.cloudflare.com/turnstile/"
 SITEKEY = "0x4AAAAAABg7-KFH60E_65uI"     # the site's Turnstile key when the page does not name it
 DEAD_MARK = "file not found or deleted"
+
+
+def _retry_after(r, default: int) -> int:
+    """Seconds from a Retry-After header, else the default."""
+    try:
+        v = str(r.headers.get("retry-after") or "")
+    except Exception:
+        v = ""
+    return int(v) if v.isdigit() and int(v) > 0 else default
 
 
 def _host_ok(host: str) -> bool:
@@ -109,7 +118,7 @@ class FuckingFastPlugin(SitePlugin):
         if r.status_code == 404 or DEAD_MARK in page.lower():
             raise PluginError("FuckingFast file is offline (not found or deleted)")
         if r.status_code == 429 or re.search(r"rate limit", page, re.I):
-            raise PluginError("FuckingFast rate limit reached; wait 5 minutes")
+            raise RetryLater("FuckingFast rate limit reached; wait 5 minutes", _retry_after(r, 300))
         if r.status_code >= 400:
             raise PluginError(f"FuckingFast page answered HTTP {r.status_code}")
         name = fragment_name(url) or page_name(page)
@@ -138,7 +147,7 @@ class FuckingFastPlugin(SitePlugin):
         if link:
             return link
         if r.status_code == 429:
-            raise PluginError("FuckingFast rate limit reached; wait 5 minutes")
+            raise RetryLater("FuckingFast rate limit reached; wait 5 minutes", _retry_after(r, 300))
         if data:
             raise PluginError("FuckingFast refused the captcha answer")
         if sitekey and (r.status_code in (400, 401, 403) or "captcha" in r.text.lower()):
